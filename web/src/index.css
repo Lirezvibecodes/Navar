@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #0d0d0d;
+  --color-app-surface: #181818;
+  --color-app-surface-hover: #282828;
+  --color-app-accent: #1db954;
+  --color-app-text: #ffffff;
+  --color-app-text-muted: #a7a7a7;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--color-app-bg);
+  color: var(--color-app-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-app-surface-hover);
+  border-radius: 6px;
+}
