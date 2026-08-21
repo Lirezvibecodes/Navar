@@ -16,8 +16,12 @@ async function main() {
       await bot.telegram.setWebhook(`${config.webhookUrl}${path}`);
       console.log(`[bot] webhook registered at ${path}`);
     } else {
-      // Local dev: long polling, no public URL required.
-      bot.launch();
+      // Local dev: long polling, no public URL required. Not awaited (it
+      // resolves only once polling stops); catch so a failed/interrupted
+      // launch logs instead of crashing the whole process, API included.
+      bot.launch().catch((err) => {
+        console.error("[bot] long polling failed to start:", err);
+      });
       console.log("[bot] long polling started");
     }
 
