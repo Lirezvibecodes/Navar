@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+server/web-dist/
 .env
 .env.local
 .env.production

@@ -5,10 +5,11 @@ import { authRouter } from "./routes/auth";
 import { tracksRouter } from "./routes/tracks";
 import { playlistsRouter } from "./routes/playlists";
 
-// The web app is built alongside this service (see render.yaml's buildCommand)
-// and served from the same origin, so the Mini App only ever depends on this
-// one domain instead of a separate static host.
-const webDist = path.join(__dirname, "../../web/dist");
+// The web app is built into this package (see the build script) and served
+// from the same origin, so the Mini App only ever depends on this one domain
+// instead of a separate static host. It lives inside server/ rather than being
+// read from ../web/dist because Render only deploys the service's rootDir.
+const webDist = path.join(__dirname, "../web-dist");
 
 export function createApp(bot: Telegraf | null): Express {
   const app = express();
