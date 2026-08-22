@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 server/web-dist/
+# Copied out of node_modules at build time by web/scripts/copy-telegram-sdk.mjs
+web/public/telegram-web-app.js
 .env
 .env.local
 .env.production

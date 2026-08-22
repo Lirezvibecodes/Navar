@@ -5,6 +5,9 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Music</title>
+    <!-- Served from our own origin (see scripts/copy-telegram-sdk.mjs); loading
+         it from telegram.org breaks on networks where that domain is blocked. -->
+    <script src="/telegram-web-app.js"></script>
   </head>
   <body>
     <div id="root"></div>
