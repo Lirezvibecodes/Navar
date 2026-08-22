@@ -8,8 +8,11 @@ services:
     startCommand: npm run start
     healthCheckPath: /health
     envVars:
+      # Vite 8, @vitejs/plugin-react and oxlint all require
+      # ^20.19.0 || >=22.12.0; the web bundle is built here (see server's
+      # build script), so 22.10.0 fails the build outright.
       - key: NODE_VERSION
-        value: 22.10.0
+        value: 24.19.0
       - key: PORT
         value: 10000
       - key: BOT_TOKEN
