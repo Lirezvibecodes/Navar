@@ -14,6 +14,21 @@ const webDist = path.join(__dirname, "../web-dist");
 export function createApp(bot: Telegraf | null): Express {
   const app = express();
 
+  // Render captures stdout as the service's only log stream, so without this
+  // there is no record of what actually reached the server — which makes it
+  // impossible to tell a client that never connected from one that got an
+  // error back. The user agent distinguishes Telegram's in-app WebView.
+  app.use((req, res, next) => {
+    const startedAt = Date.now();
+    res.on("finish", () => {
+      console.log(
+        `[http] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - startedAt}ms ` +
+          `ua="${req.get("user-agent") ?? "-"}"`
+      );
+    });
+    next();
+  });
+
   app.get("/health", (_req, res) => {
     res.json({ ok: true, botEnabled: bot !== null });
   });
