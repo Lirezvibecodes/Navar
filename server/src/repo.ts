@@ -23,6 +23,8 @@ export interface NewTrack {
   durationSeconds: number | null;
   telegramFileId: string;
   mimeType: string | null;
+  coverImage: Buffer | null;
+  coverMimeType: string | null;
 }
 
 // Excludes cover_image so list/get/update calls never pull cover bytes over
@@ -35,8 +37,9 @@ const TRACK_COLUMNS = `
 export async function createTrack(input: NewTrack): Promise<Track> {
   const { rows } = await getPool().query<Track>(
     `INSERT INTO tracks
-       (id, owner_telegram_id, title, artist, album, duration_seconds, telegram_file_id, mime_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (id, owner_telegram_id, title, artist, album, duration_seconds, telegram_file_id,
+        mime_type, cover_image, cover_mime_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING ${TRACK_COLUMNS}`,
     [
       input.id,
@@ -47,6 +50,8 @@ export async function createTrack(input: NewTrack): Promise<Track> {
       input.durationSeconds,
       input.telegramFileId,
       input.mimeType,
+      input.coverImage,
+      input.coverMimeType,
     ]
   );
   return rows[0];
@@ -69,6 +74,21 @@ export async function getTrack(
     [id, ownerTelegramId]
   );
   return rows[0] ?? null;
+}
+
+/** Tracks whose artwork was never captured — the input to a cover backfill. */
+export async function listTracksMissingCover(
+  ownerTelegramId: number
+): Promise<Pick<Track, "id" | "title" | "telegram_file_id">[]> {
+  const { rows } = await getPool().query<
+    Pick<Track, "id" | "title" | "telegram_file_id">
+  >(
+    `SELECT id, title, telegram_file_id FROM tracks
+     WHERE owner_telegram_id = $1 AND cover_image IS NULL
+     ORDER BY created_at DESC`,
+    [ownerTelegramId]
+  );
+  return rows;
 }
 
 export interface TrackCover {

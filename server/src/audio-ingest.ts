@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Telegraf } from "telegraf";
 import { createTrack, ensureUser } from "./repo";
+import { resolveCoverArt } from "./cover-art";
 import type { Track } from "./types";
 
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -13,14 +14,17 @@ export interface IncomingAudio {
   title?: string;
   durationSeconds?: number;
   fileSize?: number;
+  /** Album-cover thumbnail Telegram derived for the message, when there was one. */
+  thumbFileId?: string;
 }
 
 export class AudioTooLargeError extends Error {}
 
 /**
- * Records a track pointing at the file Telegram already stores — no bytes
- * are downloaded or copied anywhere. Streaming later re-resolves the
- * file_id through the Bot API on demand.
+ * Records a track pointing at the file Telegram already stores — the audio
+ * itself is never downloaded or copied anywhere; only its tag header is read,
+ * to lift out the album art. Streaming later re-resolves the file_id through
+ * the Bot API on demand.
  */
 export async function ingestAudioMessage(
   bot: Telegraf,
@@ -51,6 +55,7 @@ export async function ingestAudioMessage(
   }
 
   const fallbackTitle = audio.fileName?.replace(/\.[a-zA-Z0-9]+$/, "");
+  const cover = await resolveCoverArt(audio);
 
   return createTrack({
     id: randomUUID(),
@@ -61,5 +66,7 @@ export async function ingestAudioMessage(
     durationSeconds: audio.durationSeconds ?? null,
     telegramFileId: audio.fileId,
     mimeType: audio.mimeType ?? null,
+    coverImage: cover?.image ?? null,
+    coverMimeType: cover?.mimeType ?? null,
   });
 }
