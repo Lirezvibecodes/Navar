@@ -6,8 +6,12 @@ import { resolveCoverArt } from "./cover-art";
 import { listTracksMissingCover, updateTrackCover } from "./repo";
 
 /**
- * Tracks scanned per /covers run. Bounded so the handler answers well inside
- * Telegram's webhook timeout instead of being retried mid-scan.
+ * Tracks scanned per /covers run, to stay inside Telegraf's 90s handlerTimeout.
+ * (Telegram's own webhook timeout isn't the constraint: webhookReply is on by
+ * default, so the handler's first reply is sent as the webhook response and
+ * ends it long before the scan finishes.) Overrunning is survivable anyway —
+ * each cover is committed as it's found and the scan only ever selects tracks
+ * still missing one, so an interrupted run resumes on the next /covers.
  */
 const COVER_BACKFILL_BATCH = 25;
 
