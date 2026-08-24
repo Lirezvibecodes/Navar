@@ -108,12 +108,12 @@ export function HomeView({ nav }: { nav: Navigation }) {
             action="All"
             onAction={() => nav.push({ type: "library" })}
           />
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {playlists.slice(0, 2).map((playlist, i) => (
+          <div className="nav-shelf nav-shelf-bleed" style={{ gap: 12 }}>
+            {playlists.map((playlist, i) => (
               <PlaylistCard
                 key={playlist.id}
                 playlist={playlist}
-                tall={i === 0}
+                index={i}
                 onOpen={() => nav.push({ type: "playlist", id: playlist.id })}
               />
             ))}
@@ -152,28 +152,45 @@ export function HomeView({ nav }: { nav: Navigation }) {
   );
 }
 
-/** The two cards under the shelf: the first one is tall and carries a Play. */
+/**
+ * A playlist in the home shelf.
+ *
+ * The art is on top and the name is under it, in that order and never
+ * overlapping: a cover is a picture of the playlist, not a background for its
+ * own label. Nothing is cropped or absolutely positioned over anything else,
+ * so a long name wraps to two lines and the card below it stays where it is.
+ *
+ * The Play disc sits in the art's bottom-right corner the way the reference
+ * puts a lime circle at the head of its primary action. It overlaps the art by
+ * a few pixels rather than taking a row of its own, which is what keeps the
+ * card the size of its cover instead of the size of its controls. Every card
+ * carries one — the old layout gave a Play only to the first, which meant the
+ * shelf taught you a control that then vanished.
+ */
+const CARD = 138;
+
 function PlaylistCard({
   playlist,
-  tall,
+  index,
   onOpen,
 }: {
   playlist: Playlist;
-  tall: boolean;
+  index: number;
   onOpen: () => void;
 }) {
   const { playFrom } = usePlayer();
 
   return (
     <div
-      className="nav-card nav-rise"
-      style={{
-        position: "relative",
-        height: tall ? 214 : 150,
-        borderRadius: 14,
-        padding: "11px 12px",
-        overflow: "hidden",
-      }}
+      className="nav-rise"
+      style={
+        {
+          "--i": index,
+          width: CARD,
+          flex: "none",
+          position: "relative",
+        } as React.CSSProperties
+      }
     >
       <button
         className="nav-press"
@@ -181,81 +198,67 @@ function PlaylistCard({
           haptic.tap();
           onOpen();
         }}
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "flex-end",
-          padding: "11px 12px",
-          textAlign: "left",
-        }}
+        style={{ display: "block", width: "100%", textAlign: "left" }}
       >
         <CollectionArt
           name={playlist.name}
           coverTrackId={playlist.cover_track_id}
-          size={tall ? 120 : 90}
-          radius={12}
-          className="nav-card-art"
+          size={CARD}
+          radius={14}
         />
+        <span
+          className="nav-clip"
+          style={{
+            display: "block",
+            marginTop: 8,
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          {playlist.name}
+        </span>
+        <span
+          style={{
+            display: "block",
+            marginTop: 1,
+            fontSize: 11,
+            color: "rgba(255,255,255,.52)",
+          }}
+        >
+          {pluralise(playlist.track_count ?? 0, "track")}
+        </span>
       </button>
 
-      <div
+      <button
+        className="nav-press"
+        aria-label={`Play ${playlist.name}`}
+        onClick={() => {
+          haptic.press();
+          void api.listPlaylistTracks(playlist.id).then((rows) =>
+            playFrom({
+              label: playlist.name,
+              key: `playlist:${playlist.id}`,
+              tracks: rows,
+            })
+          );
+        }}
         style={{
           position: "absolute",
-          left: 12,
-          top: 11,
-          right: 12,
+          right: 7,
+          top: CARD - 43,
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          pointerEvents: "none",
+          justifyContent: "center",
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          background: "var(--color-nav-action)",
+          color: "#0A0A0A",
+          boxShadow: "0 6px 18px rgba(223,252,142,.34)",
         }}
       >
-        <span style={{ flex: 1, minWidth: 0 }}>
-          <span
-            className="nav-clip"
-            style={{ display: "block", fontSize: 14.5, fontWeight: 600 }}
-          >
-            {playlist.name}
-          </span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,.52)" }}>
-            {pluralise(playlist.track_count ?? 0, "track")}
-          </span>
-        </span>
-        {tall ? (
-          <button
-            className="nav-press"
-            aria-label={`Play ${playlist.name}`}
-            onClick={() => {
-              haptic.press();
-              void api.listPlaylistTracks(playlist.id).then((rows) =>
-                playFrom({
-                  label: playlist.name,
-                  key: `playlist:${playlist.id}`,
-                  tracks: rows,
-                })
-              );
-            }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              height: 30,
-              padding: "0 13px",
-              borderRadius: 15,
-              flex: "none",
-              pointerEvents: "auto",
-              background: "var(--color-nav-action)",
-              color: "#0A0A0A",
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            <PlayIcon size={12} />
-            Play
-          </button>
-        ) : null}
-      </div>
+        <PlayIcon size={13} />
+      </button>
     </div>
   );
 }

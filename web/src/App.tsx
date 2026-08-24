@@ -62,7 +62,7 @@ function Shell({ me }: { me: Me }) {
   // entrance; without it React reuses the subtree and nothing animates.
   const seq = useRef(0);
 
-  const { tracks, playlists, loading, error, reload } = useLibrary();
+  const { tracks, loading, error, reload } = useLibrary();
   const { current, restoreLast } = usePlayer();
 
   const view = stack[stack.length - 1];
@@ -151,12 +151,13 @@ function Shell({ me }: { me: Me }) {
     }
   };
 
-  const title =
-    view.type === "playlist"
-      ? (playlists.find((p) => p.id === view.id)?.name ?? TITLES.playlist)
-      : view.type === "artist" || view.type === "album"
-        ? view.name
-        : TITLES[view.type];
+  // A screen that prints its own name in its header — a playlist, an album,
+  // an artist — gets only the kind up here. The name was already six lines
+  // below in a bigger face, and saying it twice makes the reader stop to check
+  // whether the two are the same thing.
+  const named =
+    view.type === "playlist" || view.type === "artist" || view.type === "album";
+  const title = TITLES[view.type];
 
   return (
     <div
@@ -170,6 +171,7 @@ function Shell({ me }: { me: Me }) {
     >
       <TopBar
         title={title}
+        subdued={named}
         me={me}
         onSearch={
           view.type === "crate"
@@ -190,8 +192,23 @@ function Shell({ me }: { me: Me }) {
         {body()}
       </div>
 
-      <NowPlayingBar onOpen={() => setPlayerOpen(true)} />
-      <BottomNav active={rootTabFor(view)} onSelect={selectTab} />
+      {/* The bottom furniture floats over the content the same way the top
+          bar does, so a list runs behind it instead of stopping at it. Every
+          scroll container already reserves exactly this much room at its
+          bottom, so nothing is hidden — it is only ever passed under. */}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 30,
+          pointerEvents: "none",
+        }}
+      >
+        <NowPlayingBar onOpen={() => setPlayerOpen(true)} />
+        <BottomNav active={rootTabFor(view)} onSelect={selectTab} />
+      </div>
 
       {playerOpen ? (
         <PlayerView nav={nav} onClose={() => setPlayerOpen(false)} />

@@ -50,6 +50,8 @@ type Pane = "player" | "lyrics" | "queue";
  * travels from wherever the bar's little disc actually is, measured rather
  * than assumed. Opened from a track row instead, there is no origin to grow
  * from and it simply rises.
+ *
+ * It leaves the same way it came: dragged down. See `useDragToDismiss`.
  */
 export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => void }) {
   const { owns, setFavorite } = useLibrary();
@@ -79,6 +81,9 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
+  // Nothing playing means this screen renders nothing, so there is no root to
+   // bind to until there is; the flag is what brings the listeners back.
+  useDragToDismiss(rootRef, onClose, current != null);
   const [pane, setPane] = useState<Pane>("player");
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);
   const [sleepOpen, setSleepOpen] = useState(false);
@@ -395,6 +400,146 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
   );
 }
 
+// --- Dismissal ---------------------------------------------------------------
+
+/** Past this much of the screen, letting go finishes the dismissal. */
+const DISMISS_FRACTION = 0.18;
+/** How far the finger travels before the drag stops being a possible scroll. */
+const ENGAGE_AT = 10;
+
+/**
+ * Drag the player down to put it away.
+ *
+ * The player fills the screen and its panes scroll, so a downward drag is
+ * ambiguous by nature: it is a dismissal only when there is nothing above to
+ * scroll to. The rule is the one every sheet of this kind uses — the gesture
+ * belongs to the scroller until the scroller is at its top, and to the sheet
+ * after that. Without it a swipe down does what the user reported: nothing but
+ * scroll, on a pane that was already at the top and had nowhere to go.
+ *
+ * The listeners are native and non-passive rather than React props, because
+ * React registers `touchmove` passively and a passive listener cannot call
+ * `preventDefault` — which is the only way to stop the WebView from rubber-
+ * banding underneath the drag.
+ *
+ * While the finger is down the sheet is pinned to it with no transition, so it
+ * tracks exactly. Transition comes back only on release, when the sheet either
+ * falls away or springs home.
+ */
+function useDragToDismiss(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  onClose: () => void,
+  ready: boolean
+) {
+  // The callback lands in a ref so the listeners are attached once for the
+  // life of the screen rather than re-bound whenever the parent re-renders.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    let startY = 0;
+    let startX = 0;
+    let travelled = 0;
+    let tracking = false;
+    let engaged = false;
+
+    const scroller = () => root.querySelector<HTMLElement>(".nav-scroll");
+
+    const release = () => {
+      root.style.transition = "";
+      root.style.transform = "";
+      root.style.opacity = "";
+      root.classList.remove("nav-player-settle");
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const target = touch.target as Element | null;
+      if (target?.closest("[data-own-drag]")) return;
+      const pane = scroller();
+      if (pane && pane.scrollTop > 0) return;
+
+      tracking = true;
+      engaged = false;
+      travelled = 0;
+      startY = touch.clientY;
+      startX = touch.clientX;
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (!tracking) return;
+      const touch = e.touches[0];
+      const dy = touch.clientY - startY;
+      const dx = touch.clientX - startX;
+
+      if (!engaged) {
+        // Upward, or more sideways than down: not ours. Deciding once and
+        // staying decided is what keeps a seek from turning into a dismissal
+        // halfway through.
+        if (dy <= 0 || Math.abs(dx) > Math.abs(dy)) {
+          tracking = false;
+          return;
+        }
+        if (dy < ENGAGE_AT) return;
+        const pane = scroller();
+        if (pane && pane.scrollTop > 0) {
+          tracking = false;
+          return;
+        }
+        engaged = true;
+        root.classList.remove("nav-player-settle");
+        root.style.transition = "none";
+      }
+
+      e.preventDefault();
+      travelled = dy;
+      root.style.transform = `translateY(${dy}px)`;
+      root.style.opacity = String(Math.max(0.35, 1 - dy / root.clientHeight));
+    };
+
+    const onEnd = () => {
+      if (!tracking) return;
+      const wasEngaged = engaged;
+      tracking = false;
+      engaged = false;
+      if (!wasEngaged) {
+        root.style.transition = "";
+        return;
+      }
+
+      root.classList.add("nav-player-settle");
+      if (travelled > root.clientHeight * DISMISS_FRACTION) {
+        haptic.tap();
+        root.style.transform = `translateY(${root.clientHeight}px)`;
+        root.style.opacity = "0";
+        // Unmounting on the transition rather than a guessed delay would be
+        // better, except a cancelled transition never fires one and the
+        // player would stay stuck offscreen.
+        window.setTimeout(() => closeRef.current(), 200);
+        return;
+      }
+      root.style.transform = "";
+      root.style.opacity = "";
+    };
+
+    root.addEventListener("touchstart", onStart, { passive: true });
+    root.addEventListener("touchmove", onMove, { passive: false });
+    root.addEventListener("touchend", onEnd);
+    root.addEventListener("touchcancel", onEnd);
+    return () => {
+      root.removeEventListener("touchstart", onStart);
+      root.removeEventListener("touchmove", onMove);
+      root.removeEventListener("touchend", onEnd);
+      root.removeEventListener("touchcancel", onEnd);
+      release();
+    };
+  }, [rootRef, ready]);
+}
+
 // --- Transport ---------------------------------------------------------------
 
 function TransportButton({
@@ -511,6 +656,10 @@ function Scrubber({
           setDragging(null);
         }}
         onPointerCancel={() => setDragging(null)}
+        // The player watches for a downward drag to dismiss itself; the rail
+        // and the queue's lift handle are the two places a vertical drag means
+        // something else, and this marks them so it lets go.
+        data-own-drag
         onKeyDown={(e) => {
           if (e.key === "ArrowLeft") onSeek(Math.max(0, position - 10));
           if (e.key === "ArrowRight") onSeek(Math.min(duration, position + 10));
@@ -924,6 +1073,7 @@ function QueueRow({
         <button
           className="nav-press"
           aria-label="Reorder — long press to lift, or use the menu"
+          data-own-drag
           onPointerDown={onLift}
           onClick={() => setMovesOpen(true)}
           style={{

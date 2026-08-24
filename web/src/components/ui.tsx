@@ -18,12 +18,15 @@ import type { IconProps } from "../icons";
 /**
  * A scrollable screen.
  *
- * The bottom padding is the whole reason this exists. Three things stack over
- * the bottom of every screen — the device inset, the nav, and the Now Playing
- * bar once anything is playing — and a list that does not reserve room for all
- * three hides its last row behind them. The two heights are custom properties
- * written by the components that own them, so the padding follows the bar
- * appearing without anybody passing a prop down.
+ * The padding is the whole reason this exists. The bars at both ends of the
+ * screen float over the content rather than boxing it in, so this container
+ * runs edge to edge and reserves the room they occupy itself — otherwise a
+ * list's first and last rows sit behind glass.
+ *
+ * Four things stack over it: the top bar, and at the bottom the device inset,
+ * the nav, and the Now Playing bar once anything is playing. Every height is a
+ * custom property written by the component that owns it, so the padding
+ * follows a bar appearing without anybody passing a prop down.
  */
 export function Screen({
   children,
@@ -44,6 +47,7 @@ export function Screen({
         flexDirection: "column",
         gap,
         padding: "0 14px",
+        paddingTop: "calc(var(--nav-topbar-h) + var(--tg-content-top) + 8px)",
         paddingBottom:
           "calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + 16px)",
       }}
@@ -213,7 +217,9 @@ export function Chip({
         letterSpacing: "-0.01em",
         color: active ? "#0A0A0A" : "rgba(255,255,255,.72)",
         background: active ? "var(--color-nav-action)" : undefined,
-        boxShadow: active ? "0 4px 14px rgba(223,252,142,.22)" : undefined,
+        boxShadow: active
+          ? "0 6px 22px rgba(223,252,142,.42), 0 2px 8px rgba(223,252,142,.3)"
+          : undefined,
       }}
     >
       {label}
@@ -224,9 +230,14 @@ export function Chip({
   );
 }
 
+/**
+ * The chips scroll, and a scroller clips. .nav-shelf-bleed is the room the
+ * active chip's glow needs on all four sides, given back to the layout as
+ * negative margin so the row still sits where it looks like it sits.
+ */
 export function ChipRow({ children }: { children: ReactNode }) {
   return (
-    <div className="nav-shelf" style={{ gap: 7, padding: "2px 0" }}>
+    <div className="nav-shelf nav-shelf-bleed" style={{ gap: 7 }}>
       {children}
     </div>
   );
@@ -536,6 +547,28 @@ export function Sheet({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * A rule between groups of sheet items.
+ *
+ * The only thing standing between "remove this from the playlist" and "delete
+ * this from your library forever" used to be 46px of nothing, which is the
+ * distance a thumb travels by accident. The two are different kinds of act and
+ * now look it: they are in different groups, they carry different glyphs, and
+ * only the second one is red.
+ */
+export function SheetDivider() {
+  return (
+    <div
+      role="separator"
+      style={{
+        height: 1,
+        margin: "7px 14px",
+        background: "rgba(255,255,255,.09)",
+      }}
+    />
   );
 }
 

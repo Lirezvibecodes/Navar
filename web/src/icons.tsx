@@ -331,3 +331,65 @@ export const PrevIcon = icon(
     <rect x="2" y="4" width="4" height="16" />
   </>
 );
+
+/**
+ * The three queue verbs, drawn as one family.
+ *
+ * Play next, Add to queue and Remove from playlist sit within a few pixels of
+ * each other in the same menu, and the thing that distinguishes them is what
+ * happens to the list — not that a list is involved. So all three are the same
+ * list of lines, and the mark in the corner is the entire difference: a play
+ * triangle, a plus, a minus.
+ *
+ * The lines are the library's own bullet-list geometry with the bullets
+ * dropped, which is what leaves the corner free for the mark.
+ */
+const QUEUE_LINES = (
+  <>
+    <rect x="2" y="4" width="20" height="2" />
+    <rect x="2" y="10" width="20" height="2" />
+    <rect x="2" y="16" width="10" height="2" />
+  </>
+);
+
+export const PlayNextIcon = icon(
+  <>
+    {QUEUE_LINES}
+    <g transform="translate(14,13.5) scale(0.35)">
+      <polygon points={PLAY} />
+    </g>
+  </>
+);
+
+export const QueueAddIcon = icon(
+  <>
+    {QUEUE_LINES}
+    <rect x="17" y="14" width="2" height="8" />
+    <rect x="14" y="17" width="8" height="2" />
+  </>
+);
+
+export const ListMinusIcon = icon(
+  <>
+    {QUEUE_LINES}
+    <rect x="14" y="17" width="8" height="2" />
+  </>
+);
+
+/** pixel-icon-library/regular/playlist — a list with a note leaving it. */
+export const PlaylistIcon = icon(
+  <>
+    <path d="m21,1v1h-2v1h-2v1h-1v12h-4v1h-2v1h-1v3h1v1h2v1h5v-1h1v-1h1v-13h2v-1h2V1h-2Zm-10,19v-1h1v-1h5v2h-1v1h-4v-1h-1Zm8-14v1h-1v-2h1v-1h2v2h-2Z" />
+    <rect x="1" y="15" width="6" height="2" />
+    <rect x="1" y="9" width="12" height="2" />
+    <rect x="1" y="3" width="12" height="2" />
+  </>
+);
+
+/** pixel-icon-library/regular/image. */
+export const ImageIcon = icon(
+  <>
+    <polygon points="9 6 9 9 8 9 8 10 5 10 5 9 4 9 4 6 5 6 5 5 8 5 8 6 9 6" />
+    <path d="m22,2v-1H2v1h-1v20h1v1h20v-1h1V2h-1Zm-5,12v1h1v1h1v1h1v1h1v3h-13v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1v1h1Zm3,1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v-1h-1v-1h-1v-1h-1v-1h-1V3h18v12h-1Zm-15,3v1h1v1h1v1H3v-4h1v1h1Z" />
+  </>
+);

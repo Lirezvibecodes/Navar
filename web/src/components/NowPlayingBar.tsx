@@ -56,13 +56,14 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
       style={{ flex: "none", padding: "8px 12px 0", position: "relative", zIndex: 30 }}
     >
       <div
-        className="nav-glass"
+        className="nav-bar-glass"
         style={{
           display: "flex",
           alignItems: "center",
           height: 58,
           borderRadius: 29,
           padding: "0 8px",
+          pointerEvents: "auto",
         }}
       >
         <button

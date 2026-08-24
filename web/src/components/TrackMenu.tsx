@@ -4,13 +4,15 @@ import type { Playlist, Track } from "../types";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
-import { ActionButton, Sheet, SheetItem } from "./ui";
+import { ActionButton, GhostButton, Sheet, SheetDivider, SheetItem } from "./ui";
 import { CollectionArt } from "./PixelArt";
 import {
   AlbumIcon,
   EditIcon,
-  ListIcon,
-  PlusIcon,
+  ListMinusIcon,
+  PlayNextIcon,
+  PlaylistIcon,
+  QueueAddIcon,
   TrashIcon,
   UserIcon,
 } from "../icons";
@@ -21,8 +23,16 @@ import { haptic } from "../telegram";
  * The `⋯` behind every track row.
  *
  * The order is fixed everywhere the menu appears — queue actions, then where
- * this track lives, then editing, then removal last and alone. A menu whose
+ * this track lives, then editing, then deletion last and alone. A menu whose
  * items move between screens has to be read every time instead of aimed at.
+ *
+ * The two ways a track can leave are the one place this menu works hard.
+ * Taking it out of a playlist and deleting it from the library are not two
+ * strengths of the same action, so they no longer look like it: they use
+ * different verbs, they carry different glyphs, they sit in different groups
+ * with a rule between them, and only the one that is actually destructive is
+ * red. The first also names the playlist, so there is no reading required to
+ * know which list is about to lose a track.
  *
  * What is missing is as deliberate: a track you do not own offers the queue
  * actions and the collections it belongs to, and nothing else. There is no
@@ -33,6 +43,8 @@ export interface TrackMenuTarget {
   track: Track;
   /** Present in a playlist, so the menu can offer to take it back out. */
   playlistId?: string;
+  /** That playlist's name, so the menu can say which one it means. */
+  playlistName?: string;
 }
 
 export function TrackMenu({
@@ -97,7 +109,7 @@ export function TrackMenu({
         {track ? (
           <>
             <SheetItem
-              icon={ListIcon}
+              icon={PlayNextIcon}
               label="Play next"
               onClick={() => {
                 queueNext(track);
@@ -106,7 +118,7 @@ export function TrackMenu({
               }}
             />
             <SheetItem
-              icon={PlusIcon}
+              icon={QueueAddIcon}
               label="Add to queue"
               onClick={() => {
                 queueLast(track);
@@ -114,9 +126,11 @@ export function TrackMenu({
                 onClose();
               }}
             />
+            <SheetDivider />
+
             {owned ? (
               <SheetItem
-                icon={ListIcon}
+                icon={PlaylistIcon}
                 label="Add to playlist"
                 onClick={() => setAdding(track)}
               />
@@ -150,18 +164,26 @@ export function TrackMenu({
             ) : null}
             {owned && target?.playlistId ? (
               <SheetItem
-                icon={TrashIcon}
-                label="Remove from playlist"
+                icon={ListMinusIcon}
+                label={
+                  target.playlistName
+                    ? `Remove from ${target.playlistName}`
+                    : "Remove from this playlist"
+                }
                 onClick={() => void removeFromPlaylist(track, target.playlistId!)}
               />
             ) : null}
+
             {owned ? (
-              <SheetItem
-                icon={TrashIcon}
-                label="Remove from library"
-                destructive
-                onClick={() => void removeFromLibrary(track)}
-              />
+              <>
+                <SheetDivider />
+                <SheetItem
+                  icon={TrashIcon}
+                  label="Delete from library"
+                  destructive
+                  onClick={() => void removeFromLibrary(track)}
+                />
+              </>
             ) : null}
           </>
         ) : null}
@@ -334,6 +356,17 @@ export function EditTrackSheet({
   const value = (field: "title" | "artist" | "album") =>
     (draft[field] as string | null | undefined) ?? track?.[field] ?? "";
 
+  // Nothing typed, nothing to save. The button being dead until there is a
+  // change is what tells you the sheet has registered what you typed, and it
+  // is also the only honest state for a Save that would otherwise PATCH three
+  // fields with the values they already have.
+  const dirty = Object.keys(draft).length > 0;
+
+  const close = () => {
+    setDraft({});
+    onClose();
+  };
+
   const save = async () => {
     if (!track) return;
     setBusy(true);
@@ -350,7 +383,7 @@ export function EditTrackSheet({
   };
 
   return (
-    <Sheet open={track != null} onClose={onClose} title="Edit details">
+    <Sheet open={track != null} onClose={close} title="Edit details">
       <div
         style={{
           display: "flex",
@@ -382,9 +415,20 @@ export function EditTrackSheet({
             />
           </label>
         ))}
-        <div style={{ marginTop: 4 }}>
-          <ActionButton disabled={busy} onClick={() => void save()}>
-            Save
+        {/* Cancel is the same size as Save and sits beside it rather than
+            under it: on a sheet the only other way out is the scrim, and a
+            scrim is not a control anybody is sure about. Save keeps the whole
+            remaining width because it is what the sheet is for. */}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <GhostButton width={96} height={44} onClick={close}>
+            Cancel
+          </GhostButton>
+          <ActionButton
+            height={44}
+            disabled={busy || !dirty}
+            onClick={() => void save()}
+          >
+            {busy ? "Saving…" : "Save"}
           </ActionButton>
         </div>
       </div>

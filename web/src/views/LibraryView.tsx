@@ -137,10 +137,9 @@ export function LibraryView({ nav }: { nav: Navigation }) {
               key: p.id,
               name: p.name,
               cover: p.cover_track_id,
-              caption: `${p.track_count ?? 0}`,
+              caption: pluralise(p.track_count ?? 0, "track"),
               to: { type: "playlist", id: p.id } as View,
             }))}
-            onNew={() => setNaming(true)}
             nav={nav}
           />
 
@@ -160,7 +159,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
                 key: a.name,
                 name: a.name,
                 cover: a.cover_track_id,
-                caption: `${a.track_count}`,
+                caption: pluralise(a.track_count, "track"),
                 to: { type: "album", name: a.name } as View,
               }))}
               nav={nav}
@@ -189,22 +188,31 @@ export function LibraryView({ nav }: { nav: Navigation }) {
   );
 }
 
-/** The square tiles: playlists and albums are the same shape and the same tap. */
+/**
+ * The square tiles: playlists and albums are the same shape and the same tap.
+ *
+ * Three to a row, not four. A playlist is something you aim at and its cover
+ * is the only way to tell it apart at a glance, so the tile is sized to be
+ * recognisable rather than to fit as many as possible above the fold.
+ *
+ * There is deliberately no "new playlist" tile here. Making one is not a
+ * playlist, and a dashed square the size of a real cover claimed the same
+ * weight as your actual music — the compact `+ New` in the section header
+ * says the same thing without pretending to be an item in the list.
+ */
 function Grid({
   items,
-  onNew,
   nav,
 }: {
   items: { key: string; name: string; cover?: string | null; caption: string; to: View }[];
-  onNew?: () => void;
   nav: Navigation;
 }) {
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(4, 1fr)",
-        gap: 8,
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 12,
       }}
     >
       {items.map((item, i) => (
@@ -220,43 +228,21 @@ function Grid({
           <CollectionArt
             name={item.name}
             coverTrackId={item.cover}
-            size={72}
-            radius={10}
+            size={112}
+            radius={13}
             fill
           />
           <span
             className="nav-clip"
-            style={{ display: "block", fontSize: 11, marginTop: 5 }}
+            style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginTop: 7 }}
           >
             {item.name}
           </span>
-          <span style={{ fontSize: 10.5, color: "rgba(255,255,255,.5)" }}>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,.5)" }}>
             {item.caption}
           </span>
         </button>
       ))}
-
-      {onNew ? (
-        <button
-          className="nav-press"
-          onClick={() => {
-            haptic.tap();
-            onNew();
-          }}
-          aria-label="New playlist"
-          style={{
-            aspectRatio: "1",
-            borderRadius: 10,
-            border: "1px dashed rgba(255,255,255,.22)",
-            color: "rgba(255,255,255,.5)",
-            fontSize: 11,
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          New
-        </button>
-      ) : null}
     </div>
   );
 }

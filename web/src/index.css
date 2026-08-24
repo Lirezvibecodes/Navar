@@ -107,6 +107,10 @@
      list's padding follows it. */
   --nav-bottomnav-h: 78px;
   --nav-nowplaying-h: 0px;
+
+  /* The top bar floats over the scrolling content rather than sitting above
+     it, so every scroll container has to reserve the room itself. */
+  --nav-topbar-h: 52px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -172,6 +176,19 @@ body {
     0 10px 30px rgba(0, 0, 0, 0.55);
 }
 
+/* The floating bars at the bottom. Darker and less lit than .nav-glass: they
+   sit over artwork rather than over the background wash, and a light glass
+   pill on top of a bright cover turns into a smear. */
+.nav-bar-glass {
+  background: linear-gradient(180deg, rgba(32, 34, 36, 0.9), rgba(13, 14, 15, 0.86));
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 14px 34px rgba(0, 0, 0, 0.6);
+}
+
 /* The player's queue/lyrics sheet: deeper blur, light only from above, and a
    shadow that falls upward because the sheet sits on top of the screen. */
 .nav-sheet {
@@ -187,6 +204,49 @@ body {
 
 .nav-card {
   background: linear-gradient(180deg, var(--color-nav-card-top), var(--color-nav-card-bottom));
+}
+
+/* The top bar.
+   
+   It is an overlay, not a row above the content: the scroll container starts
+   at the top of the screen and runs underneath it. Without that, a list that
+   scrolls up simply stops existing at the bar's lower edge — a hard cut with
+   nothing to explain it.
+   
+   The blur and the wash live on a pseudo-element rather than on the header, so
+   the mask that fades them out cannot also fade the title and the buttons. The
+   element is 26px taller than the bar and dissolves over its last 40%, which
+   is what turns the cut into content passing behind glass. */
+.nav-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--nav-topbar-h);
+  padding: 0 14px;
+  padding-top: var(--tg-content-top);
+  box-sizing: content-box;
+}
+.nav-topbar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(100% + 26px);
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(3, 3, 3, 0.78), rgba(3, 3, 3, 0));
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
+}
+.nav-topbar > * {
+  position: relative;
 }
 
 /* ---------------------------------------------------------------------------
@@ -231,6 +291,15 @@ body {
 .nav-shelf > * {
   scroll-snap-align: start;
   flex: none;
+}
+
+/* A scroller clips on both axes, so anything that glows inside one is cut off
+   square at the edge of the box. The padding is the room the glow needs and
+   the negative margin gives it back to the layout, so the shelf still measures
+   as if it were tight against its neighbours. */
+.nav-shelf-bleed {
+  padding: 14px 0 20px;
+  margin: -14px 0 -18px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -394,6 +463,72 @@ button {
   animation: nav-art-in var(--dur-focal) var(--ease) both;
 }
 
+/* --- The bottom nav ---------------------------------------------------------
+
+   The bar hugs its contents and floats, so the label growing out of the active
+   tab changes the width of the whole pill. That width is the animation, and it
+   is the one place in the app where a layout property is animated on purpose:
+   there is no transform that widens a blurred glass pill without smearing the
+   blur, and three tabs is not a number of elements a phone struggles with.
+   
+   Everything moves on the same clock. The old version ran the label's width on
+   one duration and its opacity on another, which is what made the switch read
+   as two separate things happening rather than one tab opening. */
+
+.nav-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 4px;
+  border-radius: 23px;
+  color: rgba(255, 255, 255, 0.6);
+  transition:
+    color var(--dur-state) var(--ease),
+    padding var(--dur-state) var(--ease);
+}
+.nav-tab[aria-current="page"] {
+  color: #0a0a0a;
+  padding: 0 16px 0 4px;
+}
+
+/* The lime disc. It is a child rather than the button's own background so it
+   keeps its circle while the button around it stretches into a pill. */
+.nav-tab-disc {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  transition:
+    background-color var(--dur-state) var(--ease),
+    box-shadow var(--dur-state) var(--ease),
+    transform var(--dur-state) var(--ease);
+}
+.nav-tab[aria-current="page"] .nav-tab-disc {
+  background: var(--color-nav-action);
+  box-shadow: 0 6px 18px rgba(223, 252, 142, 0.34);
+}
+
+.nav-tab-label {
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition:
+    max-width var(--dur-state) var(--ease),
+    opacity var(--dur-state) var(--ease);
+}
+.nav-tab[aria-current="page"] .nav-tab-label {
+  max-width: 90px;
+  opacity: 1;
+}
+
 /* --- Bars ------------------------------------------------------------------ */
 
 /* The Now Playing bar the first time anything plays. It comes up from behind
@@ -407,6 +542,19 @@ button {
 }
 .nav-bar-in {
   animation: nav-bar-in var(--dur-view) var(--ease) both;
+}
+
+/* The player while a finger is dragging it down. No transition — the sheet is
+   following the finger — and the class is dropped on release so the spring back
+   up animates. */
+/* The player letting go after a drag: it either falls the rest of the way or
+   springs back, and the fade rides along so the two directions are told apart
+   before the movement finishes. Applied only on release — during the drag the
+   sheet is pinned to the finger with no transition at all. */
+.nav-player-settle {
+  transition:
+    transform var(--dur-state) var(--ease),
+    opacity var(--dur-state) var(--ease);
 }
 
 /* --- Lists ------------------------------------------------------------------

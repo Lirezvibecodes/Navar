@@ -16,6 +16,12 @@ import type { Track } from "../types";
  * These four screens differ only in what sits at the top and where the rows
  * came from, so they share one body. The Crate is the exception and has its
  * own screen, because selection mode and search belong to it alone.
+ *
+ * This header is the only place the collection's name appears. The bar above
+ * it carries the KIND — `PLAYLIST`, `ALBUM`, `ARTIST` — because that is the
+ * one thing the header cannot tell you: art with a name under it looks the
+ * same whoever made it. Printing the name in both places, as this screen used
+ * to, spent the top of every detail screen saying one word twice.
  */
 export function TrackListScreen({
   nav,
@@ -27,6 +33,7 @@ export function TrackListScreen({
   sourceKey,
   sourceLabel,
   playlistId,
+  playlistName,
   emptyTitle = "Nothing here yet",
   emptyBody,
   actions,
@@ -41,6 +48,8 @@ export function TrackListScreen({
   sourceLabel: string;
   /** Set when these rows are a playlist, so the menu can remove them from it. */
   playlistId?: string;
+  /** That playlist's name, so the menu's remove item can say which one. */
+  playlistName?: string;
   emptyTitle?: string;
   emptyBody?: string;
   /** Extra header controls — rename, visibility, follow. */
@@ -60,18 +69,29 @@ export function TrackListScreen({
       <Screen>
         <div
           className="nav-rise"
-          style={{ display: "flex", alignItems: "center", gap: 13, paddingTop: 4 }}
+          style={{ display: "flex", alignItems: "center", gap: 14, paddingTop: 4 }}
         >
           {art}
           <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Two lines, then an ellipsis. Now that this is the only place
+                the name is written, a long one is allowed to take the room
+                it needs instead of being cut at the first line. */}
             <div
-              className="nav-clip"
-              style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.015em" }}
+              style={{
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 2,
+                overflow: "hidden",
+                fontSize: 19,
+                fontWeight: 600,
+                lineHeight: 1.2,
+                letterSpacing: "-0.02em",
+              }}
             >
               {name}
             </div>
             <div
-              style={{ fontSize: 11.5, color: "rgba(255,255,255,.52)", marginTop: 3 }}
+              style={{ fontSize: 11.5, color: "rgba(255,255,255,.52)", marginTop: 5 }}
             >
               {subtitle}
             </div>
@@ -113,7 +133,7 @@ export function TrackListScreen({
                 owned={owns(track)}
                 favorited={track.favorited_at != null}
                 onPlay={() => playFrom(source, track)}
-                onMenu={() => setMenu({ track, playlistId })}
+                onMenu={() => setMenu({ track, playlistId, playlistName })}
                 onToggleFavorite={() =>
                   void setFavorite(track, track.favorited_at == null)
                 }
