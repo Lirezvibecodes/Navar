@@ -91,12 +91,18 @@ const UNDO_WINDOW_DAYS = 30;
  * and a group crate — and they differ only in what happens around the insert.
  * The statement itself is written once so the column list, the placeholders and
  * the origin fallback cannot drift apart between them.
+ *
+ * The cast on $11 is load-bearing. $2 is deduced as bigint from its VALUES
+ * slot, but inside COALESCE both arguments arrive untyped, and an all-unknown
+ * COALESCE resolves to text — which deduces $2 as text a second time and makes
+ * Postgres reject the whole statement with 42P08. Typing $11 gives COALESCE a
+ * type to agree with, so both deductions land on bigint.
  */
 const INSERT_TRACK_SQL = `
   INSERT INTO tracks
     (id, owner_telegram_id, title, artist, album, duration_seconds, telegram_file_id,
      mime_type, cover_image, cover_mime_type, origin_adder_id)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, $2))
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::BIGINT, $2))
   RETURNING ${TRACK_COLUMNS}
 `;
 
@@ -1182,7 +1188,7 @@ export async function setIngestAwaitingName(
     `UPDATE ingest_sessions
      SET awaiting_name = true, name_prompt_message_id = $2, updated_at = now()
      WHERE telegram_user_id = $1`,
-    [telegramUserId]
+    [telegramUserId, promptMessageId]
   );
 }
 
