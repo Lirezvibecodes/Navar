@@ -15,9 +15,7 @@ export type View =
   /** One view serves both your own profile and somebody else's; the edit
    *  affordances turn on when userId is you. */
   | { type: "profile"; userId: number }
-  | { type: "friendLibrary"; friendId: number }
-  /** The unauthenticated share page. No session, no navigation. */
-  | { type: "shared"; slug: string };
+  | { type: "friendLibrary"; friendId: number };
 
 /** The three destinations the bottom nav and the sidebar offer. */
 export type RootTab = "home" | "library" | "social";
@@ -27,7 +25,7 @@ export type RootTab = "home" | "library" | "social";
  * Library keeps Library lit, so drilling into a playlist never looks like it
  * moved you to another section of the app.
  */
-export function rootTabFor(view: View): RootTab | null {
+export function rootTabFor(view: View): RootTab {
   switch (view.type) {
     case "home":
       return "home";
@@ -41,7 +39,5 @@ export function rootTabFor(view: View): RootTab | null {
     case "profile":
     case "friendLibrary":
       return "social";
-    case "shared":
-      return null;
   }
 }

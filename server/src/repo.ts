@@ -1,5 +1,12 @@
+import { randomBytes } from "node:crypto";
 import { getPool, withTransaction } from "./db";
-import type { Track, Playlist } from "./types";
+import type {
+  Playlist,
+  PlaylistVisibility,
+  SharedPlaylist,
+  SharedTrack,
+  Track,
+} from "./types";
 
 /**
  * Upsert the account and hand back the handle it holds, if any.
@@ -662,7 +669,11 @@ export async function getPlaylist(
 export async function updatePlaylist(
   id: string,
   ownerTelegramId: number,
-  fields: { name?: string; description?: string | null }
+  fields: {
+    name?: string;
+    description?: string | null;
+    visibility?: PlaylistVisibility;
+  }
 ): Promise<Playlist | null> {
   const sets: string[] = [];
   const params: unknown[] = [id, ownerTelegramId];
@@ -673,6 +684,28 @@ export async function updatePlaylist(
   if (fields.description !== undefined) {
     params.push(fields.description);
     sets.push(`description = $${params.length}`);
+  }
+  if (fields.visibility !== undefined) {
+    // The slug is the credential for the unauthenticated link, so its lifetime
+    // is decided here rather than by the caller: going private destroys it,
+    // which is what makes "make it private again" an actual revocation, and
+    // coming back out of private mints a new one so a link that was revoked
+    // can never be resurrected by re-sharing.
+    //
+    // COALESCE rather than an unconditional assignment, so widening from
+    // friends to a link keeps the address people were already given. The
+    // candidate below is generated on every call and simply discarded when one
+    // already exists — cheaper than a read to decide whether to generate, and
+    // it keeps the whole rule inside a single atomic statement.
+    params.push(fields.visibility);
+    const visibility = `$${params.length}`;
+    sets.push(`visibility = ${visibility}`);
+    params.push(newShareSlug());
+    sets.push(
+      `share_slug = CASE WHEN ${visibility} = 'private'
+                        THEN NULL
+                        ELSE COALESCE(share_slug, $${params.length}) END`
+    );
   }
   // Nothing to write is not an error — the caller still wants the row back.
   if (sets.length === 0) return getPlaylist(id, ownerTelegramId);
@@ -820,6 +853,165 @@ export async function playlistVisibleToRequester(
     [playlistId, requesterTelegramId]
   );
   return rows[0] ?? null;
+}
+
+/**
+ * A fresh share credential.
+ *
+ * Twelve random bytes as base64url — sixteen characters, no padding, nothing
+ * that needs escaping in a URL. It is minted here rather than in a route
+ * because it is a secret in the same sense a password is: anyone holding it
+ * can stream the playlist forever, so the code that decides what it is should
+ * be the code that decides when it lives and dies.
+ */
+function newShareSlug(): string {
+  return randomBytes(12).toString("base64url");
+}
+
+/**
+ * Replace the share credential.
+ *
+ * The only way to revoke a link that has already been passed around, which is
+ * why it is an explicit action of its own rather than a side effect of editing
+ * something else. Refuses on a private playlist: there is no link to revoke,
+ * and minting one for a playlist nobody can open would leave a live credential
+ * sitting in the row waiting to be shared by accident.
+ */
+export async function rotatePlaylistSlug(
+  id: string,
+  ownerTelegramId: number
+): Promise<Playlist | null> {
+  const { rowCount } = await getPool().query(
+    `UPDATE playlists SET share_slug = $3, updated_at = now()
+     WHERE id = $1 AND owner_telegram_id = $2 AND visibility <> 'private'`,
+    [id, ownerTelegramId, newShareSlug()]
+  );
+  if ((rowCount ?? 0) === 0) return null;
+  return getPlaylist(id, ownerTelegramId);
+}
+
+/**
+ * What a stranger holding a link is allowed to know about a track.
+ *
+ * A deliberately short list rather than TRACK_COLUMNS with fields deleted
+ * afterwards: the wide one carries owner_telegram_id, origin_adder_id and
+ * telegram_file_id, and a projection that has to be trimmed by its caller is
+ * one refactor away from not being. Nothing here identifies a person, and the
+ * id is only the address the shared stream and cover routes are called with.
+ */
+const SHARED_TRACK_COLUMNS = `
+  t.id, t.title, t.artist, t.album, t.duration_seconds,
+  ${HAS_COVER_T} AS has_cover
+`;
+
+/**
+ * The playlist behind a link, if the link is live.
+ *
+ * 'public' and nothing else. A slug also exists while a playlist is
+ * friends-only — the same address, opened inside Telegram where the friendship
+ * is actually checked — so matching on the slug alone here would hand every
+ * friends-only playlist to anyone who was ever sent its link.
+ */
+export async function getSharedPlaylist(
+  slug: string
+): Promise<SharedPlaylist | null> {
+  const { rows } = await getPool().query<SharedPlaylist>(
+    `SELECT p.id, p.name, p.description, p.share_slug,
+       (p.cover_file_id IS NOT NULL) AS has_cover,
+       COALESCE(u.handle, u.username) AS owner_name,
+       ${PLAYLIST_TRACK_COUNT},
+       ${PLAYLIST_COVER}
+     FROM playlists p
+     LEFT JOIN users u ON u.telegram_user_id = p.owner_telegram_id
+     WHERE p.share_slug = $1 AND p.visibility = 'public'`,
+    [slug]
+  );
+  return rows[0] ?? null;
+}
+
+/** The rows of a shared playlist, in order, for a caller with no session. */
+export async function listSharedPlaylistTracks(
+  slug: string
+): Promise<SharedTrack[]> {
+  const { rows } = await getPool().query<SharedTrack>(
+    `SELECT ${SHARED_TRACK_COLUMNS}
+     FROM playlist_tracks pt
+     JOIN tracks t ON t.id = pt.track_id
+     JOIN playlists p ON p.id = pt.playlist_id
+     WHERE p.share_slug = $1 AND p.visibility = 'public' AND ${LIVE_T}
+     ORDER BY pt.position ASC`,
+    [slug]
+  );
+  return rows;
+}
+
+/**
+ * One track of a shared playlist, addressed by the slug it was reached through.
+ *
+ * The slug and the track id travel together into a single query on purpose.
+ * These are the unauthenticated media routes, so a bare track id would make
+ * them an open proxy over every track in the database for anyone who holds one
+ * shared link and can guess a UUID. The join is the authorization, and there
+ * is no other.
+ */
+export async function getSharedTrack(
+  slug: string,
+  trackId: string
+): Promise<{ id: string; telegram_file_id: string; mime_type: string | null } | null> {
+  const { rows } = await getPool().query<{
+    id: string;
+    telegram_file_id: string;
+    mime_type: string | null;
+  }>(
+    `SELECT t.id, t.telegram_file_id, t.mime_type
+     FROM playlist_tracks pt
+     JOIN tracks t ON t.id = pt.track_id
+     JOIN playlists p ON p.id = pt.playlist_id
+     WHERE p.share_slug = $1 AND p.visibility = 'public'
+       AND t.id = $2 AND ${LIVE_T}`,
+    [slug, trackId]
+  );
+  return rows[0] ?? null;
+}
+
+/** The artwork of one track of a shared playlist, under the same join. */
+export async function getSharedTrackCover(
+  slug: string,
+  trackId: string
+): Promise<CoverSource | null> {
+  const { rows } = await getPool().query<{
+    cover_image: Buffer | null;
+    cover_mime_type: string | null;
+    cover_file_id: string | null;
+  }>(
+    `SELECT t.cover_image, t.cover_mime_type, t.cover_file_id
+     FROM playlist_tracks pt
+     JOIN tracks t ON t.id = pt.track_id
+     JOIN playlists p ON p.id = pt.playlist_id
+     WHERE p.share_slug = $1 AND p.visibility = 'public'
+       AND t.id = $2 AND ${LIVE_T}`,
+    [slug, trackId]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  if (row.cover_file_id) return { kind: "telegram", fileId: row.cover_file_id };
+  if (row.cover_image) {
+    return { kind: "bytes", image: row.cover_image, mimeType: row.cover_mime_type };
+  }
+  return null;
+}
+
+/** The shared playlist's own picture, under the same 'public' check. */
+export async function getSharedPlaylistCover(
+  slug: string
+): Promise<CoverSource | null> {
+  const { rows } = await getPool().query<{ cover_file_id: string | null }>(
+    `SELECT cover_file_id FROM playlists
+     WHERE share_slug = $1 AND visibility = 'public'`,
+    [slug]
+  );
+  const fileId = rows[0]?.cover_file_id;
+  return fileId ? { kind: "telegram", fileId } : null;
 }
 
 export async function addPlaylistTrack(

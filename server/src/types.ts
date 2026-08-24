@@ -63,3 +63,50 @@ export interface Playlist {
    */
   has_cover?: boolean;
 }
+
+/**
+ * A track as it appears to somebody holding a share link and nothing else.
+ *
+ * Its own type rather than a Partial<Track>: the shared page is served to
+ * people with no account, so what it may carry is a decision, and a decision
+ * that lives in a type is one a future field cannot quietly join. There is no
+ * owner here, no origin, no telegram_file_id and no credit — a stranger should
+ * not get a map of who passed what to whom.
+ */
+export interface SharedTrack {
+  id: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  duration_seconds: number | null;
+  has_cover: boolean;
+}
+
+/** The playlist behind a live share link, on the same terms. */
+export interface SharedPlaylist {
+  id: string;
+  name: string;
+  description: string | null;
+  share_slug: string;
+  has_cover: boolean;
+  /**
+   * The name the owner chose, or their Telegram username. The one person a
+   * share link does name, because publishing it is what attaches their name to
+   * it — everyone else in the playlist's history stays anonymous.
+   */
+  owner_name: string | null;
+  track_count: number;
+  cover_track_id: string | null;
+}
+
+/**
+ * What GET /api/shared/:slug answers with: the row, plus the way back in.
+ *
+ * The link is composed by the route rather than read from the database, which
+ * is why it is a type of its own instead of another column on SharedPlaylist —
+ * it depends on the bot's own @username, resolved at startup, and is null in
+ * API-only mode where there is no bot to open.
+ */
+export interface SharedPlaylistPage extends SharedPlaylist {
+  app_link: string | null;
+}

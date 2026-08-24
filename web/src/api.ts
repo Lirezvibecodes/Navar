@@ -1,4 +1,14 @@
-import type { Collection, Me, Person, Playlist, Track } from "./types";
+import type {
+  Collection,
+  Me,
+  Person,
+  Playlist,
+  PlaylistVisibility,
+  SharedPlaylist,
+  SharedPlaylistPage,
+  SharedTrack,
+  Track,
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -154,17 +164,45 @@ export function createPlaylist(name: string): Promise<Playlist> {
 }
 
 /**
- * Rename a playlist, rewrite its description, or both. An omitted field is
- * left alone; `description: null` clears it.
+ * Rename a playlist, rewrite its description, change who can see it, or any
+ * combination. An omitted field is left alone; `description: null` clears it.
+ *
+ * Setting the visibility also mints or destroys the share link, so the
+ * playlist that comes back is the one to read `share_slug` from.
  */
 export function updatePlaylist(
   id: string,
-  fields: { name?: string; description?: string | null }
+  fields: {
+    name?: string;
+    description?: string | null;
+    visibility?: PlaylistVisibility;
+  }
 ): Promise<Playlist> {
   return request<Playlist>(`/api/playlists/${id}`, {
     method: "PATCH",
     body: json(fields),
   });
+}
+
+/**
+ * Mint a new share link, which is the only way to kill the old one. Anyone
+ * still holding the previous URL stops being able to open it.
+ */
+export function rotatePlaylistSlug(id: string): Promise<Playlist> {
+  return request<Playlist>(`/api/playlists/${id}/rotate-slug`, {
+    method: "POST",
+  });
+}
+
+/**
+ * The address to hand somebody, or null when the playlist has no live link.
+ *
+ * Same origin as the app itself — the Mini App and the share page are served
+ * by the one service — so this is the whole of the link's construction.
+ */
+export function shareUrl(playlist: Playlist): string | null {
+  if (playlist.visibility !== "public" || !playlist.share_slug) return null;
+  return `${window.location.origin}/s/${playlist.share_slug}`;
 }
 
 /** Pin a cover, or pass null to let the playlist pick its own again. */
@@ -289,4 +327,36 @@ export function acceptFriend(id: string | number): Promise<void> {
 
 export function removeFriend(id: string | number): Promise<void> {
   return request<void>(`/api/friends/${id}`, { method: "DELETE" });
+}
+
+// --- The share page ---------------------------------------------------------
+//
+// The only calls in this file that carry no session, because the page they
+// serve has none. The slug in the path is the entire credential — which is
+// why the app calls this level "Anyone with the link" and never "Public".
+
+export function getSharedPlaylist(slug: string): Promise<SharedPlaylistPage> {
+  return request<SharedPlaylistPage>(`/api/shared/${encodeURIComponent(slug)}`);
+}
+
+export function listSharedTracks(slug: string): Promise<SharedTrack[]> {
+  return request<SharedTrack[]>(`/api/shared/${encodeURIComponent(slug)}/tracks`);
+}
+
+/**
+ * Media URLs for the share page. No token — there is nobody to authenticate —
+ * and the slug travels with every one of them, because the server proves the
+ * track sits in that playlist rather than trusting the id.
+ */
+export function sharedStreamUrl(slug: string, trackId: string): string {
+  return `${API_BASE}/api/shared/${encodeURIComponent(slug)}/tracks/${trackId}/stream`;
+}
+
+export function sharedTrackCoverUrl(slug: string, trackId: string): string {
+  return `${API_BASE}/api/shared/${encodeURIComponent(slug)}/tracks/${trackId}/cover`;
+}
+
+export function sharedPlaylistCoverUrl(playlist: SharedPlaylist): string | null {
+  if (!playlist.has_cover) return null;
+  return `${API_BASE}/api/shared/${encodeURIComponent(playlist.share_slug)}/cover`;
 }

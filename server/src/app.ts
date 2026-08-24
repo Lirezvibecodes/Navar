@@ -8,6 +8,7 @@ import { albumsRouter, artistsRouter } from "./routes/collections";
 import { usersRouter } from "./routes/users";
 import { meRouter } from "./routes/me";
 import { friendsRouter } from "./routes/friends";
+import { sharedRouter } from "./routes/shared";
 
 // The web app is built into this package (see the build script) and served
 // from the same origin, so the Mini App only ever depends on this one domain
@@ -17,6 +18,15 @@ const webDist = path.join(__dirname, "../web-dist");
 
 export function createApp(bot: Telegraf | null): Express {
   const app = express();
+
+  // Render terminates TLS at its own proxy, so without this every request
+  // arrives from the same address and req.ip is useless — which matters
+  // because the share routes rate-limit by it, and one shared counter for the
+  // whole internet would throttle everybody at once. One hop, not `true`: with
+  // `true` Express believes the leftmost X-Forwarded-For entry, which the
+  // client writes, and a limiter keyed on a value the caller chooses is not a
+  // limiter. At 1 it reads the entry Render's proxy appended.
+  app.set("trust proxy", 1);
 
   // Render captures stdout as the service's only log stream, so without this
   // there is no record of what actually reached the server — which makes it
@@ -55,6 +65,9 @@ export function createApp(bot: Telegraf | null): Express {
   app.use("/api/users", usersRouter());
   app.use("/api/me", meRouter());
   app.use("/api/friends", friendsRouter());
+  // Deliberately last, and deliberately without requireAuth: everything above
+  // this line knows who is calling and nothing below it does.
+  app.use("/api/shared", sharedRouter());
 
   app.use(express.static(webDist));
   app.get(/^\/(?!api|health|telegraf).*/, (_req, res) => {

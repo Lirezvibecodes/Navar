@@ -17,6 +17,7 @@ import { SocialView } from "./views/SocialView";
 import { ProfileView } from "./views/ProfileView";
 import { FriendLibraryView } from "./views/FriendLibraryView";
 import { PlayerView } from "./views/PlayerView";
+import { SharedView } from "./views/SharedView";
 import { getTelegramWebApp, initTelegramPlatform, setBackButton } from "./telegram";
 import type { Me } from "./types";
 import type { RootTab, View } from "./view";
@@ -51,7 +52,6 @@ const TITLES: Record<View["type"], string> = {
   social: "Social",
   profile: "Profile",
   friendLibrary: "Library",
-  shared: "Navaar",
 };
 
 function Shell({ me }: { me: Me }) {
@@ -147,8 +147,6 @@ function Shell({ me }: { me: Me }) {
         return <ProfileView nav={nav} userId={view.userId} />;
       case "friendLibrary":
         return <FriendLibraryView nav={nav} friendId={view.friendId} />;
-      case "shared":
-        return null;
     }
   };
 
@@ -288,7 +286,27 @@ function Boot() {
   );
 }
 
+/**
+ * The share page is the one thing in Navaar that has an address.
+ *
+ * It is matched here rather than being a View, because a View is a screen of
+ * the shell: it gets the top bar, the bottom nav, the player and a session, and
+ * this has none of those. There is still no router — one path, matched once at
+ * startup, is the whole of it, and a Mini App never navigates to it.
+ */
+const SHARE_PATH = /^\/s\/([A-Za-z0-9_-]{8,64})\/?$/;
+
 export default function App() {
+  const shared = SHARE_PATH.exec(window.location.pathname);
+  if (shared) {
+    return (
+      <ToastProvider>
+        <div className="nav-screen-bg" aria-hidden="true" />
+        <SharedView slug={shared[1]} />
+      </ToastProvider>
+    );
+  }
+
   return (
     <ToastProvider>
       {/* The wash is its own layer rather than a class on the shell. It is

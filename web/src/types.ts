@@ -71,3 +71,44 @@ export interface Me {
   /** Null until this person has chosen one, which the app asks for on first launch. */
   handle: string | null;
 }
+
+/**
+ * A track as the share page sees it.
+ *
+ * Its own type rather than a slice of Track, mirroring the server's: the
+ * shared page is served to people with no account, and what it is allowed to
+ * carry is a decision rather than an accident. There is no owner here and no
+ * credit — a stranger does not get a map of who passed what to whom.
+ */
+export interface SharedTrack {
+  id: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  duration_seconds: number | null;
+  has_cover: boolean;
+}
+
+/** The playlist behind a live share link. */
+export interface SharedPlaylist {
+  id: string;
+  name: string;
+  description: string | null;
+  share_slug: string;
+  has_cover: boolean;
+  /** The one person a share link names: whoever published it. */
+  owner_name: string | null;
+  track_count: number;
+  cover_track_id: string | null;
+}
+
+/**
+ * What GET /api/shared/:slug answers with: the row, plus the way back in.
+ *
+ * The link is composed by the server rather than stored, and is null when it
+ * is running without a bot — the share page then simply has no call to action
+ * rather than one that opens nothing.
+ */
+export interface SharedPlaylistPage extends SharedPlaylist {
+  app_link: string | null;
+}

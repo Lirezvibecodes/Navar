@@ -15,15 +15,20 @@ import {
   listPlaylistTracksForListener,
   playlistVisibleToRequester,
   removePlaylistTrack,
+  rotatePlaylistSlug,
   updatePlaylist,
   updatePlaylistCover,
   setPlaylistCover,
 } from "../repo";
 import { captionOf, personLabel } from "../channels";
+import type { PlaylistVisibility } from "../types";
 import { serveCover, storeCover } from "./covers";
 
 /** The cap the database enforces too — see migration 008. */
 const DESCRIPTION_MAX = 500;
+
+/** The three the column's CHECK constraint allows — see migration 004. */
+const VISIBILITIES: PlaylistVisibility[] = ["private", "friends", "public"];
 
 /**
  * The same allowlist and the same ceiling the track cover upload uses. A
@@ -74,11 +79,16 @@ export function playlistsRouter(): Router {
   );
 
   /**
-   * A partial update: send the name, the description, or both.
+   * A partial update: send the name, the description, the visibility, or any
+   * combination.
    *
    * An absent key leaves the field alone; a null or empty description clears
    * it. The name still cannot be blanked, because a playlist with no name is
    * unreachable in every list that draws it.
+   *
+   * Changing the visibility also mints or destroys the share link — see
+   * updatePlaylist. That is not a hidden side effect so much as the same fact
+   * written down twice: the link is what "shared" means here.
    */
   router.patch(
     "/:id",
@@ -87,8 +97,13 @@ export function playlistsRouter(): Router {
       const body = (req.body ?? {}) as {
         name?: unknown;
         description?: unknown;
+        visibility?: unknown;
       };
-      const fields: { name?: string; description?: string | null } = {};
+      const fields: {
+        name?: string;
+        description?: string | null;
+        visibility?: PlaylistVisibility;
+      } = {};
 
       if (body.name !== undefined) {
         if (typeof body.name !== "string" || body.name.trim().length === 0) {
@@ -118,10 +133,48 @@ export function playlistsRouter(): Router {
         }
       }
 
+      if (body.visibility !== undefined) {
+        // Checked against the list here as well as by the column's CHECK
+        // constraint: a bad value should come back as a 400 naming the three
+        // legal ones, not as a 500 from a constraint violation.
+        if (!VISIBILITIES.includes(body.visibility as PlaylistVisibility)) {
+          res
+            .status(400)
+            .json({ error: `Visibility must be one of ${VISIBILITIES.join(", ")}` });
+          return;
+        }
+        fields.visibility = body.visibility as PlaylistVisibility;
+      }
+
       const playlist = await updatePlaylist(
         req.params.id,
         (req as AuthedRequest).telegramUserId,
         fields
+      );
+      if (!playlist) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(playlist);
+    })
+  );
+
+  /**
+   * Mint a new share link, invalidating the old one.
+   *
+   * Its own action because it is the only way to take back a link that has
+   * already been passed around, and burying that inside PATCH would make
+   * revocation something you could trigger by accident while renaming. A 404
+   * covers both "no such playlist of yours" and "that one is private": there
+   * is no link on a private playlist to replace.
+   */
+  router.post(
+    "/:id/rotate-slug",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const playlist = await rotatePlaylistSlug(
+        req.params.id,
+        (req as AuthedRequest).telegramUserId
       );
       if (!playlist) {
         res.status(404).json({ error: "Not found" });

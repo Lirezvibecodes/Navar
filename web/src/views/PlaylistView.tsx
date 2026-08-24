@@ -3,6 +3,7 @@ import * as api from "../api";
 import type { Navigation } from "../App";
 import { CollectionArt, Cover } from "../components/PixelArt";
 import { NameSheet } from "../components/NameSheet";
+import { ShareSheet } from "../components/ShareSheet";
 import { TrackListScreen } from "../components/TrackListScreen";
 import { Empty, GhostButton, Sheet, SheetDivider, SheetItem } from "../components/ui";
 import {
@@ -11,13 +12,14 @@ import {
   EditIcon,
   ImageIcon,
   NoteIcon,
+  ShareIcon,
   TrashIcon,
 } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { pluralise } from "../lib/format";
 import { haptic } from "../telegram";
-import type { Track } from "../types";
+import type { PlaylistVisibility, Track } from "../types";
 
 /**
  * One playlist.
@@ -27,6 +29,19 @@ import type { Track } from "../types";
  * library's copy of the playlist supplies the name and the count so the header
  * is filled in before the tracks arrive.
  */
+/**
+ * What the options menu says about sharing, before you open the sheet.
+ *
+ * The line names the state rather than the action — "Share" would say nothing
+ * about a playlist that is already out there, and this is the one setting on a
+ * playlist with a consequence outside the app.
+ */
+const VISIBILITY_LABEL: Record<PlaylistVisibility, string> = {
+  private: "Share this playlist",
+  friends: "Shared with friends",
+  public: "Anyone with the link",
+};
+
 export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   const { playlists, putPlaylist, dropPlaylist } = useLibrary();
   const { toast, undoToast } = useToast();
@@ -39,6 +54,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [describing, setDescribing] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const playlist = playlists.find((p) => p.id === id);
 
@@ -242,6 +258,14 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
             setPicking(true);
           }}
         />
+        <SheetItem
+          icon={ShareIcon}
+          label={VISIBILITY_LABEL[playlist?.visibility ?? "private"]}
+          onClick={() => {
+            setMenuOpen(false);
+            setSharing(true);
+          }}
+        />
         <SheetDivider />
         <SheetItem
           icon={TrashIcon}
@@ -290,6 +314,13 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
           onPick={(trackId) => void chooseCover(trackId)}
         />
       </Sheet>
+
+      <ShareSheet
+        open={sharing}
+        onClose={() => setSharing(false)}
+        playlist={playlist}
+        onChange={putPlaylist}
+      />
 
       <NameSheet
         open={renaming}
