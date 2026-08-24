@@ -393,3 +393,13 @@ export const ImageIcon = icon(
     <path d="m22,2v-1H2v1h-1v20h1v1h20v-1h1V2h-1Zm-5,12v1h1v1h1v1h1v1h1v3h-13v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1v1h1Zm3,1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v-1h-1v-1h-1v-1h-1v-1h-1V3h18v12h-1Zm-15,3v1h1v1h1v1H3v-4h1v1h1Z" />
   </>
 );
+
+/** pixel-icon-library/regular/align-left — lines of text, i.e. a description. */
+export const NoteIcon = icon(
+  <>
+    <rect x="1" y="2" width="15" height="1" />
+    <rect x="1" y="8" width="22" height="1" />
+    <rect x="1" y="15" width="15" height="1" />
+    <rect x="1" y="21" width="22" height="1" />
+  </>
+);

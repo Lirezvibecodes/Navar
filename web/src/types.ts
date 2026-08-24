@@ -34,6 +34,8 @@ export interface Playlist {
   id: string;
   owner_telegram_id: string;
   name: string;
+  /** What the owner has written about it, or null if they never have. */
+  description: string | null;
   visibility: PlaylistVisibility;
   share_slug: string | null;
   group_chat_id: string | null;

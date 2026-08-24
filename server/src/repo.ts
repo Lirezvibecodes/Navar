@@ -444,8 +444,8 @@ export async function purgeExpiredTracks(): Promise<number> {
  * below replaces the stored cover with a resolved one under the same name, and
  * two columns called cover_track_id in one result set is a coin toss.
  */
-const PLAYLIST_COLUMNS = `p.id, p.owner_telegram_id, p.name, p.created_at,
-     p.updated_at, p.visibility, p.share_slug, p.group_chat_id`;
+const PLAYLIST_COLUMNS = `p.id, p.owner_telegram_id, p.name, p.description,
+     p.created_at, p.updated_at, p.visibility, p.share_slug, p.group_chat_id`;
 
 /**
  * The picture: whatever the owner pinned, and otherwise the first track in the
@@ -514,15 +514,38 @@ async function readPlaylist(
   return rows[0] ?? null;
 }
 
-export async function renamePlaylist(
+/**
+ * Change a playlist's name, its description, or both.
+ *
+ * One function rather than one per field because the two are edited in the same
+ * sheet and PATCH is defined as a partial update: a caller who is only
+ * rewriting the description should not have to resend the name it did not
+ * touch, and an omitted key has to mean "leave it alone" rather than "set it to
+ * null". `undefined` is that distinction, which is why the fields are optional
+ * here and null is a legal, meaningful value for the description.
+ */
+export async function updatePlaylist(
   id: string,
   ownerTelegramId: number,
-  name: string
+  fields: { name?: string; description?: string | null }
 ): Promise<Playlist | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [id, ownerTelegramId];
+  if (fields.name !== undefined) {
+    params.push(fields.name);
+    sets.push(`name = $${params.length}`);
+  }
+  if (fields.description !== undefined) {
+    params.push(fields.description);
+    sets.push(`description = $${params.length}`);
+  }
+  // Nothing to write is not an error — the caller still wants the row back.
+  if (sets.length === 0) return readPlaylist(id, ownerTelegramId);
+
   const { rowCount } = await getPool().query(
-    `UPDATE playlists SET name = $3, updated_at = now()
+    `UPDATE playlists SET ${sets.join(", ")}, updated_at = now()
      WHERE id = $1 AND owner_telegram_id = $2`,
-    [id, ownerTelegramId, name]
+    params
   );
   if ((rowCount ?? 0) === 0) return null;
   return readPlaylist(id, ownerTelegramId);

@@ -65,6 +65,7 @@ export function Cover({
   style,
 }: CoverProps) {
   const base: React.CSSProperties = {
+    position: "relative",
     width: size,
     height: size,
     borderRadius: radius,
@@ -79,15 +80,7 @@ export function Cover({
   // shows the generated square instead of a hole.
   return (
     <div className={className} style={base}>
-      {hasCover ? (
-        <img
-          src={trackCoverUrl(trackId)}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-      ) : null}
+      {hasCover ? <ArtImage src={trackCoverUrl(trackId)} /> : null}
     </div>
   );
 }
@@ -118,24 +111,51 @@ export function CollectionArt({
     <div
       className={className}
       style={{
+        position: "relative",
         width: fill ? "100%" : size,
-        height: fill ? undefined : size,
-        aspectRatio: fill ? "1" : undefined,
+        // height: 0 with a 100% bottom padding, not aspect-ratio. A percentage
+        // padding always resolves against the width, on every WebView Telegram
+        // ships on and whatever the contents turn out to be, so a row of tiles
+        // cannot come out at three different heights.
+        height: fill ? 0 : size,
+        paddingBottom: fill ? "100%" : undefined,
         borderRadius: round ? "50%" : radius,
         flex: "none",
         overflow: "hidden",
         ...pixelPattern(name, size),
       }}
     >
-      {coverTrackId ? (
-        <img
-          src={trackCoverUrl(coverTrackId)}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-      ) : null}
+      {coverTrackId ? <ArtImage src={trackCoverUrl(coverTrackId)} /> : null}
     </div>
+  );
+}
+
+/**
+ * The artwork itself, pinned to its box rather than laid out inside it.
+ *
+ * A `width: 100%; height: 100%` image only fills its parent while the parent
+ * has a height the percentage can resolve against. In a grid tile the height is
+ * derived rather than declared, and when the percentage falls back to `auto`
+ * the image renders at its natural size — a 1400px cover inside a 112px tile,
+ * cropped to its top-left corner and shoving everything around it out of the
+ * way. Taking it out of flow makes that impossible: the box decides the size,
+ * always, and object-fit does the cropping.
+ */
+function ArtImage({ src }: { src: string }) {
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        display: "block",
+      }}
+    />
   );
 }

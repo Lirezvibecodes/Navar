@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as api from "../api";
 import type { Playlist, Track } from "../types";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
 import { ActionButton, GhostButton, Sheet, SheetDivider, SheetItem } from "./ui";
-import { CollectionArt } from "./PixelArt";
+import { CollectionArt, Cover } from "./PixelArt";
 import {
   AlbumIcon,
   EditIcon,
+  ImageIcon,
   ListMinusIcon,
   PlayNextIcon,
   PlaylistIcon,
@@ -56,7 +57,7 @@ export function TrackMenu({
   onClose: () => void;
   onGoTo: (to: { type: "album" | "artist"; name: string }) => void;
 }) {
-  const { owns, putTrack, dropTracks, playlists } = useLibrary();
+  const { owns, putTrack, dropTracks, playlists, markInPlaylist } = useLibrary();
   const { queueNext, queueLast } = usePlayer();
   const { toast, undoToast } = useToast();
 
@@ -95,7 +96,9 @@ export function TrackMenu({
       return;
     }
     undoToast("Removed from playlist", () => {
-      void api.addTracksToPlaylist(playlistId, [t.id]);
+      void api.addTracksToPlaylist(playlistId, [t.id]).then(() =>
+        markInPlaylist([t.id])
+      );
     });
   };
 
@@ -222,7 +225,7 @@ export function AddToPlaylistSheet({
   playlists: Playlist[];
   onClose: () => void;
 }) {
-  const { putPlaylist } = useLibrary();
+  const { putPlaylist, markInPlaylist } = useLibrary();
   const { toast } = useToast();
   const [creating, setCreating] = useState("");
   const [busy, setBusy] = useState(false);
@@ -238,6 +241,10 @@ export function AddToPlaylistSheet({
         ...playlist,
         track_count: (playlist.track_count ?? 0) + added,
       });
+      // The Crate splits All from Unsorted on `in_playlist`, which the server
+      // computes at load. Without this the track a user has just filed stays
+      // sitting in Unsorted until the next reload.
+      markInPlaylist(tracks.map((t) => t.id));
       haptic.success();
       toast(
         added === tracks.length
@@ -352,6 +359,32 @@ export function EditTrackSheet({
   const { toast } = useToast();
   const [draft, setDraft] = useState<api.TrackEdit>({});
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Artwork saves on pick rather than on Save.
+   *
+   * It is a separate endpoint — the bytes go up as multipart while the three
+   * text fields go up as JSON — so pretending the two share one button would
+   * mean a Save that half-succeeds and a sheet that cannot say which half. The
+   * picture changing under the picker the moment you choose is also the only
+   * confirmation an image upload actually needs.
+   */
+  const pickArtwork = async (file: File | undefined) => {
+    if (!file || !track) return;
+    setUploading(true);
+    try {
+      putTrack(await api.uploadCover(track.id, file));
+      haptic.success();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not set that artwork");
+    } finally {
+      setUploading(false);
+      // Cleared so that picking the same file twice still fires a change.
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   const value = (field: "title" | "artist" | "album") =>
     (draft[field] as string | null | undefined) ?? track?.[field] ?? "";
@@ -392,6 +425,58 @@ export function EditTrackSheet({
           padding: "0 8px 12px",
         }}
       >
+        {track ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 3,
+            }}
+          >
+            <Cover
+              trackId={track.id}
+              hasCover={track.has_cover}
+              size={56}
+              radius={12}
+              style={{ opacity: uploading ? 0.5 : 1 }}
+            />
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 6,
+              }}
+            >
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,.52)" }}>
+                Artwork
+              </div>
+              <GhostButton
+                icon={ImageIcon}
+                height={34}
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+              >
+                {uploading
+                  ? "Uploading…"
+                  : track.has_cover
+                    ? "Replace"
+                    : "Choose an image"}
+              </GhostButton>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={(e) => void pickArtwork(e.target.files?.[0])}
+              style={{ display: "none" }}
+            />
+          </div>
+        ) : null}
+
         {(["title", "artist", "album"] as const).map((field) => (
           <label key={field} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <span style={{ fontSize: 10.5, color: "rgba(255,255,255,.52)" }}>

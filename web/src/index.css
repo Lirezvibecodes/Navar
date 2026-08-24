@@ -101,6 +101,14 @@
   --tg-safe-bottom: 0px;
   --tg-content-top: 0px;
 
+  /* The two are additive, and nothing in the app may use either on its own.
+     In the ordinary Mini App the viewport already starts below the status bar,
+     so --tg-safe-top is 0 and this is just Telegram's header. In fullscreen the
+     viewport starts at the very top of the display: the device inset is the
+     status bar and the content inset is the floating close/menu buttons, and a
+     top bar that reserves only one of them ends up underneath the other. */
+  --nav-top-inset: calc(var(--tg-safe-top) + var(--tg-content-top));
+
   /* Height of the fixed furniture at the bottom of the screen, so every
      scrollable view can reserve exactly the right amount of room. The player
      value flips from 0 the first time something starts playing, and every
@@ -120,6 +128,23 @@
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Nothing in the app is selectable text. This is a native app that happens to
+   be rendered by a WebView: a long press on a track title is how you enter
+   selection mode, and the browser answering it with a text caret and a
+   Copy/Share bubble is the single most obvious tell that this is a web page.
+   The fields you actually type into opt back in below. */
+* {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 html,
@@ -228,7 +253,7 @@ body {
   gap: 12px;
   height: var(--nav-topbar-h);
   padding: 0 14px;
-  padding-top: var(--tg-content-top);
+  padding-top: var(--nav-top-inset);
   box-sizing: content-box;
 }
 .nav-topbar::before {
@@ -278,10 +303,20 @@ body {
   display: none;
 }
 
-/* A horizontal shelf. Snaps so a half-shown tile does not sit under the edge. */
+/* A horizontal shelf. Snaps so a half-shown tile does not sit under the edge.
+
+   touch-action is the important line. Setting overflow-x alone makes the box a
+   scroll container on *both* axes — the other axis computes from `visible` to
+   `auto` — so a shelf silently accepts vertical drags and swallows them
+   without moving. The chip row is a full-width band across the top of every
+   screen, which is exactly where a thumb starts a downward flick, and that is
+   why those pages felt like they would not scroll. Restricting the shelf to
+   pan-x hands the vertical gesture back to the page behind it. */
 .nav-shelf {
   display: flex;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
   scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
@@ -297,9 +332,18 @@ body {
    square at the edge of the box. The padding is the room the glow needs and
    the negative margin gives it back to the layout, so the shelf still measures
    as if it were tight against its neighbours. */
+/* The room the active chip's glow needs, on all four sides, given back to the
+   layout as an exactly equal negative margin so the shelf still measures as if
+   it were tight against its neighbours.
+
+   The numbers come from the glow itself: `0 6px 22px` reaches 28px below the
+   chip and 22px to either side, and the old rule reserved nothing at all
+   horizontally, which is why the first and last chip were cut off square down
+   their outside edge. Sideways the bleed is capped at the screen gutter — past
+   that the screen's own clip takes over and no amount of padding helps. */
 .nav-shelf-bleed {
-  padding: 14px 0 20px;
-  margin: -14px 0 -18px;
+  padding: 24px 14px 30px;
+  margin: -24px -14px -30px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -328,6 +372,7 @@ body {
   --dur-state: 200ms; /* a control changing what it means */
   --dur-view: 300ms; /* a screen replacing another */
   --dur-focal: 460ms; /* the bar becoming the player */
+  --dur-tab: 340ms; /* one tab opening while another closes */
 }
 
 /* Every control gets the same press response. Telegram supplies the haptic;
@@ -361,6 +406,18 @@ button {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Two lines, then an ellipsis. For the labels under square and round tiles,
+   where the column is narrow enough that one line would cut most real names
+   off after a few characters. */
+.nav-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* --- The view stack ---------------------------------------------------------
@@ -496,10 +553,10 @@ button {
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   transition:
-    padding var(--dur-state) var(--ease),
-    background-color var(--dur-state) var(--ease),
-    border-color var(--dur-state) var(--ease),
-    box-shadow var(--dur-state) var(--ease),
+    padding var(--dur-tab) var(--ease),
+    background-color var(--dur-tab) var(--ease),
+    border-color var(--dur-tab) var(--ease),
+    box-shadow var(--dur-tab) var(--ease),
     transform var(--dur-tap) var(--ease-in),
     opacity var(--dur-tap) var(--ease-in);
 }
@@ -524,9 +581,9 @@ button {
   height: 44px;
   border-radius: 50%;
   transition:
-    background-color var(--dur-state) var(--ease),
-    color var(--dur-state) var(--ease),
-    box-shadow var(--dur-state) var(--ease);
+    background-color var(--dur-tab) var(--ease),
+    color var(--dur-tab) var(--ease),
+    box-shadow var(--dur-tab) var(--ease);
 }
 .nav-tab[aria-current="page"] .nav-tab-disc {
   background: var(--color-nav-action);
@@ -536,10 +593,21 @@ button {
 
 /* The 8px between the disc and the name is padding rather than the row's gap,
    so that it collapses with the label instead of leaving a permanent notch in
-   the inactive circle. */
+   the inactive circle.
+
+   That padding has to be animated to zero along with the width. max-width: 0
+   collapses the *content* box and nothing else, so an inactive tab was still
+   carrying 8px of padding it had no content for: the circle measured 60px
+   wide instead of 52 and its glyph sat 4px left of the middle. Every inactive
+   icon in the row was off-centre by exactly half the gap.
+
+   The name slides out of the disc rather than appearing beside it, and its
+   opacity finishes early so it is readable while the capsule is still
+   settling — which is what makes the switch read as one movement instead of a
+   width animation with text taped to it. */
 .nav-tab-label {
   max-width: 0;
-  padding-left: 8px;
+  padding-left: 0;
   opacity: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -547,13 +615,18 @@ button {
   font-size: 16px;
   font-weight: 500;
   letter-spacing: -0.01em;
+  transform: translate3d(-10px, 0, 0);
   transition:
-    max-width var(--dur-state) var(--ease),
-    opacity var(--dur-state) var(--ease);
+    max-width var(--dur-tab) var(--ease),
+    padding-left var(--dur-tab) var(--ease),
+    transform var(--dur-tab) var(--ease),
+    opacity calc(var(--dur-tab) * 0.55) var(--ease);
 }
 .nav-tab[aria-current="page"] .nav-tab-label {
   max-width: 120px;
+  padding-left: 8px;
   opacity: 1;
+  transform: none;
 }
 
 /* --- Bars ------------------------------------------------------------------ */

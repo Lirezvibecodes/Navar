@@ -28,6 +28,7 @@ export function TrackListScreen({
   art,
   name,
   subtitle,
+  note,
   tracks,
   loading = false,
   sourceKey,
@@ -42,6 +43,8 @@ export function TrackListScreen({
   art: ReactNode;
   name: string;
   subtitle: string;
+  /** A line under the header — a playlist owner's description. */
+  note?: ReactNode;
   tracks: Track[];
   loading?: boolean;
   sourceKey: string;
@@ -97,6 +100,8 @@ export function TrackListScreen({
             </div>
           </div>
         </div>
+
+        {note}
 
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
           <ActionButton

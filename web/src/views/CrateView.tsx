@@ -10,6 +10,7 @@ import {
   ChipRow,
   Empty,
   GhostButton,
+  Portal,
   Screen,
   Skeleton,
 } from "../components/ui";
@@ -353,50 +354,61 @@ function SelectionBar({
   onAdd: () => void;
   onRemove: () => void;
 }) {
+  // Portalled to the body. Every screen is rendered inside the view-transition
+  // wrapper, whose animation makes it a stacking context for as long as the
+  // fill-mode keeps the animation in effect — which is forever. Anything with a
+  // z-index inside it is therefore trapped below the bottom furniture, and this
+  // bar was being painted behind the nav bar rather than over it.
   return (
-    <div
-      className="nav-bar-in"
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: "calc(var(--nav-bottomnav-h) + var(--tg-safe-bottom))",
-        padding: "8px 12px 0",
-        zIndex: 40,
-      }}
-    >
+    <Portal>
       <div
-        className="nav-glass"
+        className="nav-bar-in"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          height: 58,
-          borderRadius: 29,
-          padding: "0 8px 0 14px",
+          position: "fixed",
+          left: 0,
+          right: 0,
+          // --nav-bottomnav-h is published from the nav's own offsetHeight and
+          // already carries the safe inset; adding it again lifts the bar by a
+          // whole home indicator.
+          bottom: "var(--nav-bottomnav-h)",
+          padding: "8px 12px 0",
+          zIndex: 40,
         }}
       >
-        <button
-          className="nav-press"
-          onClick={onCancel}
-          style={{ fontSize: 12.5, fontWeight: 600, minHeight: 44, flex: "none" }}
+        <div
+          className="nav-glass"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 58,
+            borderRadius: 29,
+            padding: "0 8px 0 14px",
+          }}
         >
-          {count === 0 ? "Cancel" : `${count} selected`}
-        </button>
-        <span style={{ flex: 1 }} />
-        <GhostButton onClick={onSelectAll} height={38} width={54}>
-          All
-        </GhostButton>
-        <GhostButton
-          icon={TrashIcon}
-          label="Remove selected"
-          width={44}
-          onClick={onRemove}
-        />
-        <ActionButton grow={false} onClick={onAdd} disabled={count === 0}>
-          Add to…
-        </ActionButton>
+          <button
+            className="nav-press"
+            onClick={onCancel}
+            style={{ fontSize: 12.5, fontWeight: 600, minHeight: 44, flex: "none" }}
+          >
+            {count === 0 ? "Cancel" : `${count} selected`}
+          </button>
+          <span style={{ flex: 1 }} />
+          <GhostButton onClick={onSelectAll} height={38} width={54}>
+            All
+          </GhostButton>
+          <GhostButton
+            icon={TrashIcon}
+            label="Remove selected"
+            width={44}
+            onClick={onRemove}
+            disabled={count === 0}
+          />
+          <ActionButton grow={false} onClick={onAdd} disabled={count === 0}>
+            Add to…
+          </ActionButton>
+        </div>
       </div>
-    </div>
+    </Portal>
   );
 }

@@ -11,7 +11,7 @@ import {
   SectionHeader,
   Skeleton,
 } from "../components/ui";
-import { ChevronRightIcon, CrateIcon } from "../icons";
+import { CrateIcon } from "../icons";
 import {
   albumsOf,
   artistsOf,
@@ -65,6 +65,16 @@ export function LibraryView({ nav }: { nav: Navigation }) {
   return (
     <Screen>
       <ChipRow>
+        {/* The Crate is a destination rather than a filter, which is why it
+            carries a glyph and the three filters do not. It used to be a card
+            below this row; a card the width of the screen made "everything you
+            own" look like a bigger thing than the library it is the whole of. */}
+        <Chip
+          label="The Crate"
+          icon={CrateIcon}
+          active={false}
+          onClick={() => nav.push({ type: "crate", filter: "all" })}
+        />
         <Chip label="All" active={tab === "all"} onClick={() => setTab("all")} />
         <Chip
           label="Albums"
@@ -82,56 +92,12 @@ export function LibraryView({ nav }: { nav: Navigation }) {
 
       {tab === "all" ? (
         <>
-          <button
-            className="nav-press nav-card nav-rise"
-            onClick={() => {
-              haptic.tap();
-              nav.push({ type: "crate", filter: "all" });
-            }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              width: "100%",
-              marginTop: 14,
-              padding: 11,
-              borderRadius: 16,
-              textAlign: "left",
-            }}
-          >
-            <span
-              style={{
-                width: 52,
-                height: 52,
-                borderRadius: 12,
-                flex: "none",
-                display: "grid",
-                placeItems: "center",
-                color: "#0A0A0A",
-                background: "linear-gradient(150deg,#DFFC8E,#89AEFF)",
-              }}
-            >
-              <CrateIcon size={24} />
-            </span>
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span className="nav-clip" style={{ display: "block", fontSize: 14.5 }}>
-                The Crate
-              </span>
-              <span
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  color: "rgba(255,255,255,.52)",
-                  marginTop: 2,
-                }}
-              >
-                Everything you own · {pluralise(tracks.length, "track")}
-              </span>
-            </span>
-            <ChevronRightIcon size={16} style={{ color: "rgba(255,255,255,.35)" }} />
-          </button>
-
-          <SectionHeader title="Playlists" action="+ New" onAction={() => setNaming(true)} />
+          <SectionHeader
+            title="Playlists"
+            action="+ New"
+            onAction={() => setNaming(true)}
+            spaceAbove={14}
+          />
           <Grid
             items={playlists.map((p) => ({
               key: p.id,
@@ -153,7 +119,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
             body="Albums appear once your tracks carry an album tag. Edit any track to add one."
           />
         ) : (
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 16 }}>
             <Grid
               items={albums.map((a) => ({
                 key: a.name,
@@ -172,7 +138,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
           body="Artists appear once your tracks carry an artist tag."
         />
       ) : (
-        <div style={{ marginTop: 14 }}>
+        <div style={{ marginTop: 16 }}>
           <Circles artists={artists} nav={nav} wrap />
         </div>
       )}
@@ -187,6 +153,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
     </Screen>
   );
 }
+
 
 /**
  * The square tiles: playlists and albums are the same shape and the same tap.
@@ -223,7 +190,16 @@ function Grid({
             haptic.tap();
             nav.push(item.to);
           }}
-          style={{ "--i": i, textAlign: "left" } as React.CSSProperties}
+          style={
+            {
+              "--i": i,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              textAlign: "left",
+              minWidth: 0,
+            } as React.CSSProperties
+          }
         >
           <CollectionArt
             name={item.name}
@@ -233,12 +209,19 @@ function Grid({
             fill
           />
           <span
-            className="nav-clip"
-            style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginTop: 7 }}
+            className="nav-clamp-2"
+            style={{
+              fontSize: 12.5,
+              fontWeight: 600,
+              lineHeight: 1.25,
+              marginTop: 8,
+            }}
           >
             {item.name}
           </span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,.5)" }}>
+          <span
+            style={{ fontSize: 11, color: "rgba(255,255,255,.5)", marginTop: 1 }}
+          >
             {item.caption}
           </span>
         </button>
@@ -247,6 +230,15 @@ function Grid({
   );
 }
 
+/**
+ * Artists, as circles.
+ *
+ * The tile is 78px wide for a 64px circle, and the name below it is allowed two
+ * lines. At 60px with a single ellipsised line almost every real artist name
+ * was cut to three or four characters, which is not a label — it is a shape
+ * that happens to contain letters. Two lines of 10.5px holds around twenty
+ * characters, and the clamp only bites on the genuinely long ones.
+ */
 function Circles({
   artists,
   nav,
@@ -267,25 +259,31 @@ function Circles({
       style={
         {
           "--i": i,
-          width: 60,
+          width: 78,
           flex: "none",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 5,
+          gap: 7,
         } as React.CSSProperties
       }
     >
       <CollectionArt
         name={artist.name}
         coverTrackId={artist.cover_track_id}
-        size={52}
-        radius={26}
+        size={64}
+        radius={32}
         round
       />
       <span
-        className="nav-clip"
-        style={{ fontSize: 10.5, maxWidth: "100%", textAlign: "center" }}
+        className="nav-clamp-2"
+        style={{
+          fontSize: 10.5,
+          lineHeight: 1.25,
+          width: "100%",
+          textAlign: "center",
+          color: "rgba(255,255,255,.82)",
+        }}
       >
         {artist.name}
       </span>
@@ -294,13 +292,21 @@ function Circles({
 
   if (wrap) {
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(78px, 1fr))",
+          justifyItems: "center",
+          rowGap: 18,
+          columnGap: 8,
+        }}
+      >
         {artists.map(tile)}
       </div>
     );
   }
   return (
-    <div className="nav-shelf" style={{ gap: 12 }}>
+    <div className="nav-shelf nav-shelf-bleed" style={{ gap: 10 }}>
       {artists.map(tile)}
     </div>
   );

@@ -132,10 +132,17 @@ export function createPlaylist(name: string): Promise<Playlist> {
   });
 }
 
-export function renamePlaylist(id: string, name: string): Promise<Playlist> {
+/**
+ * Rename a playlist, rewrite its description, or both. An omitted field is
+ * left alone; `description: null` clears it.
+ */
+export function updatePlaylist(
+  id: string,
+  fields: { name?: string; description?: string | null }
+): Promise<Playlist> {
   return request<Playlist>(`/api/playlists/${id}`, {
     method: "PATCH",
-    body: json({ name }),
+    body: json(fields),
   });
 }
 

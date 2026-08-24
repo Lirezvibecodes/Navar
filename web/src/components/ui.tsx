@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { haptic } from "../telegram";
 import type { IconProps } from "../icons";
@@ -47,7 +48,7 @@ export function Screen({
         flexDirection: "column",
         gap,
         padding: "0 14px",
-        paddingTop: "calc(var(--nav-topbar-h) + var(--tg-content-top) + 8px)",
+        paddingTop: "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 8px)",
         paddingBottom:
           "calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + 16px)",
       }}
@@ -193,11 +194,14 @@ export function Chip({
   count,
   active,
   onClick,
+  icon: Icon,
 }: {
   label: string;
   count?: number;
   active: boolean;
   onClick: () => void;
+  /** A chip that goes somewhere rather than filtering carries its own glyph. */
+  icon?: (props: IconProps) => ReactNode;
 }) {
   return (
     <button
@@ -208,8 +212,11 @@ export function Chip({
         onClick();
       }}
       style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
         height: 32,
-        padding: "0 13px",
+        padding: Icon ? "0 13px 0 11px" : "0 13px",
         borderRadius: 16,
         flex: "none",
         fontSize: 12,
@@ -222,10 +229,13 @@ export function Chip({
           : undefined,
       }}
     >
-      {label}
-      {count == null ? null : (
-        <span style={{ opacity: active ? 0.55 : 0.5 }}> · {count}</span>
-      )}
+      {Icon ? <Icon size={14} style={{ flex: "none" }} /> : null}
+      <span>
+        {label}
+        {count == null ? null : (
+          <span style={{ opacity: active ? 0.55 : 0.5 }}> · {count}</span>
+        )}
+      </span>
     </button>
   );
 }
@@ -302,6 +312,7 @@ export function GhostButton({
   label,
   width,
   height = 38,
+  disabled,
 }: {
   children?: ReactNode;
   onClick: () => void;
@@ -309,10 +320,12 @@ export function GhostButton({
   label?: string;
   width?: number;
   height?: number;
+  disabled?: boolean;
 }) {
   return (
     <button
       aria-label={label}
+      disabled={disabled}
       className="nav-press nav-glass"
       onClick={() => {
         haptic.tap();
@@ -330,6 +343,7 @@ export function GhostButton({
         color: "rgba(255,255,255,.82)",
         fontSize: 13,
         fontWeight: 600,
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       {Icon ? <Icon size={15} /> : null}
@@ -449,6 +463,41 @@ export function Skeleton({ rows = 6 }: { rows?: number }) {
   );
 }
 
+// --- Overlays ----------------------------------------------------------------
+
+/**
+ * Anything that has to sit above the whole app, rendered into `<body>`.
+ *
+ * z-index alone was never going to be enough here. Every screen is wrapped in
+ * the view-stack animation, and an element with an animation on `opacity` or
+ * `transform` is a stacking context for as long as that animation is in
+ * effect — which, with `animation-fill-mode: both`, is forever. So a sheet at
+ * z-index 70 rendered inside a screen was not competing with the bottom nav at
+ * all: it was sealed inside a container that the nav's own z-index of 30 paints
+ * straight over. That is why the lower half of every menu was untappable, and
+ * why the Crate's selection bar looked like it had no actions — it was there,
+ * behind the navbar, the whole time.
+ *
+ * Leaving the DOM is the fix. Nothing inside a screen can be raised above the
+ * furniture without also raising the screen, and the screen has to stay
+ * underneath: content passing behind the glass is the whole layout.
+ */
+export function Portal({ children }: { children: ReactNode }) {
+  const [host] = useState(() =>
+    typeof document === "undefined" ? null : document.createElement("div")
+  );
+
+  useEffect(() => {
+    if (!host) return;
+    document.body.appendChild(host);
+    return () => {
+      host.remove();
+    };
+  }, [host]);
+
+  return host ? createPortal(children, host) : null;
+}
+
 // --- Sheets ------------------------------------------------------------------
 
 /**
@@ -489,64 +538,80 @@ export function Sheet({
   if (!mounted) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 70,
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "flex-end",
-      }}
-    >
-      <button
-        aria-label="Close"
-        onClick={onClose}
-        className="nav-fade"
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "rgba(0,0,0,.55)",
-          opacity: closing ? 0 : 1,
-          transition: "opacity 200ms var(--ease)",
-        }}
-      />
+    <Portal>
       <div
-        role="dialog"
-        aria-modal="true"
-        className={`nav-sheet ${closing ? "" : "nav-rise"}`}
         style={{
-          position: "relative",
-          padding: "10px 8px",
-          paddingBottom: "calc(var(--tg-safe-bottom) + 10px)",
-          transform: closing ? "translateY(100%)" : undefined,
-          transition: closing ? "transform 200ms var(--ease-in)" : undefined,
+          position: "fixed",
+          inset: 0,
+          zIndex: 70,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-end",
         }}
       >
-        <div
+        <button
+          aria-label="Close"
+          onClick={onClose}
+          className="nav-fade"
           style={{
-            width: 38,
-            height: 4,
-            borderRadius: 2,
-            background: "rgba(255,255,255,.22)",
-            margin: "2px auto 10px",
+            position: "absolute",
+            inset: 0,
+            background: "rgba(0,0,0,.55)",
+            opacity: closing ? 0 : 1,
+            transition: "opacity 200ms var(--ease)",
           }}
         />
-        {title ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className={`nav-sheet ${closing ? "" : "nav-rise"}`}
+          style={{
+            position: "relative",
+            display: "flex",
+            flexDirection: "column",
+            // A sheet with nine items and a text field can be taller than the
+            // room above the fold. Capping it against the top inset and letting
+            // the items scroll is what keeps the last one reachable — it used
+            // to run off the top of the screen instead.
+            maxHeight: "calc(100% - var(--nav-top-inset) - 44px)",
+            padding: "10px 8px",
+            // The device inset plus a thumb's worth of room. The nav and the
+            // player are underneath this sheet now rather than on top of it,
+            // so nothing here has to dodge them.
+            paddingBottom: "calc(var(--tg-safe-bottom) + 14px)",
+            transform: closing ? "translateY(100%)" : undefined,
+            transition: closing ? "transform 200ms var(--ease-in)" : undefined,
+          }}
+        >
           <div
-            className="nav-clip"
             style={{
-              fontSize: 11,
-              color: "rgba(255,255,255,.52)",
-              padding: "0 14px 8px",
+              width: 38,
+              height: 4,
+              borderRadius: 2,
+              flex: "none",
+              background: "rgba(255,255,255,.22)",
+              margin: "2px auto 10px",
             }}
-          >
-            {title}
+          />
+          {title ? (
+            <div
+              className="nav-clip"
+              style={{
+                flex: "none",
+                fontSize: 11,
+                color: "rgba(255,255,255,.52)",
+                padding: "0 14px 8px",
+              }}
+            >
+              {title}
+            </div>
+          ) : null}
+          <div className="nav-scroll" style={{ minHeight: 0 }}>
+            {children}
           </div>
-        ) : null}
-        {children}
+        </div>
       </div>
-    </div>
+    </Portal>
   );
 }
 

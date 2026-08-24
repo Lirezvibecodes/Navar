@@ -25,6 +25,14 @@ function readTrackIds(body: unknown): string[] | null {
 import { getTelegramFileDownloadUrl } from "../telegram-files";
 import { asyncHandler } from "../asyncHandler";
 
+/*
+ * The cover endpoint serves these bytes back under the mime type they arrived
+ * with, so the type is an allowlist rather than a hint: without it an "image"
+ * of type text/html or image/svg+xml is a script hosted on the API origin,
+ * fetched with a session token in the query string.
+ */
+const COVER_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -209,7 +217,17 @@ export function tracksRouter(): Router {
         return;
       }
 
-      const updated = await updateTrackCover(req.params.id, ownerId, file.buffer, file.mimetype);
+      if (!COVER_TYPES.has(file.mimetype)) {
+        res.status(400).json({ error: "Cover must be a JPEG, PNG, WebP or GIF" });
+        return;
+      }
+
+      const updated = await updateTrackCover(
+        req.params.id,
+        ownerId,
+        file.buffer,
+        file.mimetype
+      );
       if (!updated) {
         res.status(404).json({ error: "Not found" });
         return;

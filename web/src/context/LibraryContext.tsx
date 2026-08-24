@@ -37,6 +37,18 @@ interface LibraryApi {
   putTrack: (track: Track) => void;
   /** Drops rows from local state; the caller has already told the server. */
   dropTracks: (ids: string[]) => void;
+  /**
+   * Records that these tracks now sit in at least one playlist.
+   *
+   * `in_playlist` is what the Crate's All/Unsorted split reads, and it is
+   * computed by the server on the library listing — so adding a track to a
+   * playlist used to leave it sitting in Unsorted until the next reload, which
+   * is the opposite of what the screen is for. Only the true direction is
+   * offered: this client cannot know whether removing a track from one playlist
+   * has taken it out of every playlist, and guessing would file a track back
+   * under Unsorted while it is still in two others.
+   */
+  markInPlaylist: (ids: string[]) => void;
   putPlaylist: (playlist: Playlist) => void;
   dropPlaylist: (id: string) => void;
 
@@ -92,6 +104,13 @@ export function LibraryProvider({
     setTracks((rows) => rows.filter((t) => !gone.has(t.id)));
   }, []);
 
+  const markInPlaylist = useCallback((ids: string[]) => {
+    const filed = new Set(ids);
+    setTracks((rows) =>
+      rows.map((t) => (filed.has(t.id) ? { ...t, in_playlist: true } : t))
+    );
+  }, []);
+
   const putPlaylist = useCallback((playlist: Playlist) => {
     setPlaylists((rows) => {
       const exists = rows.some((p) => p.id === playlist.id);
@@ -135,6 +154,7 @@ export function LibraryProvider({
       reload,
       putTrack,
       dropTracks,
+      markInPlaylist,
       putPlaylist,
       dropPlaylist,
       setFavorite,
@@ -149,6 +169,7 @@ export function LibraryProvider({
       reload,
       putTrack,
       dropTracks,
+      markInPlaylist,
       putPlaylist,
       dropPlaylist,
       setFavorite,

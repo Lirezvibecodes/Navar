@@ -142,7 +142,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         display: "flex",
         flexDirection: "column",
         background: "#030303",
-        paddingTop: "var(--tg-content-top)",
+        paddingTop: "var(--nav-top-inset)",
         paddingBottom: "var(--tg-safe-bottom)",
         ...focalRiseVars(),
       }}

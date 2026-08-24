@@ -11,9 +11,12 @@ import {
   listPlaylistTracksForListener,
   playlistVisibleToRequester,
   removePlaylistTrack,
-  renamePlaylist,
+  updatePlaylist,
   setPlaylistCover,
 } from "../repo";
+
+/** The cap the database enforces too — see migration 008. */
+const DESCRIPTION_MAX = 500;
 
 /** Reads a `{ trackIds: [...] }` body, rejecting anything that is not a list of strings. */
 function readTrackIds(body: unknown): string[] | null {
@@ -51,19 +54,55 @@ export function playlistsRouter(): Router {
     })
   );
 
+  /**
+   * A partial update: send the name, the description, or both.
+   *
+   * An absent key leaves the field alone; a null or empty description clears
+   * it. The name still cannot be blanked, because a playlist with no name is
+   * unreachable in every list that draws it.
+   */
   router.patch(
     "/:id",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const { name } = req.body ?? {};
-      if (typeof name !== "string" || name.trim().length === 0) {
-        res.status(400).json({ error: "Missing name" });
-        return;
+      const body = (req.body ?? {}) as {
+        name?: unknown;
+        description?: unknown;
+      };
+      const fields: { name?: string; description?: string | null } = {};
+
+      if (body.name !== undefined) {
+        if (typeof body.name !== "string" || body.name.trim().length === 0) {
+          res.status(400).json({ error: "Missing name" });
+          return;
+        }
+        fields.name = body.name.trim();
       }
-      const playlist = await renamePlaylist(
+
+      if (body.description !== undefined) {
+        if (body.description === null) {
+          fields.description = null;
+        } else if (typeof body.description !== "string") {
+          res.status(400).json({ error: "Description must be text" });
+          return;
+        } else {
+          const text = body.description.trim();
+          if (text.length > DESCRIPTION_MAX) {
+            res
+              .status(400)
+              .json({ error: `Description must be ${DESCRIPTION_MAX} characters or fewer` });
+            return;
+          }
+          // Empty is the same as never having written one, and storing "" would
+          // make every reader test for two kinds of nothing.
+          fields.description = text.length === 0 ? null : text;
+        }
+      }
+
+      const playlist = await updatePlaylist(
         req.params.id,
         (req as AuthedRequest).telegramUserId,
-        name.trim()
+        fields
       );
       if (!playlist) {
         res.status(404).json({ error: "Not found" });
@@ -77,9 +116,9 @@ export function playlistsRouter(): Router {
    * Pin one of the playlist's own tracks as its cover, or send null to hand
    * the choice back to the playlist.
    *
-   * Its own route rather than a field on PATCH /:id, because rename rejects a
-   * missing name and a caller changing only the picture should not have to
-   * resend one.
+   * Its own route rather than a field on PATCH /:id: the cover is a reference
+   * to another row that has to be checked against the playlist's own tracks,
+   * which is a different kind of write from editing two text fields.
    */
   router.put(
     "/:id/cover",

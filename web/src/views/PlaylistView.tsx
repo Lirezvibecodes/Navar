@@ -5,7 +5,14 @@ import { CollectionArt, Cover } from "../components/PixelArt";
 import { NameSheet } from "../components/NameSheet";
 import { TrackListScreen } from "../components/TrackListScreen";
 import { Empty, GhostButton, Sheet, SheetDivider, SheetItem } from "../components/ui";
-import { CheckIcon, DotsIcon, EditIcon, ImageIcon, TrashIcon } from "../icons";
+import {
+  CheckIcon,
+  DotsIcon,
+  EditIcon,
+  ImageIcon,
+  NoteIcon,
+  TrashIcon,
+} from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { pluralise } from "../lib/format";
@@ -28,6 +35,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [describing, setDescribing] = useState(false);
 
   const playlist = playlists.find((p) => p.id === id);
 
@@ -51,10 +59,25 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
     const before = playlist;
     putPlaylist({ ...playlist, name });
     try {
-      putPlaylist(await api.renamePlaylist(id, name));
+      putPlaylist(await api.updatePlaylist(id, { name }));
     } catch (err) {
       putPlaylist(before);
       toast(err instanceof Error ? err.message : "Could not rename that");
+    }
+  };
+
+  // Empty means "no description", not an empty one: the server stores null
+  // either way, so saving a cleared field is how you delete what you wrote.
+  const describe = async (text: string) => {
+    if (!playlist) return;
+    const before = playlist;
+    const description = text.length === 0 ? null : text;
+    putPlaylist({ ...playlist, description });
+    try {
+      putPlaylist(await api.updatePlaylist(id, { description }));
+    } catch (err) {
+      putPlaylist(before);
+      toast(err instanceof Error ? err.message : "Could not save that");
     }
   };
 
@@ -120,6 +143,22 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
         }
         name={playlist?.name ?? "Playlist"}
         subtitle={pluralise(playlist?.track_count ?? tracks.length, "track")}
+        note={
+          playlist?.description ? (
+            <p
+              className="nav-rise"
+              style={{
+                marginTop: 12,
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                color: "rgba(255,255,255,.62)",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {playlist.description}
+            </p>
+          ) : null
+        }
         tracks={tracks}
         loading={loading}
         sourceKey={`playlist:${id}`}
@@ -145,6 +184,14 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
           onClick={() => {
             setMenuOpen(false);
             setRenaming(true);
+          }}
+        />
+        <SheetItem
+          icon={NoteIcon}
+          label={playlist?.description ? "Edit description" : "Add a description"}
+          onClick={() => {
+            setMenuOpen(false);
+            setDescribing(true);
           }}
         />
         <SheetItem
@@ -179,6 +226,18 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
         initial={playlist?.name ?? ""}
         onSubmit={(name) => void rename(name)}
         onClose={() => setRenaming(false)}
+      />
+
+      <NameSheet
+        open={describing}
+        title="Playlist description"
+        initial={playlist?.description ?? ""}
+        placeholder="What is this playlist for?"
+        multiline
+        maxLength={500}
+        allowEmpty
+        onSubmit={(text) => void describe(text)}
+        onClose={() => setDescribing(false)}
       />
     </>
   );
