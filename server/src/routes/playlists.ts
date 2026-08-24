@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
@@ -7,16 +8,31 @@ import {
   removePlaylistTracksBulk,
   createPlaylist,
   deletePlaylist,
+  getPlaylistCover,
   listPlaylists,
   listPlaylistTracksForListener,
   playlistVisibleToRequester,
   removePlaylistTrack,
   updatePlaylist,
+  updatePlaylistCover,
   setPlaylistCover,
 } from "../repo";
+import { serveCover, storeCover } from "./covers";
 
 /** The cap the database enforces too — see migration 008. */
 const DESCRIPTION_MAX = 500;
+
+/**
+ * The same allowlist and the same ceiling the track cover upload uses. A
+ * playlist's picture and a track's picture take the same path out to the cover
+ * channel, so they must not disagree about what is allowed down it.
+ */
+const COVER_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 /** Reads a `{ trackIds: [...] }` body, rejecting anything that is not a list of strings. */
 function readTrackIds(body: unknown): string[] | null {
@@ -262,6 +278,84 @@ export function playlistsRouter(): Router {
         return;
       }
       res.status(204).end();
+    })
+  );
+
+  /**
+   * A playlist's own picture.
+   *
+   * A read path, scoped by whether the requester may see the playlist at all
+   * rather than by ownership: a shared playlist showing a blank square to the
+   * person it was shared with would be a strange thing to have shared.
+   */
+  router.get(
+    "/:id/artwork",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const visible = await playlistVisibleToRequester(
+        req.params.id,
+        (req as AuthedRequest).telegramUserId
+      );
+      if (!visible) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      await serveCover(await getPlaylistCover(req.params.id), req, res);
+    })
+  );
+
+  router.post(
+    "/:id/artwork",
+    requireAuth,
+    upload.single("cover"),
+    asyncHandler(async (req, res) => {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: "Missing cover file" });
+        return;
+      }
+      if (!COVER_TYPES.has(file.mimetype)) {
+        res.status(400).json({ error: "Cover must be a JPEG, PNG, WebP or GIF" });
+        return;
+      }
+
+      const stored = await storeCover(file.buffer, file.mimetype);
+      // A playlist cover is only ever a channel photo. There is no bytes column
+      // on playlists to fall back into, so a channel that would not take the
+      // picture is an honest failure rather than a silently dropped upload.
+      if (stored.kind !== "telegram") {
+        res.status(503).json({ error: "Could not store the cover right now" });
+        return;
+      }
+
+      const updated = await updatePlaylistCover(
+        req.params.id,
+        (req as AuthedRequest).telegramUserId,
+        stored.fileId
+      );
+      if (!updated) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(updated);
+    })
+  );
+
+  /** Clears the picture, so the playlist goes back to choosing one for itself. */
+  router.delete(
+    "/:id/artwork",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const updated = await updatePlaylistCover(
+        req.params.id,
+        (req as AuthedRequest).telegramUserId,
+        null
+      );
+      if (!updated) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(updated);
     })
   );
 

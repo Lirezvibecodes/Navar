@@ -56,4 +56,10 @@ export interface Playlist {
    */
   track_count?: number;
   cover_track_id?: string | null;
+  /**
+   * True when the owner has given the playlist a picture of its own, which
+   * outranks cover_track_id. The image is fetched from the playlist's cover
+   * endpoint rather than a track's.
+   */
+  has_cover?: boolean;
 }

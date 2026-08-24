@@ -103,6 +103,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
               key: p.id,
               name: p.name,
               cover: p.cover_track_id,
+              art: api.playlistArtworkUrl(p),
               caption: pluralise(p.track_count ?? 0, "track"),
               to: { type: "playlist", id: p.id } as View,
             }))}
@@ -171,7 +172,16 @@ function Grid({
   items,
   nav,
 }: {
-  items: { key: string; name: string; cover?: string | null; caption: string; to: View }[];
+  items: {
+    key: string;
+    name: string;
+    /** A track id whose artwork stands in for the tile. */
+    cover?: string | null;
+    /** A picture the item owns outright — a playlist cover. Wins over `cover`. */
+    art?: string | null;
+    caption: string;
+    to: View;
+  }[];
   nav: Navigation;
 }) {
   return (
@@ -204,6 +214,7 @@ function Grid({
           <CollectionArt
             name={item.name}
             coverTrackId={item.cover}
+            src={item.art}
             size={112}
             radius={13}
             fill

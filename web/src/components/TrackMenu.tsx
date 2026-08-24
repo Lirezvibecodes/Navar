@@ -327,6 +327,7 @@ export function AddToPlaylistSheet({
             <CollectionArt
               name={playlist.name}
               coverTrackId={playlist.cover_track_id}
+              src={api.playlistArtworkUrl(playlist)}
               size={36}
               radius={8}
             />

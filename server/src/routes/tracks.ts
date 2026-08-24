@@ -23,6 +23,7 @@ function readTrackIds(body: unknown): string[] | null {
   return ids as string[];
 }
 import { getTelegramFileDownloadUrl } from "../telegram-files";
+import { serveCover, storeCover } from "./covers";
 import { asyncHandler } from "../asyncHandler";
 
 /*
@@ -164,14 +165,7 @@ export function tracksRouter(): Router {
         return;
       }
 
-      const cover = await getTrackCover(track.id);
-      if (!cover) {
-        res.status(404).json({ error: "Not found" });
-        return;
-      }
-
-      res.setHeader("Content-Type", cover.coverMimeType ?? "image/jpeg");
-      res.send(cover.coverImage);
+      await serveCover(await getTrackCover(track.id), req, res);
     })
   );
 
@@ -225,8 +219,7 @@ export function tracksRouter(): Router {
       const updated = await updateTrackCover(
         req.params.id,
         ownerId,
-        file.buffer,
-        file.mimetype
+        await storeCover(file.buffer, file.mimetype)
       );
       if (!updated) {
         res.status(404).json({ error: "Not found" });

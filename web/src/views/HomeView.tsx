@@ -203,6 +203,7 @@ function PlaylistCard({
         <CollectionArt
           name={playlist.name}
           coverTrackId={playlist.cover_track_id}
+          src={api.playlistArtworkUrl(playlist)}
           size={CARD}
           radius={14}
         />

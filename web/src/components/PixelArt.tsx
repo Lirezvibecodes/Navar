@@ -86,12 +86,15 @@ export function Cover({
 }
 
 /**
- * The square for a playlist, album or artist: the artwork of a track inside
- * it, or the pattern seeded on the collection's own name.
+ * The square for a playlist, album or artist: an image of its own if it has
+ * one, else the artwork of a track inside it, else the pattern seeded on the
+ * collection's own name.
  */
 export function CollectionArt({
   name,
   coverTrackId,
+  /** A picture belonging to the collection itself. Wins over coverTrackId. */
+  src,
   size,
   radius,
   round,
@@ -101,12 +104,14 @@ export function CollectionArt({
 }: {
   name: string;
   coverTrackId: string | null | undefined;
+  src?: string | null;
   size: number;
   radius: number;
   round?: boolean;
   fill?: boolean;
   className?: string;
 }) {
+  const art = src ?? (coverTrackId ? trackCoverUrl(coverTrackId) : null);
   return (
     <div
       className={className}
@@ -125,7 +130,7 @@ export function CollectionArt({
         ...pixelPattern(name, size),
       }}
     >
-      {coverTrackId ? <ArtImage src={trackCoverUrl(coverTrackId)} /> : null}
+      {art ? <ArtImage src={art} /> : null}
     </div>
   );
 }

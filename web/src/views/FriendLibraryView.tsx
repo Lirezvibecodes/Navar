@@ -108,6 +108,7 @@ export function FriendLibraryView({
               <CollectionArt
                 name={playlist.name}
                 coverTrackId={playlist.cover_track_id}
+                src={api.playlistArtworkUrl(playlist)}
                 size={46}
                 radius={10}
               />

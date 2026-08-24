@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { CollectionArt, Cover } from "../components/PixelArt";
@@ -16,6 +16,7 @@ import {
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { pluralise } from "../lib/format";
+import { haptic } from "../telegram";
 import type { Track } from "../types";
 
 /**
@@ -35,6 +36,8 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [describing, setDescribing] = useState(false);
 
   const playlist = playlists.find((p) => p.id === id);
@@ -98,6 +101,42 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
     }
   };
 
+  /**
+   * Give the playlist a picture of its own.
+   *
+   * Its own image outranks the pinned track below, which is the whole point:
+   * until now the only way to put an arbitrary picture on a playlist was to
+   * hide it on a track first. The image goes to the cover channel and the row
+   * keeps a file_id, exactly as a track's artwork does.
+   */
+  const uploadArtwork = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      putPlaylist(await api.uploadPlaylistArtwork(id, file));
+      haptic.success();
+      setPicking(false);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not set that picture");
+    } finally {
+      setUploading(false);
+      // Cleared so that picking the same file twice still fires a change.
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  /** Drop the picture; the pinned track — or the first with art — takes over again. */
+  const clearArtwork = async () => {
+    setUploading(true);
+    try {
+      putPlaylist(await api.clearPlaylistArtwork(id));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not remove that picture");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const remove = async () => {
     if (!playlist) return;
     const before = playlist;
@@ -137,6 +176,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
           <CollectionArt
             name={playlist?.name ?? "Playlist"}
             coverTrackId={playlist?.cover_track_id ?? tracks[0]?.id}
+            src={playlist ? api.playlistArtworkUrl(playlist) : null}
             size={96}
             radius={16}
           />
@@ -197,7 +237,6 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
         <SheetItem
           icon={ImageIcon}
           label="Change cover"
-          disabled={tracks.length === 0}
           onClick={() => {
             setMenuOpen(false);
             setPicking(true);
@@ -213,6 +252,38 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
       </Sheet>
 
       <Sheet open={picking} onClose={() => setPicking(false)} title="Playlist cover">
+        {/*
+          Two ways to answer the same question, in precedence order: a picture
+          the playlist owns, and below the rule, one of its tracks' covers to
+          borrow. The upload sits first because it is the one that wins.
+        */}
+        <div style={{ display: "flex", gap: 8, padding: "2px 12px 10px" }}>
+          <GhostButton
+            icon={ImageIcon}
+            height={34}
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading
+              ? "Uploading…"
+              : playlist?.has_cover
+                ? "Replace image"
+                : "Upload an image"}
+          </GhostButton>
+          {playlist?.has_cover ? (
+            <GhostButton height={34} disabled={uploading} onClick={() => void clearArtwork()}>
+              Remove
+            </GhostButton>
+          ) : null}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={(e) => void uploadArtwork(e.target.files?.[0])}
+          style={{ display: "none" }}
+        />
+        <SheetDivider />
         <CoverPicker
           tracks={tracks}
           chosen={playlist?.cover_track_id ?? null}

@@ -8,7 +8,15 @@ import {
   IncomingAudio,
 } from "./audio-ingest";
 import { resolveCoverArt } from "./cover-art";
-import { ensureUser, listTracksMissingCover, updateTrackCover } from "./repo";
+import { logIngestedTrack, noteChannel, postCoverPhoto } from "./channels";
+import {
+  countTracksWithCoverBytes,
+  ensureUser,
+  listTracksMissingCover,
+  listTracksWithCoverBytes,
+  offloadTrackCover,
+  updateTrackCover,
+} from "./repo";
 import { refreshAvatar } from "./avatars";
 import { handleFriendInvite, registerFriendActions } from "./bot-friends";
 import {
@@ -70,11 +78,32 @@ export function createBot(): Telegraf | null {
   // Added to (or removed from) a group. Adding is where the crate is created
   // and the privacy disclosure is posted.
   bot.on("my_chat_member", async (ctx) => {
+    // Being made an admin of a channel is itself an introduction, so the role
+    // is claimed here as well as on a post — being added is the earliest the
+    // bot can possibly know, and it saves asking for a message that only
+    // exists to announce an id.
+    void noteChannel(ctx.myChatMember.chat).catch(() => {});
+
     try {
       await handleBotMembershipChange(bot, ctx.myChatMember);
     } catch (err) {
       console.error("[bot] group membership change failed:", err);
     }
+  });
+
+  /**
+   * How the media channels introduce themselves.
+   *
+   * The bot is an admin of both, so anything posted in either arrives here
+   * carrying the channel's id and title — which is everything needed to know
+   * which channel plays which role, without anyone copying a -100… number
+   * anywhere. Recorded on every post rather than only the first, so pointing
+   * the bot at a replacement channel takes one message and no deploy.
+   */
+  bot.on("channel_post", (ctx) => {
+    void noteChannel(ctx.chat).catch((err) => {
+      console.warn("[bot] channel note failed:", err);
+    });
   });
 
   bot.on(message("new_chat_members"), (ctx) => {
@@ -164,30 +193,52 @@ export function createBot(): Telegraf | null {
     if (!isPrivate(ctx)) return;
     const ownerId = ctx.from.id;
     try {
+      const stranded = await countTracksWithCoverBytes(ownerId);
       const missing = await listTracksMissingCover(ownerId);
-      if (missing.length === 0) {
+      if (missing.length === 0 && stranded === 0) {
         await ctx.reply("Every track in your library already has cover art.");
         return;
       }
 
+      // Housekeeping first: artwork already held in the database is moved out
+      // to the cover channel, which is where covers live now. Nothing about
+      // the picture changes, only where it is kept.
+      const moved = await offloadStoredCovers(ownerId);
+
       const batch = missing.slice(0, COVER_BACKFILL_BATCH);
-      await ctx.reply(`Looking for artwork on ${batch.length} track(s)…`);
+      if (batch.length > 0) {
+        await ctx.reply(`Looking for artwork on ${batch.length} track(s)…`);
+      }
 
       let found = 0;
       for (const track of batch) {
         const cover = await resolveCoverArt({ fileId: track.telegram_file_id });
         if (!cover) continue;
-        await updateTrackCover(track.id, ownerId, cover.image, cover.mimeType);
+        const fileId = await postCoverPhoto(cover.image, cover.mimeType);
+        await updateTrackCover(
+          track.id,
+          ownerId,
+          fileId
+            ? { kind: "telegram", fileId }
+            : { kind: "bytes", image: cover.image, mimeType: cover.mimeType }
+        );
         found++;
       }
 
       const remaining = missing.length - batch.length;
       await ctx.reply(
-        `Added cover art to ${found} of ${batch.length} track(s).` +
-          (found < batch.length
-            ? " The rest have no artwork embedded in the file — you can set those in the Mini App."
-            : "") +
-          (remaining > 0 ? `\n\n${remaining} still to check — run /covers again.` : ""),
+        [
+          moved > 0 ? `Moved ${moved} cover(s) into storage.` : null,
+          batch.length > 0
+            ? `Added cover art to ${found} of ${batch.length} track(s).` +
+              (found < batch.length
+                ? " The rest have no artwork embedded in the file — you can set those in the Mini App."
+                : "")
+            : null,
+          remaining > 0 ? `${remaining} still to check — run /covers again.` : null,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         miniAppKeyboard
       );
     } catch (err) {
@@ -243,11 +294,19 @@ export function createBot(): Telegraf | null {
     const label = audio.title ?? audio.fileName ?? "track";
 
     try {
-      const { session } = await ingestAudioMessage(
+      const { track, session } = await ingestAudioMessage(
         userId,
         ctx.from?.username,
         audio
       );
+
+      // The archive. Deliberately not awaited and deliberately outside what the
+      // user is told: a log line that did not get written is not a track that
+      // did not get added.
+      void logIngestedTrack(track, {
+        senderId: userId,
+        username: ctx.from?.username,
+      });
 
       // Inside a batch the running status line is the only response. A reply
       // per file is exactly the noise the batch commands exist to remove.
@@ -307,12 +366,18 @@ export function createBot(): Telegraf | null {
 
     try {
       const crate = await crateForGroup(botInstance, chat, from.id);
-      const { position } = await ingestGroupAudioMessage(
+      const { track, position } = await ingestGroupAudioMessage(
         from.id,
         from.username,
         audio,
         crate.playlistId
       );
+
+      void logIngestedTrack(track, {
+        senderId: from.id,
+        username: from.username,
+        groupTitle: chat.title,
+      });
 
       // Skipped when the crate was created by this very file: the disclosure
       // that just went out already says where audio goes.
@@ -331,6 +396,30 @@ export function createBot(): Telegraf | null {
           : `Couldn't add "${label}". Try posting it again.`
       );
     }
+  }
+
+  /**
+   * Moves covers that are still bytes in the database out to the cover
+   * channel, one batch per run.
+   *
+   * Same throttle as the artwork scan and for the same reason — each cover is
+   * an upload to Telegram — and the same resumability: only covers still held
+   * inline are selected, so an interrupted run picks up where it stopped.
+   * A cover the channel refuses is left exactly where it is.
+   */
+  async function offloadStoredCovers(ownerId: number): Promise<number> {
+    const stored = await listTracksWithCoverBytes(ownerId, COVER_BACKFILL_BATCH);
+    let moved = 0;
+    for (const row of stored) {
+      const fileId = await postCoverPhoto(
+        row.cover_image,
+        row.cover_mime_type ?? "image/jpeg"
+      );
+      if (!fileId) break;
+      await offloadTrackCover(row.id, fileId);
+      moved++;
+    }
+    return moved;
   }
 
   /** Records a failed file against the open batch, if there is one. */

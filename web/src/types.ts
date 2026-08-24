@@ -43,6 +43,8 @@ export interface Playlist {
   updated_at: string;
   track_count?: number;
   cover_track_id?: string | null;
+  /** Whether the owner gave it a picture of its own, which wins over the pinned track. */
+  has_cover?: boolean;
 }
 
 /** An album or an artist: a GROUP BY over tags, not a table. */

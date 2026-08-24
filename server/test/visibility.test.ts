@@ -65,6 +65,7 @@ async function seed(): Promise<void> {
       mimeType: "audio/mpeg",
       coverImage: null,
       coverMimeType: null,
+      coverFileId: null,
       originAdderId: OWNER,
     });
   }

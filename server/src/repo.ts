@@ -26,6 +26,12 @@ export interface NewTrack {
   coverImage: Buffer | null;
   coverMimeType: string | null;
   /**
+   * The cover as it lives in the cover channel. Set instead of the two above
+   * whenever the artwork made it out there, which is the normal case; the
+   * inline pair is what remains when the channel is unset or unreachable.
+   */
+  coverFileId: string | null;
+  /**
    * Who first brought this track into Navaar. Defaults to the owner on a fresh
    * ingest; the save path passes the source's value through instead, so a copy
    * of a copy still credits the person at the head of the chain.
@@ -33,18 +39,30 @@ export interface NewTrack {
   originAdderId: number | null;
 }
 
+/**
+ * A track has artwork if it is held either way round.
+ *
+ * Covers used to live only in cover_image, and now normally live as a file_id
+ * pointing at a photo in the cover channel — but not always, and not yet for
+ * everything. Both are real answers to "does this track have a picture", and
+ * spelling the pair out in one constant is what stops a future query from
+ * asking only one of them and hiding half the library's artwork.
+ */
+const HAS_COVER = `(cover_image IS NOT NULL OR cover_file_id IS NOT NULL)`;
+const HAS_COVER_T = `(t.cover_image IS NOT NULL OR t.cover_file_id IS NOT NULL)`;
+
 // Excludes cover_image so list/get/update calls never pull cover bytes over
 // the wire; the dedicated cover route/query below fetches those on demand.
 const TRACK_COLUMNS = `
   id, owner_telegram_id, title, artist, album, duration_seconds,
-  telegram_file_id, mime_type, (cover_image IS NOT NULL) AS has_cover,
+  telegram_file_id, mime_type, ${HAS_COVER} AS has_cover,
   origin_adder_id, favorited_at, (lyrics IS NOT NULL) AS has_lyrics, created_at
 `;
 
 // The same list, qualified, for the queries that join tracks to something else.
 const TRACK_COLUMNS_T = `
   t.id, t.owner_telegram_id, t.title, t.artist, t.album, t.duration_seconds,
-  t.telegram_file_id, t.mime_type, (t.cover_image IS NOT NULL) AS has_cover,
+  t.telegram_file_id, t.mime_type, ${HAS_COVER_T} AS has_cover,
   t.origin_adder_id, t.favorited_at, (t.lyrics IS NOT NULL) AS has_lyrics,
   t.created_at
 `;
@@ -101,8 +119,8 @@ const UNDO_WINDOW_DAYS = 30;
 const INSERT_TRACK_SQL = `
   INSERT INTO tracks
     (id, owner_telegram_id, title, artist, album, duration_seconds, telegram_file_id,
-     mime_type, cover_image, cover_mime_type, origin_adder_id)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::BIGINT, $2))
+     mime_type, cover_image, cover_mime_type, origin_adder_id, cover_file_id)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::BIGINT, $2), $12)
   RETURNING ${TRACK_COLUMNS}
 `;
 
@@ -120,6 +138,7 @@ function insertTrackParams(input: NewTrack, album: string | null): unknown[] {
     input.coverImage,
     input.coverMimeType,
     input.originAdderId,
+    input.coverFileId,
   ];
 }
 
@@ -280,7 +299,7 @@ export async function listTracksMissingCover(
     Pick<Track, "id" | "title" | "telegram_file_id">
   >(
     `SELECT id, title, telegram_file_id FROM tracks
-     WHERE owner_telegram_id = $1 AND cover_image IS NULL AND ${LIVE}
+     WHERE owner_telegram_id = $1 AND NOT ${HAS_COVER} AND ${LIVE}
      ORDER BY created_at DESC`,
     [ownerTelegramId]
   );
@@ -301,26 +320,51 @@ export async function getTrackLyrics(id: string): Promise<string | null> {
   return rows[0]?.lyrics ?? null;
 }
 
-export interface TrackCover {
-  coverImage: Buffer;
-  coverMimeType: string | null;
-}
+/**
+ * Where a cover's bytes are.
+ *
+ * A cover posted to the cover channel is a file_id and nothing else; one that
+ * predates the channel, or that the channel refused, is still held inline. The
+ * union rather than a nullable pair because these are alternatives, not
+ * degrees: the route serves one or the other, never both.
+ */
+export type CoverSource =
+  | { kind: "bytes"; image: Buffer; mimeType: string | null }
+  | { kind: "telegram"; fileId: string };
 
 /**
  * Unscoped on purpose: the caller has already established that it may see this
  * track, via getTrack for its own or getTrackForListener for somebody else's.
  */
-export async function getTrackCover(id: string): Promise<TrackCover | null> {
+export async function getTrackCover(id: string): Promise<CoverSource | null> {
   const { rows } = await getPool().query<{
     cover_image: Buffer | null;
     cover_mime_type: string | null;
+    cover_file_id: string | null;
   }>(
-    `SELECT cover_image, cover_mime_type FROM tracks WHERE id = $1 AND ${LIVE}`,
+    `SELECT cover_image, cover_mime_type, cover_file_id
+     FROM tracks WHERE id = $1 AND ${LIVE}`,
     [id]
   );
   const row = rows[0];
-  if (!row?.cover_image) return null;
-  return { coverImage: row.cover_image, coverMimeType: row.cover_mime_type };
+  if (!row) return null;
+  // The file_id wins where both exist, which is only ever the instant between
+  // an offload writing one and the same statement clearing the other.
+  if (row.cover_file_id) return { kind: "telegram", fileId: row.cover_file_id };
+  if (row.cover_image) {
+    return { kind: "bytes", image: row.cover_image, mimeType: row.cover_mime_type };
+  }
+  return null;
+}
+
+/** The picture a playlist carries in its own right, if the owner gave it one. */
+export async function getPlaylistCover(id: string): Promise<CoverSource | null> {
+  const { rows } = await getPool().query<{ cover_file_id: string | null }>(
+    `SELECT cover_file_id FROM playlists WHERE id = $1`,
+    [id]
+  );
+  const fileId = rows[0]?.cover_file_id;
+  return fileId ? { kind: "telegram", fileId } : null;
 }
 
 export interface TrackFieldUpdate {
@@ -382,19 +426,93 @@ export async function updateTrackFields(
   return rows[0] ?? null;
 }
 
+/**
+ * Sets a track's artwork, held whichever way the caller managed to store it.
+ *
+ * Both columns are always written, so setting a cover one way clears the other
+ * rather than leaving a stale copy of the previous picture behind it.
+ */
 export async function updateTrackCover(
   id: string,
   ownerTelegramId: number,
-  coverImage: Buffer,
-  coverMimeType: string
+  cover: CoverSource
 ): Promise<Track | null> {
+  const telegram = cover.kind === "telegram";
   const { rows } = await getPool().query<Track>(
-    `UPDATE tracks SET cover_image = $3, cover_mime_type = $4
+    `UPDATE tracks SET cover_image = $3, cover_mime_type = $4, cover_file_id = $5
      WHERE id = $1 AND owner_telegram_id = $2 AND ${LIVE}
      RETURNING ${TRACK_COLUMNS}`,
-    [id, ownerTelegramId, coverImage, coverMimeType]
+    [
+      id,
+      ownerTelegramId,
+      telegram ? null : cover.image,
+      telegram ? null : cover.mimeType,
+      telegram ? cover.fileId : null,
+    ]
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Moves a cover that is still held as bytes out to the cover channel.
+ *
+ * Unscoped by owner: this is housekeeping over rows the caller has already
+ * selected, and it changes where a picture lives rather than what it is.
+ */
+export async function offloadTrackCover(id: string, fileId: string): Promise<void> {
+  await getPool().query(
+    `UPDATE tracks SET cover_file_id = $2, cover_image = NULL, cover_mime_type = NULL
+     WHERE id = $1`,
+    [id, fileId]
+  );
+}
+
+export interface StoredCover {
+  id: string;
+  cover_image: Buffer;
+  cover_mime_type: string | null;
+}
+
+/** Covers still sitting in Postgres — the input to an offload run. */
+export async function listTracksWithCoverBytes(
+  ownerTelegramId: number,
+  limit: number
+): Promise<StoredCover[]> {
+  const { rows } = await getPool().query<StoredCover>(
+    `SELECT id, cover_image, cover_mime_type FROM tracks
+     WHERE owner_telegram_id = $1 AND cover_image IS NOT NULL AND ${LIVE}
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [ownerTelegramId, limit]
+  );
+  return rows;
+}
+
+/** How many of this owner's covers are still bytes, offloaded or not. */
+export async function countTracksWithCoverBytes(
+  ownerTelegramId: number
+): Promise<number> {
+  const { rows } = await getPool().query<{ count: string }>(
+    `SELECT COUNT(*) FROM tracks
+     WHERE owner_telegram_id = $1 AND cover_image IS NOT NULL AND ${LIVE}`,
+    [ownerTelegramId]
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/** Gives a playlist a picture of its own, or clears it when fileId is null. */
+export async function updatePlaylistCover(
+  id: string,
+  ownerTelegramId: number,
+  fileId: string | null
+): Promise<Playlist | null> {
+  const { rowCount } = await getPool().query(
+    `UPDATE playlists SET cover_file_id = $3, updated_at = now()
+     WHERE id = $1 AND owner_telegram_id = $2`,
+    [id, ownerTelegramId, fileId]
+  );
+  if (!rowCount) return null;
+  return readPlaylist(id, ownerTelegramId);
 }
 
 /** Marks a track deleted. Reversible for UNDO_WINDOW_DAYS. */
@@ -445,7 +563,8 @@ export async function purgeExpiredTracks(): Promise<number> {
  * two columns called cover_track_id in one result set is a coin toss.
  */
 const PLAYLIST_COLUMNS = `p.id, p.owner_telegram_id, p.name, p.description,
-     p.created_at, p.updated_at, p.visibility, p.share_slug, p.group_chat_id`;
+     p.created_at, p.updated_at, p.visibility, p.share_slug, p.group_chat_id,
+     (p.cover_file_id IS NOT NULL) AS has_cover`;
 
 /**
  * The picture: whatever the owner pinned, and otherwise the first track in the
@@ -454,13 +573,17 @@ const PLAYLIST_COLUMNS = `p.id, p.owner_telegram_id, p.name, p.description,
  * Resolving on read rather than storing means a playlist nobody has ever given
  * a cover to still has one, and a playlist whose pinned track was later deleted
  * quietly goes back to choosing for itself instead of showing a blank square.
+ *
+ * A picture the owner uploaded for the playlist itself outranks both, and is
+ * reported by has_cover rather than here: this column names a *track* whose
+ * artwork to borrow, and an uploaded playlist cover belongs to no track.
  */
 const PLAYLIST_COVER = `COALESCE(
        (SELECT t.id FROM tracks t
-        WHERE t.id = p.cover_track_id AND ${LIVE_T} AND t.cover_image IS NOT NULL),
+        WHERE t.id = p.cover_track_id AND ${LIVE_T} AND ${HAS_COVER_T}),
        (SELECT t.id FROM playlist_tracks pt
         JOIN tracks t ON t.id = pt.track_id
-        WHERE pt.playlist_id = p.id AND ${LIVE_T} AND t.cover_image IS NOT NULL
+        WHERE pt.playlist_id = p.id AND ${LIVE_T} AND ${HAS_COVER_T}
         ORDER BY pt.position ASC LIMIT 1)
      ) AS cover_track_id`;
 
@@ -798,7 +921,7 @@ async function listDerived(
     `SELECT t.${column} AS name,
        COUNT(*)::int AS track_count,
        (ARRAY_AGG(t.id ORDER BY t.created_at DESC)
-         FILTER (WHERE t.cover_image IS NOT NULL))[1] AS cover_track_id,
+         FILTER (WHERE ${HAS_COVER_T}))[1] AS cover_track_id,
        ${column === "album" ? "MIN(t.artist)" : "NULL::text"} AS artist
      FROM tracks t
      WHERE t.owner_telegram_id = $1 AND ${LIVE_T}
@@ -1503,4 +1626,42 @@ export async function createTrackInGroupCrate(
 
     return { track, position: placed[0]?.position ?? null };
   });
+}
+
+// --- Channel registry --------------------------------------------------------
+
+/**
+ * Which Telegram channel plays which role for this deployment.
+ *
+ * Discovered rather than configured: a channel tells the bot its own id and
+ * title in every update it sends, so the alternative — a human copying a
+ * -100… number out of Telegram and into a dashboard — is work the bot can do
+ * for itself and never mistype. Persisted because discovery happens once and
+ * the process it happened in will not be the one still running tomorrow.
+ */
+export type ChannelRole = "covers" | "logs";
+
+export async function getAppChannel(role: ChannelRole): Promise<number | null> {
+  const { rows } = await getPool().query<{ chat_id: string }>(
+    `SELECT chat_id FROM app_channels WHERE role = $1`,
+    [role]
+  );
+  // BIGINT arrives as a string from pg; channel ids are far inside the safe
+  // integer range, so the narrowing is lossless.
+  return rows[0] ? Number(rows[0].chat_id) : null;
+}
+
+export async function setAppChannel(
+  role: ChannelRole,
+  chatId: number,
+  title: string | null
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO app_channels (role, chat_id, title) VALUES ($1, $2, $3)
+     ON CONFLICT (role) DO UPDATE
+       SET chat_id = EXCLUDED.chat_id,
+           title = EXCLUDED.title,
+           updated_at = now()`,
+    [role, chatId, title]
+  );
 }

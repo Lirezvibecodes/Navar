@@ -157,6 +157,35 @@ export function setPlaylistCover(
   });
 }
 
+/**
+ * The URL of a playlist's own picture, or null when it has none.
+ *
+ * Takes the row rather than the id for two reasons: the caller cannot then ask
+ * for a picture that is not there, and `updated_at` rides along in the query.
+ * The path is stable across a change of cover, so without something in the URL
+ * that moves, an <img> already showing the old picture would never go and
+ * fetch the new one.
+ */
+export function playlistArtworkUrl(playlist: Playlist): string | null {
+  if (!playlist.has_cover) return null;
+  const v = encodeURIComponent(playlist.updated_at);
+  return `${API_BASE}/api/playlists/${playlist.id}/artwork?v=${v}&token=${encodeURIComponent(sessionToken ?? "")}`;
+}
+
+export function uploadPlaylistArtwork(id: string, file: File): Promise<Playlist> {
+  const form = new FormData();
+  form.append("cover", file);
+  return request<Playlist>(`/api/playlists/${id}/artwork`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+/** Drop the uploaded picture, so the playlist goes back to picking its own. */
+export function clearPlaylistArtwork(id: string): Promise<Playlist> {
+  return request<Playlist>(`/api/playlists/${id}/artwork`, { method: "DELETE" });
+}
+
 export function deletePlaylist(id: string): Promise<void> {
   return request<void>(`/api/playlists/${id}`, { method: "DELETE" });
 }

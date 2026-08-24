@@ -328,10 +328,6 @@ body {
   flex: none;
 }
 
-/* A scroller clips on both axes, so anything that glows inside one is cut off
-   square at the edge of the box. The padding is the room the glow needs and
-   the negative margin gives it back to the layout, so the shelf still measures
-   as if it were tight against its neighbours. */
 /* The room the active chip's glow needs, on all four sides, given back to the
    layout as an exactly equal negative margin so the shelf still measures as if
    it were tight against its neighbours.

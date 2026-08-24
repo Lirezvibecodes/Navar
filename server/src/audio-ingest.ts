@@ -7,6 +7,7 @@ import {
 } from "./repo";
 import type { IngestSession, NewTrack } from "./repo";
 import { readAudioTags } from "./cover-art";
+import { postCoverPhoto } from "./channels";
 import { getTelegramFileDownloadUrl } from "./telegram-files";
 import type { Track } from "./types";
 
@@ -98,17 +99,33 @@ async function prepareTrack(
   // album, which is what /album groups a batch by.
   const tags = await readAudioTags(audio);
 
+  const title = audio.title ?? tags.title ?? fallbackTitle ?? null;
+  const artist = audio.performer ?? tags.artist ?? null;
+
+  // The artwork goes to the cover channel and only its file_id is written
+  // down, so a library's worth of covers costs the database a few hundred
+  // bytes rather than a few hundred megabytes. A channel that is unset or
+  // unreachable simply leaves the bytes where they used to go.
+  const coverFileId = tags.cover
+    ? await postCoverPhoto(
+        tags.cover.image,
+        tags.cover.mimeType,
+        [title, artist].filter(Boolean).join(" — ") || undefined
+      )
+    : null;
+
   return {
     id: randomUUID(),
     ownerTelegramId,
-    title: audio.title ?? tags.title ?? fallbackTitle ?? null,
-    artist: audio.performer ?? tags.artist ?? null,
+    title,
+    artist,
     album: tags.album,
     durationSeconds: audio.durationSeconds ?? null,
     telegramFileId: audio.fileId,
     mimeType: audio.mimeType ?? null,
-    coverImage: tags.cover?.image ?? null,
-    coverMimeType: tags.cover?.mimeType ?? null,
+    coverImage: coverFileId ? null : tags.cover?.image ?? null,
+    coverMimeType: coverFileId ? null : tags.cover?.mimeType ?? null,
+    coverFileId,
     // A fresh ingest is the origin by definition; the save path overrides this.
     originAdderId: ownerTelegramId,
   };
