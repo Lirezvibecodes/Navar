@@ -303,6 +303,21 @@ body {
   display: none;
 }
 
+/* A scrolling column must not squash what it is scrolling.
+
+   Screen is a column flex container with a fixed height, so its children are
+   flex items and shrink by default once the page is taller than the viewport
+   — which is every page worth scrolling. A grid of square tiles is the worst
+   case: percentage padding contributes nothing to a min-content height, so
+   the tile grid has almost no floor to stop at, and its auto rows do not
+   compress to match. They spill straight out of the box they were given and
+   land on top of whatever came next, which is why the Albums tab looked like
+   it had come off its grid. The taller the page, the harder the squash — the
+   Albums tab has the most rows, so it broke first and worst. */
+.nav-screen > * {
+  flex: none;
+}
+
 /* A horizontal shelf. Snaps so a half-shown tile does not sit under the edge.
 
    touch-action is the important line. Setting overflow-x alone makes the box a

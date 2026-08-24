@@ -40,7 +40,7 @@ export function Screen({
 }) {
   return (
     <div
-      className={`nav-scroll ${className}`}
+      className={`nav-scroll nav-screen ${className}`}
       style={{
         flex: 1,
         minHeight: 0,
