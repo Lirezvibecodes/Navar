@@ -250,15 +250,57 @@ export async function areFriends(a: number, b: number): Promise<boolean> {
 }
 
 /**
+ * Whether a requester may have this track at all.
+ *
+ * Four ways in, and no fifth: they own it, it is in a link-shared playlist, it
+ * is in a playlist an accepted friend opened up, or it is in a group crate for
+ * a chat they have been seen in. All four are one expression so that a
+ * partially-evaluated chain of application-code checks can never leak a track
+ * the last check would have refused — and so the read path and the save path
+ * cannot drift into two different answers to the same question. Both arguments
+ * must be placeholders or column references.
+ */
+function trackVisibleTo(viewer: string, track: string): string {
+  return `(
+    ${track}.owner_telegram_id = ${viewer}
+    OR EXISTS (
+      SELECT 1
+      FROM playlist_tracks pt
+      JOIN playlists p ON p.id = pt.playlist_id
+      WHERE pt.track_id = ${track}.id
+        AND (
+          -- Anyone holding the link.
+          p.visibility = 'public'
+
+          -- A playlist an accepted friend opened up.
+          OR (
+            p.visibility IN ('friends', 'public')
+            AND EXISTS (
+              SELECT 1 FROM friendships f
+              WHERE f.status = 'accepted'
+                AND ((f.requester_id = ${viewer} AND f.addressee_id = p.owner_telegram_id)
+                  OR (f.requester_id = p.owner_telegram_id AND f.addressee_id = ${viewer}))
+            )
+          )
+
+          -- A group playlist for a chat the requester has been seen in.
+          OR (
+            p.group_chat_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM group_members gm
+              WHERE gm.group_chat_id = p.group_chat_id
+                AND gm.telegram_user_id = ${viewer}
+            )
+          )
+        )
+    )
+  )`;
+}
+
+/**
  * The listener-scoped lookup, for read paths only. Deliberately a different
  * name from getTrack rather than a flag on it: a boolean argument is easy to
  * pass the wrong way round on a mutation route, a second function name is not.
- *
- * A requester may read a track when any one of four things is true — they own
- * it, it is in a friend's shared playlist, it is in a link-shared playlist, or
- * it is in a group playlist for a chat they are in. All four are expressed as
- * one query so that a partially-evaluated chain of application-code checks can
- * never leak a track the last check would have refused.
  */
 export async function getTrackForListener(
   id: string,
@@ -267,45 +309,103 @@ export async function getTrackForListener(
   const { rows } = await getPool().query<Track>(
     `SELECT ${TRACK_COLUMNS_T}
      FROM tracks t
-     WHERE t.id = $1
-       AND ${LIVE_T}
-       AND (
-         t.owner_telegram_id = $2
-         OR EXISTS (
-           SELECT 1
-           FROM playlist_tracks pt
-           JOIN playlists p ON p.id = pt.playlist_id
-           WHERE pt.track_id = t.id
-             AND (
-               -- Anyone holding the link.
-               p.visibility = 'public'
-
-               -- A playlist an accepted friend opened up.
-               OR (
-                 p.visibility IN ('friends', 'public')
-                 AND EXISTS (
-                   SELECT 1 FROM friendships f
-                   WHERE f.status = 'accepted'
-                     AND ((f.requester_id = $2 AND f.addressee_id = p.owner_telegram_id)
-                       OR (f.requester_id = p.owner_telegram_id AND f.addressee_id = $2))
-                 )
-               )
-
-               -- A group playlist for a chat the requester has been seen in.
-               OR (
-                 p.group_chat_id IS NOT NULL
-                 AND EXISTS (
-                   SELECT 1 FROM group_members gm
-                   WHERE gm.group_chat_id = p.group_chat_id
-                     AND gm.telegram_user_id = $2
-                 )
-               )
-             )
-         )
-       )`,
+     WHERE t.id = $1 AND ${LIVE_T} AND ${trackVisibleTo("$2", "t")}`,
     [id, requesterTelegramId]
   );
   return rows[0] ?? null;
+}
+
+export interface SavedTrack {
+  track: Track;
+  /**
+   * True when this source had already been saved and the copy that came back
+   * is the one made then. The route answers 200 rather than 201 for it, and the
+   * app says so instead of pretending a second copy appeared.
+   */
+  already: boolean;
+}
+
+/**
+ * Saving somebody else's track into your own library.
+ *
+ * A track in Navaar is metadata plus a Telegram file_id, so this is a row copy
+ * and nothing else: no download, no re-upload, not a byte of new storage, and
+ * the cover comes along in whichever of its two forms the source holds. The
+ * copy is deliberately independent — the saver can retag it freely, and it goes
+ * on working when the original owner deletes theirs.
+ *
+ * `origin_adder_id` is inherited rather than recomputed, so a copy of a copy
+ * still credits whoever brought the track into Navaar in the first place, while
+ * `track_saves.origin_id` records the nearer fact of who *you* got it from.
+ *
+ * The whole thing is one statement guarded by the same visibility expression
+ * the read path uses, so a track the requester may not have cannot be copied
+ * even if the route's own check were removed.
+ */
+export async function saveTrackToLibrary(
+  sourceTrackId: string,
+  saverTelegramId: number
+): Promise<SavedTrack | null> {
+  return withTransaction(async (client) => {
+    const live = async (): Promise<Track | null> => {
+      const { rows } = await client.query<Track>(
+        `SELECT ${TRACK_COLUMNS_T}
+         FROM track_saves ts
+         JOIN tracks t ON t.id = ts.saved_track_id
+         WHERE ts.saver_id = $1 AND ts.source_track_id = $2 AND ${LIVE_T}`,
+        [saverTelegramId, sourceTrackId]
+      );
+      return rows[0] ?? null;
+    };
+
+    const existing = await live();
+    if (existing) return { track: existing, already: true };
+
+    const copy = await client.query<Track>(
+      `INSERT INTO tracks
+         (owner_telegram_id, title, artist, album, duration_seconds, telegram_file_id,
+          mime_type, cover_image, cover_mime_type, cover_file_id, origin_adder_id)
+       SELECT $1::BIGINT, t.title, t.artist, t.album, t.duration_seconds,
+              t.telegram_file_id, t.mime_type, t.cover_image, t.cover_mime_type,
+              t.cover_file_id, COALESCE(t.origin_adder_id, t.owner_telegram_id)
+       FROM tracks t
+       WHERE t.id = $2
+         AND ${LIVE_T}
+         AND t.owner_telegram_id <> $1
+         AND ${trackVisibleTo("$1", "t")}
+       RETURNING ${TRACK_COLUMNS}`,
+      [saverTelegramId, sourceTrackId]
+    );
+    const track = copy.rows[0];
+    if (!track) return null;
+
+    // The claim on the source. A save that lost a race — the same track tapped
+    // twice, which on a phone is one gesture — finds the slot taken by a copy
+    // that is still alive, and the DO UPDATE declines it; the two statements
+    // are inside one transaction, so the loser blocks until the winner commits
+    // rather than both deciding the slot was free. A slot whose copy has since
+    // been deleted is taken over, because saving something again after throwing
+    // it away is a thing people do on purpose.
+    const claim = await client.query(
+      `INSERT INTO track_saves (saver_id, origin_id, source_track_id, saved_track_id)
+       SELECT $1, t.owner_telegram_id, t.id, $3 FROM tracks t WHERE t.id = $2
+       ON CONFLICT (saver_id, source_track_id) DO UPDATE
+         SET saved_track_id = EXCLUDED.saved_track_id, created_at = now()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM tracks prev
+           WHERE prev.id = track_saves.saved_track_id AND prev.deleted_at IS NULL
+         )
+       RETURNING saved_track_id`,
+      [saverTelegramId, sourceTrackId, track.id]
+    );
+    if (claim.rowCount === 0) {
+      await client.query(`DELETE FROM tracks WHERE id = $1`, [track.id]);
+      const winner = await live();
+      return winner ? { track: winner, already: true } : null;
+    }
+
+    return { track, already: false };
+  });
 }
 
 /** Tracks whose artwork was never captured — the input to a cover backfill. */

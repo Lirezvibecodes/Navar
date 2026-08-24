@@ -1,9 +1,12 @@
 /**
- * The authorization seam. getTrackForListener decides who may read a track,
- * and it is the one function in the codebase where a mistake silently hands
- * somebody else's library to a stranger — so all four of the ways a track can
- * become visible are exercised here, along with the case where none of them
- * apply.
+ * The authorization seam. One expression decides who may have a track, and it
+ * is the one place in the codebase where a mistake silently hands somebody
+ * else's library to a stranger — so all four of the ways a track can become
+ * visible are exercised here, along with the case where none of them apply.
+ *
+ * Both consumers of that expression are covered: getTrackForListener, which
+ * reads, and saveTrackToLibrary, which copies. They must agree, and a test that
+ * only ever asked the reader would not notice if they stopped.
  *
  * These run against a real Postgres because the whole point is the SQL. Set
  * TEST_DATABASE_URL to a scratch database; without it the suite skips rather
@@ -206,5 +209,119 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
     const track = await repo.getTrack(trackIds.unshared, OWNER);
     assert.equal(track?.title, "Renamed");
     assert.equal(track?.artist, null);
+  });
+
+  /**
+   * Saving is the copy path, and it answers the same visibility question the
+   * reads do. The fixtures here are its own: a track with artwork, in a
+   * link-shared playlist, so the copy has something to bring with it.
+   */
+  describe("saveTrackToLibrary", () => {
+    const withCover = randomUUID();
+    let sharedPlaylistId = "";
+
+    before(async () => {
+      const pool = db.getPool();
+      await repo.createTrack({
+        id: withCover,
+        ownerTelegramId: OWNER,
+        title: "Shared",
+        artist: "Somebody",
+        album: "An album",
+        durationSeconds: 210,
+        telegramFileId: "fixture-with-cover",
+        mimeType: "audio/mpeg",
+        coverImage: Buffer.from("not really a jpeg"),
+        coverMimeType: "image/jpeg",
+        coverFileId: null,
+        originAdderId: OWNER,
+      });
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO playlists (owner_telegram_id, name, visibility)
+         VALUES ($1, 'save fixtures', 'public') RETURNING id`,
+        [OWNER]
+      );
+      sharedPlaylistId = rows[0].id;
+      await pool.query(
+        `INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES ($1, $2, 0)`,
+        [sharedPlaylistId, withCover]
+      );
+    });
+
+    test("a copy is the metadata, the file reference and the artwork", async () => {
+      const saved = await repo.saveTrackToLibrary(withCover, FRIEND);
+      assert.equal(saved?.already, false);
+      const copy = saved!.track;
+
+      assert.notEqual(copy.id, withCover);
+      assert.equal(String(copy.owner_telegram_id), String(FRIEND));
+      assert.equal(copy.title, "Shared");
+      assert.equal(copy.album, "An album");
+      assert.equal(copy.duration_seconds, 210);
+      // The point of the whole feature: the same file, not a second upload.
+      assert.equal(copy.telegram_file_id, "fixture-with-cover");
+      assert.equal(copy.has_cover, true);
+
+      const cover = await repo.getTrackCover(copy.id);
+      assert.equal(cover?.kind, "bytes");
+      assert.equal(
+        cover?.kind === "bytes" ? cover.image.toString() : null,
+        "not really a jpeg"
+      );
+    });
+
+    test("the credit survives the copy", async () => {
+      const copy = (await repo.saveTrackToLibrary(withCover, FRIEND))!.track;
+      assert.equal(String(copy.origin_adder_id), String(OWNER));
+
+      // And a copy of a copy still names the person at the head of the chain
+      // rather than the person it was taken from.
+      await db.getPool().query(
+        `INSERT INTO playlist_tracks (playlist_id, track_id, position)
+         VALUES ($1, $2, 1)`,
+        [sharedPlaylistId, copy.id]
+      );
+      const second = await repo.saveTrackToLibrary(copy.id, STRANGER);
+      assert.equal(String(second?.track.origin_adder_id), String(OWNER));
+    });
+
+    test("saving the same track twice hands back the copy already made", async () => {
+      const first = await repo.saveTrackToLibrary(withCover, GROUP_MATE);
+      assert.equal(first?.already, false);
+
+      const again = await repo.saveTrackToLibrary(withCover, GROUP_MATE);
+      assert.equal(again?.already, true);
+      assert.equal(again?.track.id, first?.track.id);
+
+      const { rows } = await db
+        .getPool()
+        .query<{ n: string }>(
+          `SELECT count(*) AS n FROM tracks
+           WHERE owner_telegram_id = $1 AND deleted_at IS NULL`,
+          [GROUP_MATE]
+        );
+      assert.equal(rows[0].n, "1");
+    });
+
+    test("saving again after deleting the copy makes a new one", async () => {
+      const first = (await repo.saveTrackToLibrary(withCover, PENDING_FRIEND))!;
+      await repo.softDeleteTrack(first.track.id, PENDING_FRIEND);
+
+      const second = await repo.saveTrackToLibrary(withCover, PENDING_FRIEND);
+      assert.equal(second?.already, false);
+      assert.notEqual(second?.track.id, first.track.id);
+    });
+
+    test("a track the saver cannot see cannot be saved", async () => {
+      // The route checks this too. This is the check underneath it: if the
+      // route's own were deleted tomorrow, the copy would still be refused.
+      assert.equal(await repo.saveTrackToLibrary(trackIds.unshared, STRANGER), null);
+      assert.equal(await repo.saveTrackToLibrary(trackIds.friendsOnly, STRANGER), null);
+      assert.equal(await repo.saveTrackToLibrary(trackIds.deleted, FRIEND), null);
+    });
+
+    test("you cannot save your own track", async () => {
+      assert.equal(await repo.saveTrackToLibrary(withCover, OWNER), null);
+    });
   });
 });

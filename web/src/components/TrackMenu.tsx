@@ -10,6 +10,7 @@ import {
   AlbumIcon,
   EditIcon,
   ImageIcon,
+  LibraryIcon,
   ListMinusIcon,
   PlayNextIcon,
   PlaylistIcon,
@@ -36,8 +37,11 @@ import { haptic } from "../telegram";
  * know which list is about to lose a track.
  *
  * What is missing is as deliberate: a track you do not own offers the queue
- * actions and the collections it belongs to, and nothing else. There is no
- * greyed-out `Edit` teaching you about a permission you cannot have.
+ * actions, keeping it, and the collections it belongs to, and nothing else.
+ * There is no greyed-out `Edit` teaching you about a permission you cannot
+ * have. Keeping it comes first in that group because it is the only item there
+ * that changes anything, and it is the whole reason for listening to somebody
+ * else's playlist in the first place.
  */
 
 export interface TrackMenuTarget {
@@ -57,7 +61,8 @@ export function TrackMenu({
   onClose: () => void;
   onGoTo: (to: { type: "album" | "artist"; name: string }) => void;
 }) {
-  const { owns, putTrack, dropTracks, playlists, markInPlaylist } = useLibrary();
+  const { owns, tracks, putTrack, dropTracks, playlists, markInPlaylist } =
+    useLibrary();
   const { queueNext, queueLast } = usePlayer();
   const { toast, undoToast } = useToast();
 
@@ -85,6 +90,27 @@ export function TrackMenu({
         .then(putTrack)
         .catch(() => toast("Could not put that back"));
     });
+  };
+
+  /**
+   * Keeping somebody else's track. No file moves — the server copies the row —
+   * so this is as quick as it looks, and what lands in the library is a copy of
+   * your own that survives the other person deleting theirs.
+   */
+  const saveToLibrary = async (t: Track) => {
+    onClose();
+    try {
+      const copy = await api.saveTrack(t.id);
+      // Saving something twice is answered with the copy made the first time,
+      // so the toast says which of the two happened rather than claiming a
+      // second copy that does not exist.
+      const had = tracks.some((row) => row.id === copy.id);
+      putTrack(copy);
+      haptic.success();
+      toast(had ? "Already in your library" : `Saved ${trackTitle(t)}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not save that");
+    }
   };
 
   const removeFromPlaylist = async (t: Track, playlistId: string) => {
@@ -131,6 +157,13 @@ export function TrackMenu({
             />
             <SheetDivider />
 
+            {owned ? null : (
+              <SheetItem
+                icon={LibraryIcon}
+                label="Save to my library"
+                onClick={() => void saveToLibrary(track)}
+              />
+            )}
             {owned ? (
               <SheetItem
                 icon={PlaylistIcon}

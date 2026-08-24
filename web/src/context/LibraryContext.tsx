@@ -103,8 +103,16 @@ export function LibraryProvider({
     void reload();
   }, [reload]);
 
+  // Replace, or put in front if it is new — the same shape as putPlaylist. The
+  // library is ordered newest first, so a track arriving here for the first
+  // time (a save from a friend's playlist) belongs at the top, where the
+  // reload it eventually gets would put it anyway.
   const putTrack = useCallback((track: Track) => {
-    setTracks((rows) => rows.map((t) => (t.id === track.id ? track : t)));
+    setTracks((rows) =>
+      rows.some((t) => t.id === track.id)
+        ? rows.map((t) => (t.id === track.id ? track : t))
+        : [track, ...rows]
+    );
   }, []);
 
   const dropTracks = useCallback((ids: string[]) => {

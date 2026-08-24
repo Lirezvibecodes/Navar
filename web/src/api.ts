@@ -110,6 +110,16 @@ export function restoreTrack(id: string): Promise<Track> {
   return request<Track>(`/api/tracks/${id}/restore`, { method: "POST" });
 }
 
+/**
+ * Keep somebody else's track. What comes back is a copy of your own — a
+ * different id, yours to retag, and it keeps working if they delete theirs.
+ * Nothing is uploaded: a track is metadata and a Telegram file reference, so
+ * the server copies a row and no audio moves anywhere.
+ */
+export function saveTrack(id: string): Promise<Track> {
+  return request<Track>(`/api/tracks/${id}/save`, { method: "POST" });
+}
+
 /** Bulk delete returns the ids that actually moved, so undo puts back those. */
 export function deleteTracks(trackIds: string[]): Promise<{ deleted: string[] }> {
   return request(`/api/tracks/bulk`, {

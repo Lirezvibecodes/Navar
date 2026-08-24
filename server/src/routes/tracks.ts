@@ -10,6 +10,7 @@ import {
   listTracks,
   restoreTrack,
   restoreTracksBulk,
+  saveTrackToLibrary,
   softDeleteTrack,
   softDeleteTracksBulk,
   updateTrackCover,
@@ -265,6 +266,38 @@ export function tracksRouter(): Router {
         return;
       }
       res.status(204).end();
+    })
+  );
+
+  /**
+   * Keep somebody else's track.
+   *
+   * The visibility check is here so the refusal can be a 404 that says nothing
+   * about whether the id exists, and the copy itself repeats the same check in
+   * SQL. Saving your own track is refused rather than silently duplicating the
+   * row: two identical entries in one library is not what anybody meant by it.
+   */
+  router.post(
+    "/:id/save",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const saverId = (req as AuthedRequest).telegramUserId;
+      const source = await getTrackForListener(req.params.id, saverId);
+      if (!source) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      if (Number(source.owner_telegram_id) === saverId) {
+        res.status(400).json({ error: "This one is already yours" });
+        return;
+      }
+
+      const saved = await saveTrackToLibrary(req.params.id, saverId);
+      if (!saved) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.status(saved.already ? 200 : 201).json(saved.track);
     })
   );
 
