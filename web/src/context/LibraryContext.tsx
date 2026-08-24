@@ -27,6 +27,12 @@ import type { Me, Playlist, Track } from "../types";
 
 interface LibraryApi {
   me: Me | null;
+  /**
+   * Replaces the signed-in identity. Only the handle can change while a session
+   * is open, and it changes from a view rather than from here, so the state
+   * lives where the session does and the setter comes down to meet it.
+   */
+  setMe: (me: Me) => void;
   tracks: Track[];
   playlists: Playlist[];
   loading: boolean;
@@ -67,9 +73,11 @@ export function useLibrary(): LibraryApi {
 
 export function LibraryProvider({
   me,
+  setMe,
   children,
 }: {
   me: Me | null;
+  setMe: (me: Me) => void;
   children: React.ReactNode;
 }) {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -147,6 +155,7 @@ export function LibraryProvider({
   const value = useMemo<LibraryApi>(
     () => ({
       me,
+      setMe,
       tracks,
       playlists,
       loading,
@@ -162,6 +171,7 @@ export function LibraryProvider({
     }),
     [
       me,
+      setMe,
       tracks,
       playlists,
       loading,

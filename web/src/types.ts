@@ -59,6 +59,8 @@ export interface Collection {
 export interface Person {
   telegram_user_id: string;
   username: string | null;
+  /** The name they chose in Navaar. Null only for an account that has never opened it. */
+  handle: string | null;
   has_avatar: boolean;
 }
 
@@ -66,4 +68,6 @@ export interface Me {
   id: number;
   username: string | null;
   first_name: string | null;
+  /** Null until this person has chosen one, which the app asks for on first launch. */
+  handle: string | null;
 }

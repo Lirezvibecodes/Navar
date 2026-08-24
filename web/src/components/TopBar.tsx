@@ -79,7 +79,7 @@ export function TopBar({
       >
         <Avatar
           userId={me?.id ?? 0}
-          username={me?.username ?? me?.first_name}
+          username={me?.handle ?? me?.username ?? me?.first_name}
           size={34}
         />
       </button>

@@ -44,6 +44,27 @@ export async function authenticate(initData: string): Promise<Me> {
   return user;
 }
 
+/**
+ * Claim the name this person is known by, or change it.
+ *
+ * Resolves with the handle the server actually stored — it strips a leading @
+ * and keeps the capitalisation typed — and rejects with a message meant to be
+ * shown as-is: a 409 says the name is taken, a 400 says what a name may be.
+ */
+export function setHandle(handle: string): Promise<{ handle: string }> {
+  return request<{ handle: string }>("/api/me/handle", {
+    method: "POST",
+    body: json({ handle }),
+  });
+}
+
+/** Find one person by their exact handle. Rejects when there is nobody. */
+export function findPersonByHandle(handle: string): Promise<Person> {
+  return request<Person>(
+    `/api/users/by-handle/${encodeURIComponent(handle.replace(/^@+/, ""))}`
+  );
+}
+
 // --- Tracks -----------------------------------------------------------------
 
 export function listTracks(filter?: "unsorted"): Promise<Track[]> {

@@ -4,25 +4,30 @@ import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
 import { ActionButton, Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { UserCheckIcon, UserPlusIcon } from "../icons";
+import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
+import { personName } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
 import type { Person } from "../types";
 
 /**
  * People.
  *
- * Search, listening status, the activity feed and suggestions all need tables
- * that arrive with the social phase; until they do, this screen shows the two
- * things the server can already answer — who you are friends with, and who is
- * waiting on you — and nothing else. A section with no data behind it renders
- * nothing at all rather than an empty frame, so the screen grows as the
+ * Listening status, the activity feed and suggestions all need tables that
+ * arrive with the social phase; until they do, this screen shows what the
+ * server can already answer — who you are friends with, who is waiting on you,
+ * and the person behind a name you were given. A section with no data behind it
+ * renders nothing at all rather than an empty frame, so the screen grows as the
  * backend does instead of being a grid of placeholders.
  */
 export function SocialView({ nav }: { nav: Navigation }) {
   const { toast } = useToast();
+  const { me } = useLibrary();
   const [friends, setFriends] = useState<Person[]>([]);
   const [incoming, setIncoming] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<Person | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -57,6 +62,32 @@ export function SocialView({ nav }: { nav: Navigation }) {
     }
   };
 
+  /**
+   * Look up the exact name somebody gave you.
+   *
+   * Exact, and one result: this is following a name you were handed, not
+   * browsing the membership. The two answers that are not a stranger — it is
+   * you, or it is already a friend — are said plainly rather than dropped into
+   * the list, because both are cases where tapping Add would be the wrong move.
+   */
+  const find = async () => {
+    const handle = query.trim().replace(/^@+/, "");
+    if (handle.length === 0) return;
+    try {
+      const person = await api.findPersonByHandle(handle);
+      if (me && Number(person.telegram_user_id) === me.id) {
+        toast("That is you");
+        return;
+      }
+      haptic.tap();
+      setFound(person);
+      setQuery("");
+    } catch (err) {
+      setFound(null);
+      toast(err instanceof Error ? err.message : "Nobody by that name");
+    }
+  };
+
   const invite = async () => {
     try {
       const link = await api.friendInviteLink();
@@ -74,11 +105,65 @@ export function SocialView({ nav }: { nav: Navigation }) {
     );
   }
 
+  const alreadyFriends =
+    found != null &&
+    friends.some((f) => f.telegram_user_id === found.telegram_user_id);
+
   return (
     <Screen>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void find()}
+          placeholder="Find someone by name"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          className="nav-glass"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            height: 38,
+            borderRadius: 19,
+            padding: "0 14px",
+            fontSize: 13,
+            color: "#fff",
+            border: 0,
+            outline: "none",
+            fontFamily: "inherit",
+          }}
+        />
+        <ActionButton
+          grow={false}
+          disabled={query.trim().length === 0}
+          onClick={() => void find()}
+        >
+          Find
+        </ActionButton>
+      </div>
+
+      {found ? (
+        <>
+          <SectionHeader title="Found" spaceAbove={16} />
+          <PersonRow
+            person={found}
+            index={0}
+            onOpen={() =>
+              nav.push({ type: "profile", userId: Number(found.telegram_user_id) })
+            }
+            action={
+              alreadyFriends ? undefined : (
+                <AddFriendButton userId={found.telegram_user_id} onDone={load} />
+              )
+            }
+          />
+        </>
+      ) : null}
+
       {incoming.length > 0 ? (
         <>
-          <SectionHeader title="Waiting on you" spaceAbove={6} />
+          <SectionHeader title="Waiting on you" spaceAbove={16} />
           {incoming.map((person, i) => (
             <PersonRow
               key={person.telegram_user_id}
@@ -101,7 +186,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
         title="Friends"
         action="Invite"
         onAction={() => void invite()}
-        spaceAbove={incoming.length > 0 ? 22 : 6}
+        spaceAbove={incoming.length > 0 || found ? 22 : 16}
       />
 
       {friends.length === 0 ? (
@@ -127,7 +212,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
   );
 }
 
-/** One person: 40px face, @username, and whatever the section needs on the end. */
+/** One person: 40px face, their name, and whatever the section needs on the end. */
 function PersonRow({
   person,
   index,
@@ -170,12 +255,12 @@ function PersonRow({
       >
         <Avatar
           userId={person.telegram_user_id}
-          username={person.username}
+          username={person.handle ?? person.username}
           hasAvatar={person.has_avatar}
           size={40}
         />
         <span className="nav-clip" style={{ fontSize: 13, fontWeight: 600 }}>
-          {person.username ? `@${person.username}` : "Telegram user"}
+          {personName(person)}
         </span>
       </button>
       {action ?? (

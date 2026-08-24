@@ -1,17 +1,27 @@
 import { getPool, withTransaction } from "./db";
 import type { Track, Playlist } from "./types";
 
+/**
+ * Upsert the account and hand back the handle it holds, if any.
+ *
+ * The handle comes back from the same statement that touches the row because
+ * every caller that creates a session immediately needs to know whether this
+ * person has chosen a name yet, and a second query to learn it would be a
+ * round trip for a column already under the cursor.
+ */
 export async function ensureUser(
   telegramUserId: number,
   username: string | undefined
-): Promise<void> {
-  await getPool().query(
+): Promise<{ handle: string | null }> {
+  const { rows } = await getPool().query<{ handle: string | null }>(
     `INSERT INTO users (telegram_user_id, username)
      VALUES ($1, $2)
      ON CONFLICT (telegram_user_id)
-     DO UPDATE SET username = EXCLUDED.username`,
+     DO UPDATE SET username = EXCLUDED.username
+     RETURNING handle`,
     [telegramUserId, username ?? null]
   );
+  return { handle: rows[0]?.handle ?? null };
 }
 
 export interface NewTrack {
@@ -182,7 +192,7 @@ export async function listTracks(
   const { rows } = await getPool().query<Track>(
     `SELECT ${TRACK_COLUMNS_T},
        CASE WHEN ${visible} THEN ts.origin_id END AS credit_user_id,
-       CASE WHEN ${visible} THEN ou.username END AS credit_username,
+       CASE WHEN ${visible} THEN COALESCE(ou.handle, ou.username) END AS credit_username,
        EXISTS (SELECT 1 FROM playlist_tracks pt WHERE pt.track_id = t.id) AS in_playlist
      FROM tracks t
      LEFT JOIN track_saves ts ON ts.saved_track_id = t.id AND ts.saver_id = $1
@@ -1155,12 +1165,50 @@ export async function removeFriendship(a: number, b: number): Promise<boolean> {
 export interface PersonSummary {
   telegram_user_id: string;
   username: string | null;
+  /** The name they chose in Navaar. Null until they have opened the app. */
+  handle: string | null;
   has_avatar: boolean;
+}
+
+/**
+ * Claim a handle, or report that somebody else already has it.
+ *
+ * The race is decided by the unique index rather than by a lookup followed by
+ * a write: two people submitting the same handle in the same second both pass
+ * a prior SELECT, and only the index can say which of them actually got it.
+ * 23505 is Postgres unique_violation.
+ */
+export async function setHandle(
+  telegramUserId: number,
+  handle: string
+): Promise<"ok" | "taken"> {
+  try {
+    await getPool().query(`UPDATE users SET handle = $2 WHERE telegram_user_id = $1`, [
+      telegramUserId,
+      handle,
+    ]);
+    return "ok";
+  } catch (err) {
+    if ((err as { code?: string }).code === "23505") return "taken";
+    throw err;
+  }
+}
+
+/** Look someone up by the name they chose. Case-insensitive, as the index is. */
+export async function findPersonByHandle(
+  handle: string
+): Promise<PersonSummary | null> {
+  const { rows } = await getPool().query<PersonSummary>(
+    `SELECT telegram_user_id, username, handle, (avatar_file_id IS NOT NULL) AS has_avatar
+     FROM users WHERE LOWER(handle) = LOWER($1)`,
+    [handle]
+  );
+  return rows[0] ?? null;
 }
 
 export async function listFriends(userId: number): Promise<PersonSummary[]> {
   const { rows } = await getPool().query<PersonSummary>(
-    `SELECT u.telegram_user_id, u.username, (u.avatar_file_id IS NOT NULL) AS has_avatar
+    `SELECT u.telegram_user_id, u.username, u.handle, (u.avatar_file_id IS NOT NULL) AS has_avatar
      FROM friendships f
      JOIN users u ON u.telegram_user_id =
        CASE WHEN f.requester_id = $1 THEN f.addressee_id ELSE f.requester_id END
@@ -1178,7 +1226,7 @@ export async function listFriends(userId: number): Promise<PersonSummary[]> {
  */
 export async function listPendingFriendRequests(userId: number): Promise<PersonSummary[]> {
   const { rows } = await getPool().query<PersonSummary>(
-    `SELECT u.telegram_user_id, u.username, (u.avatar_file_id IS NOT NULL) AS has_avatar
+    `SELECT u.telegram_user_id, u.username, u.handle, (u.avatar_file_id IS NOT NULL) AS has_avatar
      FROM friendships f
      JOIN users u ON u.telegram_user_id = f.requester_id
      WHERE f.addressee_id = $1 AND f.status = 'pending'
@@ -1205,7 +1253,7 @@ export async function listOutgoingFriendRequests(userId: number): Promise<string
  */
 export async function findUserByUsername(username: string): Promise<PersonSummary | null> {
   const { rows } = await getPool().query<PersonSummary>(
-    `SELECT telegram_user_id, username, (avatar_file_id IS NOT NULL) AS has_avatar
+    `SELECT telegram_user_id, username, handle, (avatar_file_id IS NOT NULL) AS has_avatar
      FROM users WHERE lower(username) = lower($1)`,
     [username.replace(/^@/, "")]
   );
@@ -1214,7 +1262,7 @@ export async function findUserByUsername(username: string): Promise<PersonSummar
 
 export async function getPerson(telegramUserId: number): Promise<PersonSummary | null> {
   const { rows } = await getPool().query<PersonSummary>(
-    `SELECT telegram_user_id, username, (avatar_file_id IS NOT NULL) AS has_avatar
+    `SELECT telegram_user_id, username, handle, (avatar_file_id IS NOT NULL) AS has_avatar
      FROM users WHERE telegram_user_id = $1`,
     [telegramUserId]
   );

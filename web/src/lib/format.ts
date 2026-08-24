@@ -43,3 +43,31 @@ export function trackArtist(track: { artist: string | null }): string {
 export function pluralise(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
 }
+
+/**
+ * What to call somebody on screen.
+ *
+ * The Navaar handle first, because it is the name they chose and the only one
+ * anybody else can look them up by. Their Telegram username is the fallback
+ * for an account that has added tracks through the bot but never opened the
+ * app, and a first name after that — a person with neither is rare enough to
+ * be worth a plain label rather than a blank.
+ *
+ * One function rather than the same ternary in four views, so a person is
+ * never called one thing in Social and another on their own page.
+ */
+export function personName(
+  person:
+    | {
+        handle?: string | null;
+        username?: string | null;
+        first_name?: string | null;
+      }
+    | null
+    | undefined
+): string {
+  if (!person) return "Someone";
+  if (person.handle) return `@${person.handle}`;
+  if (person.username) return `@${person.username}`;
+  return person.first_name?.trim() || "Someone";
+}

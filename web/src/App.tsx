@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authenticate } from "./api";
 import { BottomNav } from "./components/BottomNav";
+import { ChooseName } from "./components/ChooseName";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
 import { Empty } from "./components/ui";
@@ -264,8 +265,22 @@ function Boot() {
     );
   }
 
+  // Before anything else, a name. Everything social is keyed on being able to
+  // name a person — a friend request, a credit line, a shared playlist — and an
+  // account that has never chosen one cannot take part in any of it. The bot
+  // creates rows for people who have only ever forwarded a file, so this is the
+  // first screen of the app rather than a step in a sign-up the app never had.
+  if (me.handle == null) {
+    return (
+      <ChooseName
+        suggestion={me.username ?? ""}
+        onChosen={(handle) => setMe({ ...me, handle })}
+      />
+    );
+  }
+
   return (
-    <LibraryProvider me={me}>
+    <LibraryProvider me={me} setMe={setMe}>
       <PlayerProvider>
         <Shell me={me} />
       </PlayerProvider>

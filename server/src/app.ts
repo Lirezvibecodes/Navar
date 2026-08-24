@@ -6,6 +6,7 @@ import { tracksRouter } from "./routes/tracks";
 import { playlistsRouter } from "./routes/playlists";
 import { albumsRouter, artistsRouter } from "./routes/collections";
 import { usersRouter } from "./routes/users";
+import { meRouter } from "./routes/me";
 import { friendsRouter } from "./routes/friends";
 
 // The web app is built into this package (see the build script) and served
@@ -52,6 +53,7 @@ export function createApp(bot: Telegraf | null): Express {
   app.use("/api/albums", albumsRouter());
   app.use("/api/artists", artistsRouter());
   app.use("/api/users", usersRouter());
+  app.use("/api/me", meRouter());
   app.use("/api/friends", friendsRouter());
 
   app.use(express.static(webDist));

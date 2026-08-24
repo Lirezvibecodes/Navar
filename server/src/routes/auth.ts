@@ -21,7 +21,7 @@ export function authRouter(): Router {
       return;
     }
 
-    await ensureUser(validated.user.id, validated.user.username);
+    const { handle } = await ensureUser(validated.user.id, validated.user.username);
     const token = signSession(validated.user.id, validated.user.username);
     // The identity comes back alongside the token because the client needs it
     // for every ownership decision it renders — whether to draw a heart, an
@@ -33,6 +33,10 @@ export function authRouter(): Router {
         id: validated.user.id,
         username: validated.user.username ?? null,
         first_name: validated.user.first_name ?? null,
+        // Null means this account has never chosen a name in Navaar, which is
+        // the one thing the client must handle before it can draw anything
+        // else: there is no sensible way to render a person with no name.
+        handle,
       },
     });
   }));

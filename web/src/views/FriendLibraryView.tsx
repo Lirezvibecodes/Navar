@@ -6,7 +6,7 @@ import { CollectionArt } from "../components/PixelArt";
 import { Empty, Screen, Skeleton } from "../components/ui";
 import { ChevronRightIcon } from "../icons";
 import { useToast } from "../context/ToastContext";
-import { pluralise } from "../lib/format";
+import { personName, pluralise } from "../lib/format";
 import { haptic } from "../telegram";
 import type { Person, Playlist } from "../types";
 
@@ -49,7 +49,7 @@ export function FriendLibraryView({
     };
   }, [friendId, toast]);
 
-  const handle = person?.username ? `@${person.username}` : "Their library";
+  const handle = person ? personName(person) : "Their library";
 
   return (
     <Screen>
@@ -59,7 +59,7 @@ export function FriendLibraryView({
       >
         <Avatar
           userId={friendId}
-          username={person?.username}
+          username={person?.handle ?? person?.username}
           hasAvatar={person?.has_avatar ?? false}
           size={56}
         />
