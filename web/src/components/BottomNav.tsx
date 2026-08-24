@@ -7,18 +7,29 @@ import { haptic } from "../telegram";
 /**
  * Home · Library · Social.
  *
- * A pill that hugs its three tabs and floats over the content, rather than a
- * bar ruled across the bottom of the screen. The active tab is a lime disc
- * with the name beside it; the other two are just their glyphs.
+ * Three separate buttons floating over the content — not one bar, and not one
+ * pill with three tabs inside it. Each tab that is not the current place is its
+ * own dark circle; the current one grows sideways into a glass capsule holding
+ * a lime disc and its name. Content runs through the gaps between them, which
+ * is what makes the row read as floating rather than as a rule across the
+ * bottom of the screen.
  *
- * Only the active tab carries a label. Three labelled pills at 13px would not
- * fit a 320px screen without shrinking the type below the floor, and the
- * inactive icons are only ever one tap from showing you what they are. The
- * label is what makes the lime disc read as a place rather than a button.
+ * The geometry is measured off the reference rather than chosen: a 52px
+ * circle, a 44px lime disc sitting 4px inside a 52px-tall capsule, 5px between
+ * tabs, 8px from the disc to the label and 15px from the label to the capsule's
+ * end. Those add up to the reference's capsule almost exactly.
  *
- * The open/close of that label is CSS, in `.nav-tab*` — one duration and one
- * curve across the width, the colour and the disc, so the switch reads as one
- * movement.
+ * The label is white. Only the glyph inside the lime disc is dark — the disc is
+ * the one surface bright enough to carry dark type, and putting that colour on
+ * the whole button is what made the name unreadable.
+ *
+ * Only the current tab is named. Three labelled capsules will not fit a 320px
+ * screen without dropping the type below its floor, and the label is what makes
+ * the lime disc read as a place rather than as a button.
+ *
+ * The open and close of that label is CSS, in `.nav-tab*`: one duration and one
+ * curve across the width, the colours, the glass and the disc together, so the
+ * switch is a single movement instead of several racing each other.
  */
 
 const TABS: { id: RootTab; label: string; icon: (p: IconProps) => React.ReactNode }[] =
@@ -35,8 +46,8 @@ export function BottomNav({
   active: RootTab | null;
   onSelect: (tab: RootTab) => void;
 }) {
-  // Published so every scrollable view reserves exactly the room the pill
-  // takes, which changes with the label and with the device inset.
+  // Published so every scrollable view reserves exactly the room the row takes,
+  // which changes with the device inset.
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -57,46 +68,40 @@ export function BottomNav({
         flex: "none",
         display: "flex",
         justifyContent: "center",
-        padding: "8px 14px 12px",
+        alignItems: "center",
+        gap: 5,
+        padding: "8px 12px 12px",
         paddingBottom: "calc(12px + var(--tg-safe-bottom))",
         position: "relative",
         zIndex: 30,
       }}
     >
-      <div
-        className="nav-bar-glass"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 2,
-          padding: 5,
-          borderRadius: 28,
-          pointerEvents: "auto",
-        }}
-      >
-        {TABS.map(({ id, label, icon: Icon }) => {
-          const on = active === id;
-          return (
-            <button
-              key={id}
-              aria-label={label}
-              aria-current={on ? "page" : undefined}
-              className="nav-press nav-tab"
-              onClick={() => {
-                haptic.select();
-                onSelect(id);
-              }}
-            >
-              <span className="nav-tab-disc">
-                <Icon size={19} />
-              </span>
-              {/* Rendered at zero width when inactive rather than removed, so
-                  the label grows out of the disc instead of popping in. */}
-              <span className="nav-tab-label">{label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {TABS.map(({ id, label, icon: Icon }) => {
+        const on = active === id;
+        return (
+          <button
+            key={id}
+            aria-label={label}
+            aria-current={on ? "page" : undefined}
+            className="nav-press nav-tab"
+            style={{ pointerEvents: "auto" }}
+            onClick={() => {
+              haptic.select();
+              onSelect(id);
+            }}
+          >
+            <span className="nav-tab-disc">
+              {/* One size in both states. These glyphs are drawn on a whole-unit
+                  pixel grid, and growing the active one would resample it
+                  mid-transition and lose the hard edges the set is built on. */}
+              <Icon size={20} />
+            </span>
+            {/* Rendered at zero width when inactive rather than removed, so the
+                name grows out of the disc instead of popping in beside it. */}
+            <span className="nav-tab-label">{label}</span>
+          </button>
+        );
+      })}
     </nav>
   );
 }
