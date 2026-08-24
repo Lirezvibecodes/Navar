@@ -12,6 +12,7 @@ import {
   playlistVisibleToRequester,
   removePlaylistTrack,
   renamePlaylist,
+  setPlaylistCover,
 } from "../repo";
 
 /** Reads a `{ trackIds: [...] }` body, rejecting anything that is not a list of strings. */
@@ -66,6 +67,38 @@ export function playlistsRouter(): Router {
       );
       if (!playlist) {
         res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(playlist);
+    })
+  );
+
+  /**
+   * Pin one of the playlist's own tracks as its cover, or send null to hand
+   * the choice back to the playlist.
+   *
+   * Its own route rather than a field on PATCH /:id, because rename rejects a
+   * missing name and a caller changing only the picture should not have to
+   * resend one.
+   */
+  router.put(
+    "/:id/cover",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const { trackId } = req.body ?? {};
+      if (trackId != null && typeof trackId !== "string") {
+        res.status(400).json({ error: "Bad trackId" });
+        return;
+      }
+      const playlist = await setPlaylistCover(
+        req.params.id,
+        (req as AuthedRequest).telegramUserId,
+        trackId ?? null
+      );
+      // One 404 for both "no such playlist" and "that track is not in it with
+      // artwork", so the response never confirms an id the caller guessed.
+      if (!playlist) {
+        res.status(404).json({ error: "Playlist or track not found" });
         return;
       }
       res.json(playlist);

@@ -433,6 +433,35 @@ export async function purgeExpiredTracks(): Promise<number> {
   return rowCount ?? 0;
 }
 
+/**
+ * A playlist's own columns, spelled out rather than `p.*` because every read
+ * below replaces the stored cover with a resolved one under the same name, and
+ * two columns called cover_track_id in one result set is a coin toss.
+ */
+const PLAYLIST_COLUMNS = `p.id, p.owner_telegram_id, p.name, p.created_at,
+     p.updated_at, p.visibility, p.share_slug, p.group_chat_id`;
+
+/**
+ * The picture: whatever the owner pinned, and otherwise the first track in the
+ * playlist that carries artwork.
+ *
+ * Resolving on read rather than storing means a playlist nobody has ever given
+ * a cover to still has one, and a playlist whose pinned track was later deleted
+ * quietly goes back to choosing for itself instead of showing a blank square.
+ */
+const PLAYLIST_COVER = `COALESCE(
+       (SELECT t.id FROM tracks t
+        WHERE t.id = p.cover_track_id AND ${LIVE_T} AND t.cover_image IS NOT NULL),
+       (SELECT t.id FROM playlist_tracks pt
+        JOIN tracks t ON t.id = pt.track_id
+        WHERE pt.playlist_id = p.id AND ${LIVE_T} AND t.cover_image IS NOT NULL
+        ORDER BY pt.position ASC LIMIT 1)
+     ) AS cover_track_id`;
+
+const PLAYLIST_TRACK_COUNT = `(SELECT COUNT(*) FROM playlist_tracks pt
+        JOIN tracks t ON t.id = pt.track_id
+        WHERE pt.playlist_id = p.id AND ${LIVE_T})::int AS track_count`;
+
 export async function createPlaylist(
   ownerTelegramId: number,
   name: string
@@ -448,14 +477,9 @@ export async function listPlaylists(
   ownerTelegramId: number
 ): Promise<Playlist[]> {
   const { rows } = await getPool().query<Playlist>(
-    `SELECT p.*,
-       (SELECT COUNT(*) FROM playlist_tracks pt
-        JOIN tracks t ON t.id = pt.track_id
-        WHERE pt.playlist_id = p.id AND ${LIVE_T})::int AS track_count,
-       (SELECT t.id FROM playlist_tracks pt
-        JOIN tracks t ON t.id = pt.track_id
-        WHERE pt.playlist_id = p.id AND ${LIVE_T} AND t.cover_image IS NOT NULL
-        ORDER BY pt.position ASC LIMIT 1) AS cover_track_id
+    `SELECT ${PLAYLIST_COLUMNS},
+       ${PLAYLIST_TRACK_COUNT},
+       ${PLAYLIST_COVER}
      FROM playlists p
      WHERE p.owner_telegram_id = $1
      ORDER BY p.updated_at DESC`,
@@ -464,17 +488,66 @@ export async function listPlaylists(
   return rows;
 }
 
+/**
+ * One playlist in the shape every list returns it in. Mutations re-read
+ * through this rather than using RETURNING *, so a rename never hands the app
+ * a raw null cover and blanks a picture that was only ever computed.
+ */
+async function readPlaylist(
+  id: string,
+  ownerTelegramId: number
+): Promise<Playlist | null> {
+  const { rows } = await getPool().query<Playlist>(
+    `SELECT ${PLAYLIST_COLUMNS},
+       ${PLAYLIST_TRACK_COUNT},
+       ${PLAYLIST_COVER}
+     FROM playlists p
+     WHERE p.id = $1 AND p.owner_telegram_id = $2`,
+    [id, ownerTelegramId]
+  );
+  return rows[0] ?? null;
+}
+
 export async function renamePlaylist(
   id: string,
   ownerTelegramId: number,
   name: string
 ): Promise<Playlist | null> {
-  const { rows } = await getPool().query<Playlist>(
+  const { rowCount } = await getPool().query(
     `UPDATE playlists SET name = $3, updated_at = now()
-     WHERE id = $1 AND owner_telegram_id = $2 RETURNING *`,
+     WHERE id = $1 AND owner_telegram_id = $2`,
     [id, ownerTelegramId, name]
   );
-  return rows[0] ?? null;
+  if ((rowCount ?? 0) === 0) return null;
+  return readPlaylist(id, ownerTelegramId);
+}
+
+/**
+ * Pin a cover, or pass null to hand the choice back to the playlist.
+ *
+ * The track has to be one of the playlist's own and has to actually carry
+ * artwork — the subquery is the check, so a track id from somebody else's
+ * library cannot be pinned by guessing it, and the update simply matches no
+ * rows instead of storing something the reader would then have to filter out.
+ */
+export async function setPlaylistCover(
+  id: string,
+  ownerTelegramId: number,
+  trackId: string | null
+): Promise<Playlist | null> {
+  const { rowCount } = await getPool().query(
+    `UPDATE playlists p SET cover_track_id = $3, updated_at = now()
+     WHERE p.id = $1 AND p.owner_telegram_id = $2
+       AND ($3::uuid IS NULL OR EXISTS (
+         SELECT 1 FROM playlist_tracks pt
+         JOIN tracks t ON t.id = pt.track_id
+         WHERE pt.playlist_id = p.id AND t.id = $3::uuid
+           AND ${LIVE_T} AND t.cover_image IS NOT NULL
+       ))`,
+    [id, ownerTelegramId, trackId]
+  );
+  if ((rowCount ?? 0) === 0) return null;
+  return readPlaylist(id, ownerTelegramId);
 }
 
 export async function deletePlaylist(
@@ -536,14 +609,9 @@ export async function listPlaylistsVisibleTo(
   requesterTelegramId: number
 ): Promise<Playlist[]> {
   const { rows } = await getPool().query<Playlist>(
-    `SELECT p.*,
-       (SELECT COUNT(*) FROM playlist_tracks pt
-        JOIN tracks t ON t.id = pt.track_id
-        WHERE pt.playlist_id = p.id AND ${LIVE_T})::int AS track_count,
-       (SELECT t.id FROM playlist_tracks pt
-        JOIN tracks t ON t.id = pt.track_id
-        WHERE pt.playlist_id = p.id AND ${LIVE_T} AND t.cover_image IS NOT NULL
-        ORDER BY pt.position ASC LIMIT 1) AS cover_track_id
+    `SELECT ${PLAYLIST_COLUMNS},
+       ${PLAYLIST_TRACK_COUNT},
+       ${PLAYLIST_COVER}
      FROM playlists p
      WHERE p.owner_telegram_id = $1
        AND ${playlistVisibleTo("$2")}
@@ -580,7 +648,10 @@ export async function playlistVisibleToRequester(
   requesterTelegramId: number
 ): Promise<Playlist | null> {
   const { rows } = await getPool().query<Playlist>(
-    `SELECT p.* FROM playlists p
+    `SELECT ${PLAYLIST_COLUMNS},
+       ${PLAYLIST_TRACK_COUNT},
+       ${PLAYLIST_COVER}
+     FROM playlists p
      WHERE p.id = $1 AND ${playlistVisibleTo("$2")}`,
     [playlistId, requesterTelegramId]
   );

@@ -139,6 +139,17 @@ export function renamePlaylist(id: string, name: string): Promise<Playlist> {
   });
 }
 
+/** Pin a cover, or pass null to let the playlist pick its own again. */
+export function setPlaylistCover(
+  id: string,
+  trackId: string | null
+): Promise<Playlist> {
+  return request<Playlist>(`/api/playlists/${id}/cover`, {
+    method: "PUT",
+    body: json({ trackId }),
+  });
+}
+
 export function deletePlaylist(id: string): Promise<void> {
   return request<void>(`/api/playlists/${id}`, { method: "DELETE" });
 }
