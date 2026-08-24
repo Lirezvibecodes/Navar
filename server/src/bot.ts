@@ -8,7 +8,13 @@ import {
   IncomingAudio,
 } from "./audio-ingest";
 import { resolveCoverArt } from "./cover-art";
-import { logIngestedTrack, noteChannel, postCoverPhoto } from "./channels";
+import {
+  captionOf,
+  logIngestedTrack,
+  noteChannel,
+  personLabel,
+  postCoverPhoto,
+} from "./channels";
 import {
   countTracksWithCoverBytes,
   ensureUser,
@@ -192,6 +198,7 @@ export function createBot(): Telegraf | null {
   bot.command("covers", async (ctx) => {
     if (!isPrivate(ctx)) return;
     const ownerId = ctx.from.id;
+    const owner = personLabel(ownerId, ctx.from.username);
     try {
       const stranded = await countTracksWithCoverBytes(ownerId);
       const missing = await listTracksMissingCover(ownerId);
@@ -203,7 +210,7 @@ export function createBot(): Telegraf | null {
       // Housekeeping first: artwork already held in the database is moved out
       // to the cover channel, which is where covers live now. Nothing about
       // the picture changes, only where it is kept.
-      const moved = await offloadStoredCovers(ownerId);
+      const moved = await offloadStoredCovers(ownerId, owner);
 
       const batch = missing.slice(0, COVER_BACKFILL_BATCH);
       if (batch.length > 0) {
@@ -214,7 +221,15 @@ export function createBot(): Telegraf | null {
       for (const track of batch) {
         const cover = await resolveCoverArt({ fileId: track.telegram_file_id });
         if (!cover) continue;
-        const fileId = await postCoverPhoto(cover.image, cover.mimeType);
+        const fileId = await postCoverPhoto(
+          cover.image,
+          cover.mimeType,
+          captionOf([
+            [track.title, track.artist].filter(Boolean).join(" — ") || "Untitled",
+            `Found for ${owner}`,
+            track.id,
+          ])
+        );
         await updateTrackCover(
           track.id,
           ownerId,
@@ -407,13 +422,21 @@ export function createBot(): Telegraf | null {
    * inline are selected, so an interrupted run picks up where it stopped.
    * A cover the channel refuses is left exactly where it is.
    */
-  async function offloadStoredCovers(ownerId: number): Promise<number> {
+  async function offloadStoredCovers(
+    ownerId: number,
+    owner: string
+  ): Promise<number> {
     const stored = await listTracksWithCoverBytes(ownerId, COVER_BACKFILL_BATCH);
     let moved = 0;
     for (const row of stored) {
       const fileId = await postCoverPhoto(
         row.cover_image,
-        row.cover_mime_type ?? "image/jpeg"
+        row.cover_mime_type ?? "image/jpeg",
+        captionOf([
+          [row.title, row.artist].filter(Boolean).join(" — ") || "Untitled",
+          `Moved out of storage for ${owner}`,
+          row.id,
+        ])
       );
       if (!fileId) break;
       await offloadTrackCover(row.id, fileId);

@@ -294,11 +294,11 @@ export async function getTrackForListener(
 /** Tracks whose artwork was never captured — the input to a cover backfill. */
 export async function listTracksMissingCover(
   ownerTelegramId: number
-): Promise<Pick<Track, "id" | "title" | "telegram_file_id">[]> {
+): Promise<Pick<Track, "id" | "title" | "artist" | "telegram_file_id">[]> {
   const { rows } = await getPool().query<
-    Pick<Track, "id" | "title" | "telegram_file_id">
+    Pick<Track, "id" | "title" | "artist" | "telegram_file_id">
   >(
-    `SELECT id, title, telegram_file_id FROM tracks
+    `SELECT id, title, artist, telegram_file_id FROM tracks
      WHERE owner_telegram_id = $1 AND NOT ${HAS_COVER} AND ${LIVE}
      ORDER BY created_at DESC`,
     [ownerTelegramId]
@@ -469,6 +469,8 @@ export async function offloadTrackCover(id: string, fileId: string): Promise<voi
 
 export interface StoredCover {
   id: string;
+  title: string | null;
+  artist: string | null;
   cover_image: Buffer;
   cover_mime_type: string | null;
 }
@@ -479,7 +481,7 @@ export async function listTracksWithCoverBytes(
   limit: number
 ): Promise<StoredCover[]> {
   const { rows } = await getPool().query<StoredCover>(
-    `SELECT id, cover_image, cover_mime_type FROM tracks
+    `SELECT id, title, artist, cover_image, cover_mime_type FROM tracks
      WHERE owner_telegram_id = $1 AND cover_image IS NOT NULL AND ${LIVE}
      ORDER BY created_at DESC
      LIMIT $2`,
@@ -512,7 +514,7 @@ export async function updatePlaylistCover(
     [id, ownerTelegramId, fileId]
   );
   if (!rowCount) return null;
-  return readPlaylist(id, ownerTelegramId);
+  return getPlaylist(id, ownerTelegramId);
 }
 
 /** Marks a track deleted. Reversible for UNDO_WINDOW_DAYS. */
@@ -622,7 +624,7 @@ export async function listPlaylists(
  * through this rather than using RETURNING *, so a rename never hands the app
  * a raw null cover and blanks a picture that was only ever computed.
  */
-async function readPlaylist(
+export async function getPlaylist(
   id: string,
   ownerTelegramId: number
 ): Promise<Playlist | null> {
@@ -663,7 +665,7 @@ export async function updatePlaylist(
     sets.push(`description = $${params.length}`);
   }
   // Nothing to write is not an error — the caller still wants the row back.
-  if (sets.length === 0) return readPlaylist(id, ownerTelegramId);
+  if (sets.length === 0) return getPlaylist(id, ownerTelegramId);
 
   const { rowCount } = await getPool().query(
     `UPDATE playlists SET ${sets.join(", ")}, updated_at = now()
@@ -671,7 +673,7 @@ export async function updatePlaylist(
     params
   );
   if ((rowCount ?? 0) === 0) return null;
-  return readPlaylist(id, ownerTelegramId);
+  return getPlaylist(id, ownerTelegramId);
 }
 
 /**
@@ -699,7 +701,7 @@ export async function setPlaylistCover(
     [id, ownerTelegramId, trackId]
   );
   if ((rowCount ?? 0) === 0) return null;
-  return readPlaylist(id, ownerTelegramId);
+  return getPlaylist(id, ownerTelegramId);
 }
 
 export async function deletePlaylist(

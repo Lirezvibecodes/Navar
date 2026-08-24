@@ -7,7 +7,7 @@ import {
 } from "./repo";
 import type { IngestSession, NewTrack } from "./repo";
 import { readAudioTags } from "./cover-art";
-import { postCoverPhoto } from "./channels";
+import { captionOf, personLabel, postCoverPhoto } from "./channels";
 import { getTelegramFileDownloadUrl } from "./telegram-files";
 import type { Track } from "./types";
 
@@ -106,16 +106,22 @@ async function prepareTrack(
   // down, so a library's worth of covers costs the database a few hundred
   // bytes rather than a few hundred megabytes. A channel that is unset or
   // unreachable simply leaves the bytes where they used to go.
+  const id = randomUUID();
   const coverFileId = tags.cover
     ? await postCoverPhoto(
         tags.cover.image,
         tags.cover.mimeType,
-        [title, artist].filter(Boolean).join(" — ") || undefined
+        captionOf([
+          [title, artist].filter(Boolean).join(" — ") || "Untitled",
+          tags.album ? `Album: ${tags.album}` : null,
+          `Added by ${personLabel(ownerTelegramId, username)}`,
+          id,
+        ])
       )
     : null;
 
   return {
-    id: randomUUID(),
+    id,
     ownerTelegramId,
     title,
     artist,

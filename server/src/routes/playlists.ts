@@ -8,6 +8,8 @@ import {
   removePlaylistTracksBulk,
   createPlaylist,
   deletePlaylist,
+  getPerson,
+  getPlaylist,
   getPlaylistCover,
   listPlaylists,
   listPlaylistTracksForListener,
@@ -17,6 +19,7 @@ import {
   updatePlaylistCover,
   setPlaylistCover,
 } from "../repo";
+import { captionOf, personLabel } from "../channels";
 import { serveCover, storeCover } from "./covers";
 
 /** The cap the database enforces too — see migration 008. */
@@ -319,7 +322,29 @@ export function playlistsRouter(): Router {
         return;
       }
 
-      const stored = await storeCover(file.buffer, file.mimetype);
+      // Read the playlist before the picture goes anywhere. It supplies the
+      // caption, and it means a picture for a playlist that is not the
+      // caller's never reaches the channel at all — the ownership check used
+      // to happen after the upload, which left a stranger able to post into
+      // the cover channel and only then be told no.
+      const ownerId = (req as AuthedRequest).telegramUserId;
+      const playlist = await getPlaylist(req.params.id, ownerId);
+      if (!playlist) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      const owner = await getPerson(ownerId);
+      const stored = await storeCover(
+        file.buffer,
+        file.mimetype,
+        captionOf([
+          `Playlist cover — ${playlist.name}`,
+          `Playlist by ${personLabel(ownerId, owner?.username)}`,
+          playlist.description,
+          playlist.id,
+        ])
+      );
       // A playlist cover is only ever a channel photo. There is no bytes column
       // on playlists to fall back into, so a channel that would not take the
       // picture is an honest failure rather than a silently dropped upload.
@@ -330,7 +355,7 @@ export function playlistsRouter(): Router {
 
       const updated = await updatePlaylistCover(
         req.params.id,
-        (req as AuthedRequest).telegramUserId,
+        ownerId,
         stored.fileId
       );
       if (!updated) {

@@ -20,12 +20,17 @@ import type { CoverSource } from "../repo";
  * Telegram comes back as a JPEG Telegram itself produced — but the caller
  * validates it before calling either way, because the fallback is not a rare
  * enough path to leave unguarded.
+ *
+ * The caption is required rather than optional: it is the only thing that
+ * makes the cover channel legible to a person, and a caller that had nothing
+ * to say about a picture it is about to post has not thought about it.
  */
 export async function storeCover(
   image: Buffer,
-  mimeType: string
+  mimeType: string,
+  caption: string
 ): Promise<CoverSource> {
-  const fileId = await postCoverPhoto(image, mimeType);
+  const fileId = await postCoverPhoto(image, mimeType, caption);
   return fileId
     ? { kind: "telegram", fileId }
     : { kind: "bytes", image, mimeType };

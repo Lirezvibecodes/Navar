@@ -188,6 +188,30 @@ function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
+/**
+ * A caption, one fact per line, skipping the facts there were none of.
+ *
+ * Everything that reaches these channels says what it is and whose it is. A
+ * channel of unlabelled album art is a pile rather than an archive: there is
+ * no telling whose cover you are looking at, or which of two similar squares
+ * belongs to the playlist you were trying to fix.
+ */
+export function captionOf(lines: (string | null | undefined)[]): string {
+  const kept = lines.filter((line): line is string => !!line);
+  return truncate(kept.join("\n"), CAPTION_LIMIT);
+}
+
+/**
+ * How a person is named in a caption. The id is the fallback rather than the
+ * first choice because a Telegram username is optional and can be changed.
+ */
+export function personLabel(
+  telegramId: number | string,
+  username: string | null | undefined
+): string {
+  return username ? `@${username}` : `id ${telegramId}`;
+}
+
 export interface LoggedTrack {
   id: string;
   title: string | null;
@@ -225,21 +249,21 @@ export async function logIngestedTrack(
   const chatId = await channelId("logs");
   if (!chatId) return;
 
-  const who = source.username ? `@${source.username}` : `id ${source.senderId}`;
-  const lines = [
+  const caption = captionOf([
     track.title ?? "Untitled",
     track.artist ?? "Unknown artist",
     track.album ? `Album: ${track.album}` : null,
     formatDuration(track.duration_seconds),
-    `Added by ${who}${source.groupTitle ? ` in “${source.groupTitle}”` : ""}`,
+    `Added by ${personLabel(source.senderId, source.username)}` +
+      (source.groupTitle ? ` in “${source.groupTitle}”` : ""),
     track.id,
-  ].filter((line): line is string => line !== null);
+  ]);
 
   try {
     const form = new FormData();
     form.append("chat_id", String(chatId));
     form.append("audio", track.telegram_file_id);
-    form.append("caption", truncate(lines.join("\n"), CAPTION_LIMIT));
+    form.append("caption", caption);
     if (track.title) form.append("title", track.title);
     if (track.artist) form.append("performer", track.artist);
     await callBotApi("sendAudio", form);

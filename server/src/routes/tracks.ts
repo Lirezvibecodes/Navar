@@ -3,6 +3,8 @@ import { Readable } from "node:stream";
 import multer from "multer";
 import { requireAuth, AuthedRequest } from "../middleware";
 import {
+  getPerson,
+  getTrack,
   getTrackCover,
   getTrackForListener,
   listTracks,
@@ -23,6 +25,7 @@ function readTrackIds(body: unknown): string[] | null {
   return ids as string[];
 }
 import { getTelegramFileDownloadUrl } from "../telegram-files";
+import { captionOf, personLabel } from "../channels";
 import { serveCover, storeCover } from "./covers";
 import { asyncHandler } from "../asyncHandler";
 
@@ -216,10 +219,29 @@ export function tracksRouter(): Router {
         return;
       }
 
+      // Read the track first: it names the picture in the channel, and it
+      // keeps an upload for somebody else's track from being posted there
+      // before the ownership check gets a chance to refuse it.
+      const track = await getTrack(req.params.id, ownerId);
+      if (!track) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      const owner = await getPerson(ownerId);
       const updated = await updateTrackCover(
         req.params.id,
         ownerId,
-        await storeCover(file.buffer, file.mimetype)
+        await storeCover(
+          file.buffer,
+          file.mimetype,
+          captionOf([
+            [track.title, track.artist].filter(Boolean).join(" — ") || "Untitled",
+            track.album ? `Album: ${track.album}` : null,
+            `Cover set by ${personLabel(ownerId, owner?.username)}`,
+            track.id,
+          ])
+        )
       );
       if (!updated) {
         res.status(404).json({ error: "Not found" });
