@@ -1,176 +1,255 @@
-import { useCallback, useEffect, useState } from "react";
-import { BottomNav, Sidebar } from "./components/Nav";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { authenticate } from "./api";
+import { BottomNav } from "./components/BottomNav";
 import { NowPlayingBar } from "./components/NowPlayingBar";
-import { TrackEditModal } from "./components/TrackEditModal";
-import { TrackList } from "./components/TrackList";
-import { PlaylistDetailView } from "./components/PlaylistDetailView";
-import { PlaylistsView } from "./components/PlaylistsView";
-import { PlayerProvider } from "./context/PlayerContext";
-import {
-  addTrackToPlaylist,
-  authenticate,
-  createPlaylist,
-  deletePlaylist,
-  listPlaylists,
-  listPlaylistTracks,
-  listTracks,
-  removeTrackFromPlaylist,
-  renamePlaylist,
-} from "./api";
-import { getTelegramWebApp } from "./telegram";
-import type { Playlist, Track } from "./types";
-import type { View } from "./view";
+import { TopBar } from "./components/TopBar";
+import { Empty } from "./components/ui";
+import { LibraryProvider, useLibrary } from "./context/LibraryContext";
+import { PlayerProvider, usePlayer } from "./context/PlayerContext";
+import { ToastProvider } from "./context/ToastContext";
+import { HomeView } from "./views/HomeView";
+import { LibraryView } from "./views/LibraryView";
+import { CrateView } from "./views/CrateView";
+import { PlaylistView } from "./views/PlaylistView";
+import { CollectionView } from "./views/CollectionView";
+import { SocialView } from "./views/SocialView";
+import { ProfileView } from "./views/ProfileView";
+import { FriendLibraryView } from "./views/FriendLibraryView";
+import { PlayerView } from "./views/PlayerView";
+import { getTelegramWebApp, initTelegramPlatform, setBackButton } from "./telegram";
+import type { Me } from "./types";
+import type { RootTab, View } from "./view";
+import { rootTabFor } from "./view";
 
-function AppContent() {
-  const [ready, setReady] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [view, setView] = useState<View>({ type: "library" });
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
-  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+/**
+ * The shell.
+ *
+ * Navigation is a stack of View values, not a router. Telegram's own back
+ * button pops it — the app draws no back chevron of its own anywhere except
+ * the player, which is a sheet rather than a screen. Switching tabs resets the
+ * stack to that tab's root: a Mini App session is short, and coming back to
+ * Library four levels deep is more surprising than useful.
+ *
+ * The player is an overlay rather than a stack entry, because it must be able
+ * to cover the nav and the bar it grew out of.
+ */
 
-  useEffect(() => {
-    const webApp = getTelegramWebApp();
-    webApp?.ready();
-    webApp?.expand();
+export interface Navigation {
+  push: (view: View) => void;
+  pop: () => void;
+  openPlayer: () => void;
+}
 
-    async function init() {
-      try {
-        if (webApp?.initData) {
-          await authenticate(webApp.initData);
-        }
-        const [trackList, playlistList] = await Promise.all([listTracks(), listPlaylists()]);
-        setTracks(trackList);
-        setPlaylists(playlistList);
-        setReady(true);
-      } catch (err) {
-        setAuthError(err instanceof Error ? err.message : "Failed to authenticate");
-      }
-    }
-    init();
+const TITLES: Record<View["type"], string> = {
+  home: "Navaar",
+  library: "Library",
+  crate: "The Crate",
+  playlist: "Playlist",
+  artist: "Artist",
+  album: "Album",
+  social: "Social",
+  profile: "Profile",
+  friendLibrary: "Library",
+  shared: "Navaar",
+};
+
+function Shell({ me }: { me: Me }) {
+  const [stack, setStack] = useState<View[]>([{ type: "home" }]);
+  const [direction, setDirection] = useState<"push" | "pop">("push");
+  const [playerOpen, setPlayerOpen] = useState(false);
+  const [searchOnOpen, setSearchOnOpen] = useState(false);
+  // Bumped on every navigation so the incoming screen remounts and replays its
+  // entrance; without it React reuses the subtree and nothing animates.
+  const seq = useRef(0);
+
+  const { tracks, playlists, loading, error, reload } = useLibrary();
+  const { current, restoreLast } = usePlayer();
+
+  const view = stack[stack.length - 1];
+
+  const push = useCallback((next: View) => {
+    seq.current += 1;
+    setDirection("push");
+    setStack((s) => [...s, next]);
   }, []);
 
-  const refreshPlaylistTracks = useCallback(async (playlistId: string) => {
-    const list = await listPlaylistTracks(playlistId);
-    setPlaylistTracks(list);
+  const pop = useCallback(() => {
+    seq.current += 1;
+    setDirection("pop");
+    setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   }, []);
 
+  const selectTab = useCallback((tab: RootTab) => {
+    seq.current += 1;
+    setDirection("push");
+    setStack([{ type: tab } as View]);
+  }, []);
+
+  const nav = useMemo<Navigation>(
+    () => ({ push, pop, openPlayer: () => setPlayerOpen(true) }),
+    [push, pop]
+  );
+
+  // Telegram's back button is the only back affordance. It pops the player
+  // first, because the player sits over whatever screen opened it.
   useEffect(() => {
-    if (view.type === "playlist") {
-      refreshPlaylistTracks(view.id);
+    const canGoBack = playerOpen || stack.length > 1;
+    if (!canGoBack) return setBackButton(null);
+    return setBackButton(() => {
+      if (playerOpen) setPlayerOpen(false);
+      else pop();
+    });
+  }, [playerOpen, stack.length, pop]);
+
+  // The search button hands the Crate a flag rather than a mode of its own;
+  // it is spent as soon as the Crate is left, so arriving there from Library
+  // later does not silently open a keyboard.
+  useEffect(() => {
+    if (view.type !== "crate" && searchOnOpen) setSearchOnOpen(false);
+  }, [view.type, searchOnOpen]);
+
+  // Restoring where you were is a one-shot: only the first library load, and
+  // only when nothing has started playing in the meantime.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || loading || tracks.length === 0 || current) return;
+    restored.current = true;
+    restoreLast(tracks);
+  }, [loading, tracks, current, restoreLast]);
+
+  const body = () => {
+    if (error) {
+      return (
+        <Empty
+          title="Nothing loaded"
+          body={error}
+          action="Try again"
+          onAction={() => void reload()}
+        />
+      );
     }
-  }, [view, refreshPlaylistTracks]);
-
-  async function handleCreatePlaylist(name: string) {
-    const playlist = await createPlaylist(name);
-    setPlaylists((prev) => [...prev, playlist]);
-  }
-
-  async function handleRenamePlaylist(playlist: Playlist, name: string) {
-    const updated = await renamePlaylist(playlist.id, name);
-    setPlaylists((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-  }
-
-  async function handleDeletePlaylist(playlist: Playlist) {
-    await deletePlaylist(playlist.id);
-    setPlaylists((prev) => prev.filter((p) => p.id !== playlist.id));
-    setView({ type: "playlists" });
-  }
-
-  async function handleAddToPlaylist(track: Track, playlistId: string) {
-    await addTrackToPlaylist(playlistId, track.id);
-    if (view.type === "playlist" && view.id === playlistId) {
-      await refreshPlaylistTracks(playlistId);
+    switch (view.type) {
+      case "home":
+        return <HomeView nav={nav} />;
+      case "library":
+        return <LibraryView nav={nav} />;
+      case "crate":
+        return <CrateView nav={nav} filter={view.filter} autoSearch={searchOnOpen} />;
+      case "playlist":
+        return <PlaylistView nav={nav} id={view.id} />;
+      case "artist":
+      case "album":
+        return <CollectionView nav={nav} kind={view.type} name={view.name} />;
+      case "social":
+        return <SocialView nav={nav} />;
+      case "profile":
+        return <ProfileView nav={nav} userId={view.userId} />;
+      case "friendLibrary":
+        return <FriendLibraryView nav={nav} friendId={view.friendId} />;
+      case "shared":
+        return null;
     }
-  }
+  };
 
-  async function handleRemoveFromPlaylist(track: Track) {
-    if (view.type !== "playlist") return;
-    await removeTrackFromPlaylist(view.id, track.id);
-    await refreshPlaylistTracks(view.id);
-  }
-
-  function handleTrackSaved(updated: Track) {
-    setTracks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-    setPlaylistTracks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-  }
-
-  if (authError) {
-    return (
-      <div className="flex h-screen items-center justify-center p-6 text-center text-sm text-red-400">
-        {authError}
-      </div>
-    );
-  }
-
-  if (!ready) {
-    return (
-      <div className="flex h-screen items-center justify-center text-sm text-app-text-muted">
-        Loading…
-      </div>
-    );
-  }
-
-  const activePlaylist =
-    view.type === "playlist" ? playlists.find((p) => p.id === view.id) : undefined;
+  const title =
+    view.type === "playlist"
+      ? (playlists.find((p) => p.id === view.id)?.name ?? TITLES.playlist)
+      : view.type === "artist" || view.type === "album"
+        ? view.name
+        : TITLES[view.type];
 
   return (
-    <div className="flex h-screen flex-col">
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar view={view} playlists={playlists} onNavigate={setView} />
-        <main className="flex-1 overflow-y-auto p-4 pb-6">
-          {view.type === "library" && (
-            <div className="flex flex-col gap-4">
-              <h1 className="text-2xl font-bold">Your Library</h1>
-              <TrackList
-                tracks={tracks}
-                playlists={playlists}
-                emptyMessage="No tracks yet — forward an audio file to the bot to get started."
-                onEdit={setEditingTrack}
-                onAddToPlaylist={handleAddToPlaylist}
-              />
-            </div>
-          )}
-          {view.type === "playlists" && (
-            <PlaylistsView
-              playlists={playlists}
-              onCreate={handleCreatePlaylist}
-              onOpen={setView}
-            />
-          )}
-          {view.type === "playlist" && activePlaylist && (
-            <PlaylistDetailView
-              playlist={activePlaylist}
-              tracks={playlistTracks}
-              playlists={playlists}
-              onRename={(name) => handleRenamePlaylist(activePlaylist, name)}
-              onDelete={() => handleDeletePlaylist(activePlaylist)}
-              onEditTrack={setEditingTrack}
-              onAddToPlaylist={handleAddToPlaylist}
-              onRemoveFromPlaylist={handleRemoveFromPlaylist}
-            />
-          )}
-        </main>
-      </div>
-      <NowPlayingBar />
-      <BottomNav view={view} playlists={playlists} onNavigate={setView} />
+    <div
+      className="nav-screen-bg"
+      style={{ display: "flex", flexDirection: "column", height: "100%" }}
+    >
+      <TopBar
+        title={title}
+        me={me}
+        onSearch={
+          view.type === "crate"
+            ? undefined
+            : () => {
+                setSearchOnOpen(true);
+                push({ type: "crate", filter: "all" });
+              }
+        }
+        onProfile={() => push({ type: "profile", userId: me.id })}
+      />
 
-      {editingTrack && (
-        <TrackEditModal
-          track={editingTrack}
-          onClose={() => setEditingTrack(null)}
-          onSaved={handleTrackSaved}
-        />
-      )}
+      <div
+        key={seq.current}
+        className={direction === "push" ? "nav-view-push" : "nav-view-pop"}
+        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
+        {body()}
+      </div>
+
+      <NowPlayingBar onOpen={() => setPlayerOpen(true)} />
+      <BottomNav active={rootTabFor(view)} onSelect={selectTab} />
+
+      {playerOpen ? (
+        <PlayerView nav={nav} onClose={() => setPlayerOpen(false)} />
+      ) : null}
     </div>
+  );
+}
+
+function Boot() {
+  const [me, setMe] = useState<Me | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => initTelegramPlatform(), []);
+
+  const signIn = useCallback(async () => {
+    setError(null);
+    const initData = getTelegramWebApp()?.initData;
+    if (!initData) {
+      setError("Open Navaar from Telegram to sign in.");
+      return;
+    }
+    try {
+      setMe(await authenticate(initData));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not sign you in");
+    }
+  }, []);
+
+  useEffect(() => {
+    void signIn();
+  }, [signIn]);
+
+  if (!me) {
+    return (
+      <div
+        className="nav-screen-bg"
+        style={{ height: "100%", display: "flex", flexDirection: "column" }}
+      >
+        {error ? (
+          <Empty
+            title="Not signed in"
+            body={error}
+            action="Try again"
+            onAction={() => void signIn()}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <LibraryProvider me={me}>
+      <PlayerProvider>
+        <Shell me={me} />
+      </PlayerProvider>
+    </LibraryProvider>
   );
 }
 
 export default function App() {
   return (
-    <PlayerProvider>
-      <AppContent />
-    </PlayerProvider>
+    <ToastProvider>
+      <Boot />
+    </ToastProvider>
   );
 }

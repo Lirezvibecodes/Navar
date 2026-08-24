@@ -1,31 +1,528 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Fonts
+
+   Both families are self-hosted from /public/fonts. Nothing is fetched from
+   Google or from telegram.org: a Mini App runs inside a WebView on whatever
+   network the phone happens to be on, and a blocked font host means the pixel
+   display face silently falls back to a system serif.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Pixelify Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/pixelify-sans-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Pixelify Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/pixelify-sans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+    U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Pixelify Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/pixelify-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "General Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/general-sans-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "General Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/general-sans-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "General Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/general-sans-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "General Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/general-sans-700.woff2") format("woff2");
+}
+
+/* ---------------------------------------------------------------------------
+   Tokens
+
+   Three colours do all the work, and each one means exactly one thing. Lime is
+   action and playback and nothing else; periwinkle is people; the pale blue is
+   secondary artwork. Anything that starts using lime for "friend" or
+   periwinkle for "playing" has broken the only rule the palette has.
+   --------------------------------------------------------------------------- */
+
 @theme {
-  --color-app-bg: #0d0d0d;
-  --color-app-surface: #181818;
-  --color-app-surface-hover: #282828;
-  --color-app-accent: #1db954;
-  --color-app-text: #ffffff;
-  --color-app-text-muted: #a7a7a7;
+  --color-nav-bg: #030303;
+  --color-nav-action: #dffc8e;
+  --color-nav-action-soft: #eaf7c9;
+  --color-nav-social: #89aeff;
+  --color-nav-art: #bce4fe;
+  --color-nav-card-top: #171a1f;
+  --color-nav-card-bottom: #101216;
+  --color-nav-text: #ffffff;
+  --color-nav-muted: rgba(255, 255, 255, 0.52);
+  --color-nav-faint: rgba(255, 255, 255, 0.32);
+  --color-nav-ghost: rgba(255, 255, 255, 0.22);
+
+  --font-display: "Pixelify Sans", monospace;
+  --font-sans: "General Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  /* Telegram's own insets, written by telegram.ts on every viewport event.
+     CSS env(safe-area-inset-*) resolves to zero inside the iOS Mini App
+     WebView, so nothing in this app may read it. */
+  --tg-safe-top: 0px;
+  --tg-safe-bottom: 0px;
+  --tg-content-top: 0px;
+
+  /* Height of the fixed furniture at the bottom of the screen, so every
+     scrollable view can reserve exactly the right amount of room. The player
+     value flips from 0 the first time something starts playing, and every
+     list's padding follows it. */
+  --nav-bottomnav-h: 78px;
+  --nav-nowplaying-h: 0px;
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
 body,
 #root {
   height: 100%;
-  background: var(--color-app-bg);
-  color: var(--color-app-text);
 }
 
-* {
-  box-sizing: border-box;
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-nav-text);
+  background: var(--color-nav-bg);
+  /* The app owns its own scrolling containers; the document never scrolls, or
+     the Mini App's pull-to-close fights every list in the app. */
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
+/* The screen wash: film grain over two coloured pools, one lime from the top
+   and one periwinkle from the bottom right. On a fixed layer rather than on
+   body so it never scrolls with content. */
+.nav-screen-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.19'/%3E%3C/svg%3E")
+      repeat,
+    radial-gradient(115% 55% at 50% -8%, rgba(223, 252, 142, 0.11), transparent 62%),
+    radial-gradient(95% 55% at 108% 104%, rgba(137, 174, 255, 0.09), transparent 66%),
+    #030303;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--color-app-surface-hover);
-  border-radius: 6px;
+/* ---------------------------------------------------------------------------
+   Surfaces
+
+   The two glass recipes and the card gradient are used on nearly every screen.
+   They are classes rather than Tailwind utilities because each is a stack of
+   five properties that must stay in step; spelling them out per component is
+   how the blur radius ends up different on one sheet.
+   --------------------------------------------------------------------------- */
+
+.nav-glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.045));
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    0 10px 30px rgba(0, 0, 0, 0.55);
+}
+
+/* The player's queue/lyrics sheet: deeper blur, light only from above, and a
+   shadow that falls upward because the sheet sits on top of the screen. */
+.nav-sheet {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.04));
+  backdrop-filter: blur(34px) saturate(190%);
+  -webkit-backdrop-filter: blur(34px) saturate(190%);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 -16px 44px rgba(0, 0, 0, 0.55);
+  border-radius: 22px 22px 0 0;
+}
+
+.nav-card {
+  background: linear-gradient(180deg, var(--color-nav-card-top), var(--color-nav-card-bottom));
+}
+
+/* ---------------------------------------------------------------------------
+   Type
+   --------------------------------------------------------------------------- */
+
+/* Screen titles only. The pixel face is unreadable below about 15px and
+   illegible in a paragraph; it never appears in body copy or on a control. */
+.nav-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ---------------------------------------------------------------------------
+   Scrolling
+   --------------------------------------------------------------------------- */
+
+.nav-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* Contains the bounce so a list at its end does not hand the gesture to the
+     WebView, which would read it as a dismissal. */
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+}
+.nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* A horizontal shelf. Snaps so a half-shown tile does not sit under the edge. */
+.nav-shelf {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+.nav-shelf::-webkit-scrollbar {
+  display: none;
+}
+.nav-shelf > * {
+  scroll-snap-align: start;
+  flex: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Motion
+
+   Four durations and one curve, and everything in the app picks from them.
+
+   The curve is exponential deceleration: things arrive fast and settle, which
+   is what makes a 300ms transition feel like 150ms. Nothing bounces — an
+   elastic overshoot on a music player reads as a toy, and on a list of 142
+   rows it reads as broken.
+
+   Exits are faster than entrances everywhere. Waiting for something to leave
+   is latency; waiting for something to arrive is anticipation.
+
+   Only transform, opacity and filter are animated. Layout properties are not
+   touched, because a Telegram WebView on a mid-range Android phone will drop
+   frames on an animated height and there is no way to get them back.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  --dur-tap: 90ms; /* the press itself */
+  --dur-state: 200ms; /* a control changing what it means */
+  --dur-view: 300ms; /* a screen replacing another */
+  --dur-focal: 460ms; /* the bar becoming the player */
+}
+
+/* Every control gets the same press response. Telegram supplies the haptic;
+   this supplies the thing you can see, which matters on Android where the
+   haptic is often disabled at the OS level. */
+.nav-press {
+  transition:
+    transform var(--dur-tap) var(--ease-in),
+    opacity var(--dur-tap) var(--ease-in),
+    background-color var(--dur-state) var(--ease),
+    color var(--dur-state) var(--ease);
+}
+.nav-press:active {
+  transform: scale(0.94);
+  opacity: 0.86;
+  transition-duration: 60ms;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Truncation is the norm here: every row is a fixed height and track titles
+   are arbitrary length. */
+.nav-clip {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* --- The view stack ---------------------------------------------------------
+
+   There is no router; App keeps a stack of views. Pushing slides the incoming
+   screen in from the right over a parent that recedes slightly, so the two
+   read as a stack rather than a swap. Popping reverses it and runs faster,
+   because going back should feel like undoing rather than travelling.
+
+   The 3% scale on the outgoing screen is what sells the depth. It is small
+   enough that nobody notices it and large enough that the eye reads one
+   surface as sitting behind the other. */
+
+@keyframes nav-push-in {
+  from {
+    transform: translate3d(22px, 0, 0);
+    opacity: 0;
+  }
+}
+@keyframes nav-push-out {
+  to {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+}
+@keyframes nav-pop-in {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+}
+@keyframes nav-pop-out {
+  to {
+    transform: translate3d(22px, 0, 0);
+    opacity: 0;
+  }
+}
+
+.nav-view-push {
+  animation: nav-push-in var(--dur-view) var(--ease) both;
+}
+.nav-view-pop {
+  animation: nav-pop-in calc(var(--dur-view) - 60ms) var(--ease) both;
+}
+/* The leaving screen is rendered for exactly as long as its animation runs.
+   pointer-events go first so a fast double tap cannot hit a dead screen. */
+.nav-view-leaving {
+  pointer-events: none;
+}
+.nav-view-leaving.nav-view-push {
+  animation-name: nav-push-out;
+  animation-timing-function: var(--ease-in);
+}
+.nav-view-leaving.nav-view-pop {
+  animation-name: nav-pop-out;
+  animation-timing-function: var(--ease-in);
+}
+
+/* --- The focal moment -------------------------------------------------------
+
+   The Now Playing bar becoming the full player. The player mounts with its
+   artwork already at the size and position of the disc in the bar and lets it
+   grow into place, so the 42px disc and the 196px square read as one object
+   that got closer rather than two views that swapped.
+
+   The custom properties are written by the component from the real bounding
+   box of the bar, so the origin is wherever the bar happened to be — no
+   hardcoded geometry, and it stays right when the safe-area inset changes. */
+
+@keyframes nav-player-in {
+  from {
+    transform: translate3d(0, var(--nav-focal-dy, 60vh), 0);
+    opacity: 0;
+  }
+}
+@keyframes nav-player-out {
+  to {
+    transform: translate3d(0, var(--nav-focal-dy, 60vh), 0);
+    opacity: 0;
+  }
+}
+.nav-player-in {
+  animation: nav-player-in var(--dur-focal) var(--ease) both;
+}
+.nav-player-out {
+  animation: nav-player-out calc(var(--dur-focal) - 140ms) var(--ease-in) both;
+  pointer-events: none;
+}
+
+/* The artwork inside it, travelling on its own clock so it lands a beat before
+   the rest of the screen settles. */
+@keyframes nav-art-in {
+  from {
+    transform: translate3d(var(--nav-art-dx, 0px), var(--nav-art-dy, 0px), 0)
+      scale(var(--nav-art-scale, 0.21));
+    border-radius: 50%;
+  }
+}
+.nav-art-in {
+  animation: nav-art-in var(--dur-focal) var(--ease) both;
+}
+
+/* --- Bars ------------------------------------------------------------------ */
+
+/* The Now Playing bar the first time anything plays. It comes up from behind
+   the nav rather than fading in, because it is arriving from the place the
+   audio came from. */
+@keyframes nav-bar-in {
+  from {
+    transform: translate3d(0, calc(100% + 12px), 0);
+    opacity: 0;
+  }
+}
+.nav-bar-in {
+  animation: nav-bar-in var(--dur-view) var(--ease) both;
+}
+
+/* --- Lists ------------------------------------------------------------------
+
+   A list that appears as a list gets a stagger, capped hard: after the sixth
+   row the delay stops growing, so a 142-track crate is not a two-second wipe.
+   The rows are visible in their default state; the animation only offsets
+   them, so a failed script leaves a readable list rather than a blank one. */
+
+@keyframes nav-row-in {
+  from {
+    transform: translate3d(0, 8px, 0);
+    opacity: 0;
+  }
+}
+.nav-row-in {
+  animation: nav-row-in 260ms var(--ease) both;
+  animation-delay: calc(min(var(--i, 0), 6) * 26ms);
+}
+
+@keyframes nav-rise {
+  from {
+    transform: translate3d(0, 12px, 0);
+    opacity: 0;
+  }
+}
+.nav-rise {
+  animation: nav-rise 220ms var(--ease) both;
+}
+
+@keyframes nav-fade {
+  from {
+    opacity: 0;
+  }
+}
+.nav-fade {
+  animation: nav-fade var(--dur-state) var(--ease) both;
+}
+
+/* --- Feedback ---------------------------------------------------------------
+
+   Three acknowledgements, each tied to one specific outcome:
+   pulse — something landed in the queue (fired on the Queue tab)
+   pop   — a heart was filled
+   spin  — a lime ring while a track resolves its Telegram file id */
+
+@keyframes nav-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.14);
+  }
+}
+.nav-pulse {
+  animation: nav-pulse 380ms var(--ease);
+}
+
+@keyframes nav-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.nav-pop {
+  animation: nav-pop 320ms var(--ease);
+}
+
+@keyframes nav-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.nav-spin {
+  animation: nav-spin 900ms linear infinite;
+}
+
+/* The play/pause glyph. Both glyphs are stacked and cross-faded rather than
+   swapped, so the transport button never blinks empty for a frame. */
+.nav-glyph {
+  transition:
+    opacity var(--dur-tap) var(--ease),
+    transform var(--dur-state) var(--ease);
+}
+.nav-glyph[data-hidden="true"] {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+/* Selection mode. Rows shift right to make room for the checkbox instead of
+   the checkbox appearing on top of them. */
+.nav-select-shift {
+  transition: transform var(--dur-view) var(--ease);
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion
+
+   Everything above is either feedback or continuity, and both survive being
+   instant. Nothing here is load-bearing — no element depends on an animation
+   to become visible — so the whole layer can simply stop.
+   --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

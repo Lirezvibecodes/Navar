@@ -18,6 +18,46 @@ const MAX_TAG_BYTES = 4 * 1024 * 1024;
 const MAX_COVER_BYTES = 2 * 1024 * 1024;
 
 /**
+ * What a track's own tag header says about it.
+ *
+ * The album is the reason this exists: Telegram's audio message carries a
+ * performer and a title but never an album, and /album needs one to name the
+ * batch after. Reading it costs nothing extra — it comes out of the same two
+ * ranged requests the cover already required.
+ */
+export interface AudioTags {
+  cover: CoverArt | null;
+  album: string | null;
+  artist: string | null;
+  title: string | null;
+}
+
+const NO_TAGS: AudioTags = { cover: null, album: null, artist: null, title: null };
+
+/**
+ * Reads the tag header off the front of a file: artwork, and the text frames
+ * worth having. Never throws — a file whose tags cannot be parsed still gets
+ * ingested, just with less known about it.
+ */
+export async function readAudioTags(source: CoverArtSource): Promise<AudioTags> {
+  let tags = NO_TAGS;
+  try {
+    tags = (await readEmbeddedTags(source.fileId)) ?? NO_TAGS;
+  } catch (err) {
+    console.warn("[cover-art] tag read failed:", err);
+  }
+
+  if (tags.cover || !source.thumbFileId) return tags;
+
+  try {
+    return { ...tags, cover: await readThumbnail(source.thumbFileId) };
+  } catch (err) {
+    console.warn("[cover-art] thumbnail lookup failed:", err);
+    return tags;
+  }
+}
+
+/**
  * Finds the album art for a track.
  *
  * The picture embedded in the audio file is preferred: it is full resolution,
@@ -31,27 +71,14 @@ const MAX_COVER_BYTES = 2 * 1024 * 1024;
 export async function resolveCoverArt(
   source: CoverArtSource
 ): Promise<CoverArt | null> {
-  try {
-    const embedded = await readEmbeddedCover(source.fileId);
-    if (embedded) return embedded;
-  } catch (err) {
-    console.warn("[cover-art] embedded artwork lookup failed:", err);
-  }
-
-  if (!source.thumbFileId) return null;
-  try {
-    return await readThumbnail(source.thumbFileId);
-  } catch (err) {
-    console.warn("[cover-art] thumbnail lookup failed:", err);
-    return null;
-  }
+  return (await readAudioTags(source)).cover;
 }
 
 /**
  * Reads only the ID3v2 tag off the front of the file — two ranged requests,
  * never the audio payload.
  */
-async function readEmbeddedCover(fileId: string): Promise<CoverArt | null> {
+async function readEmbeddedTags(fileId: string): Promise<AudioTags | null> {
   const url = await getTelegramFileDownloadUrl(fileId);
 
   const header = await readRange(url, 0, 9);
@@ -64,7 +91,7 @@ async function readEmbeddedCover(fileId: string): Promise<CoverArt | null> {
   const body = await readRange(url, 10, 10 + tagSize - 1);
   if (!body) return null;
 
-  return findPictureFrame(header[3], header[5], body);
+  return collectTags(header[3], header[5], body);
 }
 
 async function readThumbnail(fileId: string): Promise<CoverArt | null> {
@@ -93,28 +120,38 @@ async function readRange(
 }
 
 /**
- * Walks the tag's frames looking for an attached picture, preferring the frame
- * marked "front cover" (picture type 3) over whatever else is attached.
+ * Walks the tag's frames once, collecting the attached picture and the text
+ * frames worth keeping. The picture marked "front cover" (type 3) wins over
+ * whatever else is attached; the first text frame of a given kind wins, since
+ * duplicates are almost always a broken writer rather than a second value.
  */
-function findPictureFrame(
+function collectTags(
   majorVersion: number,
   tagFlags: number,
   raw: Buffer
-): CoverArt | null {
+): AudioTags {
   const body = (tagFlags & 0x80) !== 0 ? deunsynchronise(raw) : raw;
 
   let offset = 0;
   if ((tagFlags & 0x40) !== 0) {
     // Extended header: v2.3 stores a plain size excluding the size field,
     // v2.4 a synchsafe size that includes it.
-    if (body.length < 4) return null;
+    if (body.length < 4) return NO_TAGS;
     offset =
       majorVersion === 3 ? 4 + body.readUInt32BE(0) : readSynchsafe(body, 0);
   }
 
-  const idLength = majorVersion === 2 ? 3 : 4;
-  const headerLength = majorVersion === 2 ? 6 : 10;
-  let fallback: CoverArt | null = null;
+  const isV22 = majorVersion === 2;
+  const idLength = isV22 ? 3 : 4;
+  const headerLength = isV22 ? 6 : 10;
+
+  // v2.2 abbreviates every frame id to three characters.
+  const TEXT_FRAMES: Record<string, keyof AudioTags> = isV22
+    ? { TAL: "album", TP1: "artist", TT2: "title" }
+    : { TALB: "album", TPE1: "artist", TIT2: "title" };
+
+  const tags: AudioTags = { cover: null, album: null, artist: null, title: null };
+  let frontCoverFound = false;
 
   while (offset + headerLength <= body.length) {
     if (body[offset] === 0) break; // padding after the last frame
@@ -125,21 +162,77 @@ function findPictureFrame(
     const end = start + size;
     if (size <= 0 || end > body.length) break;
 
-    if (id === "APIC" || id === "PIC") {
-      const found = parsePictureFrame(
-        body.subarray(start, end),
-        majorVersion === 2
-      );
-      if (found) {
-        if (found.frontCover) return found.cover;
-        fallback ??= found.cover;
+    if (!frontCoverFound && (id === "APIC" || id === "PIC")) {
+      const found = parsePictureFrame(body.subarray(start, end), isV22);
+      if (found && (found.frontCover || !tags.cover)) {
+        tags.cover = found.cover;
+        frontCoverFound = found.frontCover;
+      }
+    } else {
+      const field = TEXT_FRAMES[id];
+      if (field && field !== "cover" && !tags[field]) {
+        tags[field] = decodeTextFrame(body.subarray(start, end));
       }
     }
 
     offset = end;
   }
 
-  return fallback;
+  return tags;
+}
+
+/**
+ * An ID3 text frame: one encoding byte, then the string. Values are routinely
+ * padded with trailing NULs, and v2.4 uses NUL as a separator for multi-value
+ * frames — only the first value is wanted either way.
+ */
+function decodeTextFrame(frame: Buffer): string | null {
+  if (frame.length < 2) return null;
+  const body = frame.subarray(1);
+
+  let text: string;
+  switch (frame[0]) {
+    case 0:
+      text = body.toString("latin1");
+      break;
+    case 1:
+      text = decodeUtf16(body);
+      break;
+    case 2:
+      text = decodeUtf16(body, true);
+      break;
+    case 3:
+      text = body.toString("utf8");
+      break;
+    default:
+      return null;
+  }
+
+  const value = text.split("\u0000")[0].trim();
+  return value.length > 0 ? value : null;
+}
+
+/**
+ * Encoding 1 carries a byte-order mark; encoding 2 is big-endian with none.
+ * Node only decodes UTF-16LE, so big-endian input is byte-swapped first.
+ */
+function decodeUtf16(buf: Buffer, assumeBigEndian = false): string {
+  let body = buf;
+  let bigEndian = assumeBigEndian;
+
+  if (body.length >= 2) {
+    if (body[0] === 0xff && body[1] === 0xfe) {
+      body = body.subarray(2);
+      bigEndian = false;
+    } else if (body[0] === 0xfe && body[1] === 0xff) {
+      body = body.subarray(2);
+      bigEndian = true;
+    }
+  }
+
+  // swap16 throws on an odd length, which a truncated frame can produce.
+  if (body.length % 2 !== 0) body = body.subarray(0, body.length - 1);
+  return (bigEndian ? Buffer.from(body).swap16() : body).toString("utf16le");
 }
 
 function readFrameSize(

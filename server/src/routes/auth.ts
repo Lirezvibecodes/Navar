@@ -23,7 +23,18 @@ export function authRouter(): Router {
 
     await ensureUser(validated.user.id, validated.user.username);
     const token = signSession(validated.user.id, validated.user.username);
-    res.json({ token });
+    // The identity comes back alongside the token because the client needs it
+    // for every ownership decision it renders — whether to draw a heart, an
+    // edit affordance, a Remove. Reading it from initDataUnsafe instead would
+    // mean the UI trusting a value the server has just finished verifying.
+    res.json({
+      token,
+      user: {
+        id: validated.user.id,
+        username: validated.user.username ?? null,
+        first_name: validated.user.first_name ?? null,
+      },
+    });
   }));
 
   return router;

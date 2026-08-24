@@ -1,148 +1,267 @@
 import { useState } from "react";
-import { trackCoverUrl } from "../api";
-import type { Playlist, Track } from "../types";
+import type { Track } from "../types";
+import { Cover } from "./PixelArt";
+import { Avatar } from "./Avatar";
+import { CheckIcon, DotsIcon, HeartIcon } from "../icons";
+import { formatDuration, trackArtist, trackTitle } from "../lib/format";
+import { haptic } from "../telegram";
+import { useLongPress } from "./ui";
 
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return "--:--";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
+/**
+ * One track, everywhere a track appears in a list.
+ *
+ * The row is 52px with a 40px square, and the two trailing controls sit in
+ * 44px-tall hit areas that overhang the row above and below. That overhang is
+ * deliberate: shrinking the row to fit two comfortable targets would fit six
+ * tracks on a screen instead of nine, and a library is read by scanning.
+ */
+
+/** Wraps the matched run so incremental search shows why a row survived. */
+function Highlighted({ text, query }: { text: string; query: string }) {
+  const at = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark
+        style={{
+          background: "rgba(223,252,142,.22)",
+          color: "inherit",
+          borderRadius: 3,
+          padding: "0 1px",
+        }}
+      >
+        {text.slice(at, at + query.length)}
+      </mark>
+      {text.slice(at + query.length)}
+    </>
+  );
 }
 
-interface TrackRowProps {
+export interface TrackRowProps {
   track: Track;
-  isActive: boolean;
-  isPlaying: boolean;
-  playlists: Playlist[];
+  index?: number;
+  playing?: boolean;
+  /** Whether this row is yours to heart and edit. */
+  owned?: boolean;
+  favorited?: boolean;
+  query?: string;
+  /** Shown instead of the artist when a list is already one artist deep. */
+  secondary?: string;
+
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
+  onEnterSelection?: () => void;
+
   onPlay: () => void;
-  onEdit: () => void;
-  onAddToPlaylist: (playlistId: string) => void;
-  onRemoveFromPlaylist?: () => void;
+  onMenu?: () => void;
+  onToggleFavorite?: () => void;
 }
 
 export function TrackRow({
   track,
-  isActive,
-  isPlaying,
-  playlists,
+  index = 0,
+  playing = false,
+  owned = true,
+  favorited = false,
+  query = "",
+  secondary,
+  selectable = false,
+  selected = false,
+  onSelect,
+  onEnterSelection,
   onPlay,
-  onEdit,
-  onAddToPlaylist,
-  onRemoveFromPlaylist,
+  onMenu,
+  onToggleFavorite,
 }: TrackRowProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [addSubmenuOpen, setAddSubmenuOpen] = useState(false);
+  const press = useLongPress(() => onEnterSelection?.());
+
+  // The heart pops only while it is being filled — never on a rerender that
+  // happens to carry a favourite the row already had.
+  const [popping, setPopping] = useState(false);
+
+  const meta = secondary ?? trackArtist(track);
+  const credit = track.credit_user_id && track.credit_username;
 
   return (
     <div
-      className={`group flex items-center gap-3 rounded-md px-3 py-2 hover:bg-app-surface-hover ${
-        isActive ? "bg-app-surface-hover" : ""
-      }`}
+      className="nav-row-in"
+      style={
+        {
+          "--i": index,
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          height: 52,
+          borderRadius: 12,
+          padding: "0 8px",
+          margin: "0 -8px",
+          background: playing
+            ? "rgba(223,252,142,.07)"
+            : selected
+              ? "rgba(255,255,255,.05)"
+              : undefined,
+          transition: "background-color var(--dur-state) var(--ease)",
+        } as React.CSSProperties
+      }
     >
-      <button
-        onClick={onPlay}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-      >
-        <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-app-surface">
-          {track.has_cover ? (
-            <img
-              src={trackCoverUrl(track.id)}
-              alt=""
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-app-text-muted">
-              ♪
-            </div>
-          )}
-        </div>
-        <div className="min-w-0">
-          <div
-            className={`truncate text-sm font-medium ${
-              isActive ? "text-app-accent" : "text-app-text"
-            }`}
-          >
-            {track.title ?? "Untitled"}
-            {isActive && isPlaying ? " ▸" : ""}
-          </div>
-          <div className="truncate text-xs text-app-text-muted">
-            {track.artist ?? "Unknown artist"}
-          </div>
-        </div>
-      </button>
-
-      <span className="shrink-0 text-xs text-app-text-muted">
-        {formatDuration(track.duration_seconds)}
-      </span>
-
-      <div className="relative shrink-0">
+      {selectable ? (
         <button
-          onClick={() => setMenuOpen((v) => !v)}
-          className="rounded px-2 py-1 text-app-text-muted opacity-0 hover:bg-app-surface group-hover:opacity-100"
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={selected ? "Deselect" : "Select"}
+          className="nav-press"
+          onClick={() => {
+            haptic.select();
+            onSelect?.();
+          }}
+          style={{
+            width: 22,
+            height: 44,
+            flex: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            marginLeft: -2,
+          }}
         >
-          ⋯
-        </button>
-        {menuOpen && (
-          <div
-            className="absolute right-0 z-10 mt-1 w-44 rounded-md bg-app-surface-hover py-1 shadow-lg"
-            onMouseLeave={() => {
-              setMenuOpen(false);
-              setAddSubmenuOpen(false);
+          <span
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 6,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#0A0A0A",
+              background: selected ? "var(--color-nav-action)" : "transparent",
+              border: selected ? "none" : "1.5px solid rgba(255,255,255,.28)",
+              transition:
+                "background-color var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease)",
             }}
           >
+            <CheckIcon size={12} style={{ opacity: selected ? 1 : 0 }} />
+          </span>
+        </button>
+      ) : null}
+
+      <button
+        className="nav-press"
+        {...press}
+        onClick={() => {
+          if (press.consumed()) return;
+          haptic.tap();
+          if (selectable) onSelect?.();
+          else onPlay();
+        }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          flex: 1,
+          minWidth: 0,
+          height: 52,
+          textAlign: "left",
+        }}
+      >
+        <Cover trackId={track.id} hasCover={track.has_cover} size={40} radius={9} />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span
+            className="nav-clip"
+            style={{
+              display: "block",
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              color: playing ? "var(--color-nav-action)" : "#fff",
+              transition: "color var(--dur-state) var(--ease)",
+            }}
+          >
+            <Highlighted text={trackTitle(track)} query={query} />
+          </span>
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              marginTop: 1,
+              fontSize: 11,
+              color: "rgba(255,255,255,.52)",
+              minWidth: 0,
+            }}
+          >
+            {credit ? (
+              <Avatar
+                userId={track.credit_user_id!}
+                username={track.credit_username}
+                size={14}
+              />
+            ) : null}
+            <span className="nav-clip">
+              <Highlighted text={meta} query={query} />
+            </span>
+            {track.duration_seconds ? (
+              <span style={{ flex: "none", opacity: 0.72 }}>
+                · {formatDuration(track.duration_seconds)}
+              </span>
+            ) : null}
+          </span>
+        </span>
+      </button>
+
+      {selectable ? null : (
+        <>
+          {onMenu ? (
             <button
+              aria-label="More"
+              className="nav-press"
               onClick={() => {
-                onEdit();
-                setMenuOpen(false);
+                haptic.tap();
+                onMenu();
               }}
-              className="block w-full px-3 py-2 text-left text-sm hover:bg-app-surface"
+              style={{
+                width: 30,
+                height: 44,
+                flex: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "rgba(255,255,255,.35)",
+              }}
             >
-              Edit tags & cover
+              <DotsIcon size={17} />
             </button>
-            <div className="relative">
-              <button
-                onClick={() => setAddSubmenuOpen((v) => !v)}
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-app-surface"
-              >
-                Add to playlist ▸
-              </button>
-              {addSubmenuOpen && (
-                <div className="absolute left-full top-0 w-44 rounded-md bg-app-surface-hover py-1 shadow-lg">
-                  {playlists.length === 0 && (
-                    <div className="px-3 py-2 text-sm text-app-text-muted">
-                      No playlists yet
-                    </div>
-                  )}
-                  {playlists.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        onAddToPlaylist(p.id);
-                        setMenuOpen(false);
-                        setAddSubmenuOpen(false);
-                      }}
-                      className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-app-surface"
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {onRemoveFromPlaylist && (
-              <button
-                onClick={() => {
-                  onRemoveFromPlaylist();
-                  setMenuOpen(false);
-                }}
-                className="block w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-app-surface"
-              >
-                Remove from playlist
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+          ) : null}
+
+          {owned && onToggleFavorite ? (
+            <button
+              aria-label={favorited ? "Remove from favourites" : "Add to favourites"}
+              aria-pressed={favorited}
+              className={`nav-press ${popping ? "nav-pop" : ""}`}
+              onAnimationEnd={() => setPopping(false)}
+              onClick={() => {
+                haptic.tap();
+                if (!favorited) setPopping(true);
+                onToggleFavorite();
+              }}
+              style={{
+                width: 26,
+                height: 44,
+                flex: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: favorited
+                  ? "var(--color-nav-action)"
+                  : "rgba(255,255,255,.22)",
+              }}
+            >
+              <HeartIcon size={15} />
+            </button>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

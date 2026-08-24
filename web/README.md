@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# Navaar — Mini App frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The React client that runs inside Telegram. It is not deployed on its own: the
+server builds this package and serves `dist/` from its own origin, so the Mini
+App only ever depends on one domain (see the root `README.md`).
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev        # Vite on http://localhost:5173
+npm run build      # tsc -b && vite build
+npm run lint       # oxlint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+`npm run predev` / `npm run prebuild` copy Telegram's Web App SDK out of
+`node_modules` into `public/`, because loading it from `telegram.org` fails on
+some networks. The copy is gitignored.
+
+Outside a real Telegram client `window.Telegram.WebApp` does not exist, so
+`initData` is empty and authentication is skipped. That is enough for layout
+work; for anything touching real data, point the Mini App URL at a tunnel.
+
+## Layout
+
+```
+src/
+  api.ts          every call to the server
+  telegram.ts     the Telegram WebApp surface this app relies on
+  view.ts         the view union — navigation is state, not a router
+  design/         tokens, icons, and the primitives the wireframes define
+  components/     screens and shared UI
+  context/        player and app-level providers
+```

@@ -5,7 +5,12 @@ import { getPool } from "./db";
 
 const MIGRATIONS_DIR = path.join(__dirname, "..", "migrations");
 
-async function main() {
+/**
+ * Applies every unapplied .up.sql, newest last, one transaction each. Exported
+ * so the test suite can bring a scratch database up to the current schema
+ * without shelling out.
+ */
+export async function runMigrations(): Promise<void> {
   const pool = getPool();
 
   await pool.query(`
@@ -48,11 +53,14 @@ async function main() {
       client.release();
     }
   }
-
-  await pool.end();
 }
 
-main().catch((err) => {
-  console.error("[migrate] failed:", err);
-  process.exit(1);
-});
+if (require.main === module) {
+  runMigrations()
+    .then(() => getPool().end())
+    .catch((err) => {
+      console.error("[migrate] failed:", err);
+      process.exit(1);
+    });
+}
+

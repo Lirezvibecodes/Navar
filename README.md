@@ -1,8 +1,12 @@
-# Telegram Music Player
+# Navaar
 
-A personal, Spotify-style music library that lives inside a Telegram Mini App.
-Forward audio files to your bot; it stores them and lets you browse, play, and
-edit their tags (title/artist/album/cover) from a Mini App UI.
+A music library that lives inside a Telegram Mini App. Forward audio files to
+the bot; they land in your library, tagged and playable, and you can organise
+them into playlists, edit their tags and artwork, and share playlists with
+friends.
+
+(The package and service names still say `telegram-music-player` — that was the
+working title.)
 
 Runs entirely on free tiers:
 
@@ -12,7 +16,8 @@ Runs entirely on free tiers:
   server only stores each file's Telegram `file_id` and streams it on demand
   by proxying the Bot API's file server. Cover art (small images) is stored
   as bytes directly in Postgres.
-- **Frontend**: React + Vite + TypeScript + Tailwind, deployed as a static site on [Cloudflare Pages](https://pages.cloudflare.com)
+- **Frontend**: React + Vite + TypeScript + Tailwind, built by the server and
+  served from the same origin — one domain, so no CORS and no second deploy
 
 Repo layout:
 
@@ -93,15 +98,18 @@ build, or a tunnel (e.g. `ngrok http 5173`) registered as the Mini App URL.
 
 ## 3. Register the Mini App URL
 
-You'll do this twice: once you have a real Cloudflare Pages URL (step 5), come
-back here.
+Come back to this once the server is deployed (step 5) — the Mini App is served
+by the server, so the two share a URL.
 
 1. In BotFather, send `/mybots`, choose your bot, then **Bot Settings → Menu
    Button** (or **Configure Mini App** depending on BotFather's current menu).
-2. Set the Mini App URL to your Cloudflare Pages URL, e.g.
-   `https://your-app.pages.dev`.
-3. Also set this same URL as `MINI_APP_URL` in `server/.env` (used to build
-   the "Open Music Player" button the bot sends after ingesting a track).
+2. Set the Mini App URL to your Render service URL, e.g.
+   `https://telegram-music-player-server.onrender.com`.
+3. Set the same URL as `MINI_APP_URL` in the server's environment — it builds
+   the "Open App" button the bot sends after ingesting a track.
+4. While you are in BotFather: under **Bot Settings → Group Privacy**, turn
+   privacy **off**. Without that the bot cannot see audio posted in a group,
+   which is what group playlists are built on.
 
 ## 4. Set up Supabase (Postgres)
 
@@ -141,32 +149,26 @@ session tokens issued after Telegram auth) — e.g. generate one with
    in production — Render's free tier sleeps the service after 15 minutes of
    inactivity, and only an incoming HTTP request (i.e. a webhook delivery) can
    wake it back up.
-6. Deploy. Check `https://<your-service>.onrender.com/health` returns `ok`.
+6. Deploy. Check `https://<your-service>.onrender.com/health` returns `ok`,
+   and that the same URL in a browser serves the Mini App shell. The build
+   command installs and builds `web/` and copies the output into
+   `server/web-dist`, which Express serves — there is no separate frontend
+   deploy, and therefore no CORS configuration anywhere.
 
 Render's free tier will sleep after 15 minutes idle; the next Telegram message
 or Mini App request will wake it, with a delay of up to ~30-60 seconds on that
 first request.
 
-## 6. Deploy the web app (Cloudflare Pages)
+## 6. Point BotFather at it
 
-1. In the Cloudflare dashboard, go to **Workers & Pages → Create → Pages →
-   Connect to Git**, and select this repo.
-2. Configure the build:
-   - Root directory: `web`
-   - Build command: `npm run build`
-   - Build output directory: `dist`
-3. Add an environment variable: `VITE_API_BASE_URL` = your Render service URL
-   from step 5 (e.g. `https://telegram-music-player-server.onrender.com`).
-4. Deploy. Cloudflare gives you a URL like `https://your-app.pages.dev`.
-5. Go back to step 3 and register this URL as your Mini App URL in BotFather,
-   and as `MINI_APP_URL` in Render's environment (redeploy the server after
-   changing it).
+Go back to step 3 and register the Render URL as the Mini App URL, and as
+`MINI_APP_URL` in Render's environment. Redeploy the server after changing it.
 
 ## 7. Try it
 
 1. Open a chat with your bot in Telegram and send `/start`.
 2. Forward an audio file (or send one as a document) to the bot.
-3. Tap the "Open Music Player" button in the bot's reply.
+3. Tap the "Open App" button in the bot's reply.
 4. Your track should appear in the library. Tap it to play, use the "⋯" menu
    to edit tags/cover art or add it to a playlist.
 
@@ -174,7 +176,16 @@ first request.
 
 ## Notes on the data model
 
-Every table is scoped by `owner_telegram_id`, and every API route enforces
-that the authenticated caller only ever reads or writes their own rows —
-there's no shared/global library. See `server/migrations/*.up.sql` for
-the full schema.
+Every row is owned by exactly one person via `owner_telegram_id`, and that
+ownership is enforced in SQL rather than in route handlers — every mutation
+query carries the owner in its `WHERE` clause.
+
+Reads are a separate question from ownership. A track you do not own is
+readable if it sits in a playlist somebody has deliberately shared with you,
+and that decision is one `EXISTS` query, not a chain of checks in application
+code. Anything you are not allowed to see returns 404 rather than 403: a
+resource you cannot see does not exist as far as the API is concerned.
+
+Deleting a track is soft — the row keeps a `deleted_at` stamp for thirty days
+so the undo affordance has something to restore — so every read path filters
+`deleted_at IS NULL`. See `server/migrations/*.up.sql` for the full schema.

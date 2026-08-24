@@ -1,0 +1,619 @@
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { haptic } from "../telegram";
+import type { IconProps } from "../icons";
+
+/**
+ * The small shared pieces: the scroll container every screen sits in, the
+ * chips, the round glass buttons, the section headers and the empty states.
+ *
+ * They live together because each is a handful of lines whose only job is to
+ * keep one measurement identical across screens — the 44px target floor, the
+ * 29px pill radius, the padding that clears the bottom furniture. Split across
+ * eight files they would be harder to keep in step, not easier.
+ */
+
+// --- Layout ------------------------------------------------------------------
+
+/**
+ * A scrollable screen.
+ *
+ * The bottom padding is the whole reason this exists. Three things stack over
+ * the bottom of every screen — the device inset, the nav, and the Now Playing
+ * bar once anything is playing — and a list that does not reserve room for all
+ * three hides its last row behind them. The two heights are custom properties
+ * written by the components that own them, so the padding follows the bar
+ * appearing without anybody passing a prop down.
+ */
+export function Screen({
+  children,
+  className = "",
+  gap = 0,
+}: {
+  children: ReactNode;
+  className?: string;
+  gap?: number;
+}) {
+  return (
+    <div
+      className={`nav-scroll ${className}`}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap,
+        padding: "0 14px",
+        paddingBottom:
+          "calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + 16px)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A screen title in the pixel face. Titles only — never a label, never a row. */
+export function ScreenTitle({ children }: { children: ReactNode }) {
+  return (
+    <h1 className="nav-display" style={{ margin: 0, fontSize: 19, lineHeight: 1.1 }}>
+      {children}
+    </h1>
+  );
+}
+
+/**
+ * A run-in header above a shelf or a list. More space above than below, so the
+ * heading belongs to what follows it rather than floating between two blocks.
+ */
+export function SectionHeader({
+  title,
+  action,
+  onAction,
+  spaceAbove = 22,
+}: {
+  title: string;
+  action?: string;
+  onAction?: () => void;
+  spaceAbove?: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginTop: spaceAbove,
+        marginBottom: 9,
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>
+        {title}
+      </span>
+      {action ? (
+        <button
+          className="nav-press"
+          onClick={() => {
+            haptic.tap();
+            onAction?.();
+          }}
+          style={{
+            color: "var(--color-nav-action)",
+            fontSize: 11.5,
+            fontWeight: 600,
+            minHeight: 44,
+            paddingLeft: 12,
+            marginRight: -2,
+          }}
+        >
+          {action}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// --- Controls ----------------------------------------------------------------
+
+/**
+ * A 34px round glass button — the top bar's search and overflow, the player's
+ * back chevron. The visible circle is 34px and the hit area is 44px, which is
+ * the only way to honour the target floor without a row of fat buttons.
+ */
+export function RoundButton({
+  icon: Icon,
+  label,
+  onClick,
+  size = 34,
+  tone = "glass",
+  className = "",
+  style,
+}: {
+  icon: (props: IconProps) => ReactNode;
+  label: string;
+  onClick: () => void;
+  size?: number;
+  tone?: "glass" | "action" | "bare";
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const pad = Math.max(0, (44 - size) / 2);
+  return (
+    <button
+      aria-label={label}
+      className={`nav-press ${className}`}
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
+      style={{
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: "none",
+        width: size,
+        height: size,
+        margin: -pad,
+        padding: pad,
+        boxSizing: "content-box",
+        backgroundClip: "content-box",
+        borderRadius: "50%",
+        color: tone === "action" ? "#0A0A0A" : "rgba(255,255,255,.72)",
+        background: tone === "action" ? "var(--color-nav-action)" : undefined,
+        ...style,
+      }}
+    >
+      <span
+        className={tone === "glass" ? "nav-glass" : undefined}
+        style={{
+          position: "absolute",
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          pointerEvents: "none",
+        }}
+      />
+      <Icon size={Math.round(size * 0.47)} style={{ position: "relative" }} />
+    </button>
+  );
+}
+
+/**
+ * The filter chips: `All · 142`, `Unsorted · 12`, `Albums`, `Artists`. The
+ * active one is lime and the rest are glass, which is the same contrast the
+ * bottom nav uses, so "where am I" reads the same everywhere.
+ */
+export function Chip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count?: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`nav-press ${active ? "" : "nav-glass"}`}
+      aria-pressed={active}
+      onClick={() => {
+        haptic.select();
+        onClick();
+      }}
+      style={{
+        height: 32,
+        padding: "0 13px",
+        borderRadius: 16,
+        flex: "none",
+        fontSize: 12,
+        fontWeight: 600,
+        letterSpacing: "-0.01em",
+        color: active ? "#0A0A0A" : "rgba(255,255,255,.72)",
+        background: active ? "var(--color-nav-action)" : undefined,
+        boxShadow: active ? "0 4px 14px rgba(223,252,142,.22)" : undefined,
+      }}
+    >
+      {label}
+      {count == null ? null : (
+        <span style={{ opacity: active ? 0.55 : 0.5 }}> · {count}</span>
+      )}
+    </button>
+  );
+}
+
+export function ChipRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="nav-shelf" style={{ gap: 7, padding: "2px 0" }}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The lime action button — `Play all`, `Save`, `Add`. Full width by default
+ * because that is how it appears in every screen that has one.
+ */
+export function ActionButton({
+  children,
+  onClick,
+  icon: Icon,
+  height = 38,
+  grow = true,
+  disabled,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  icon?: (props: IconProps) => ReactNode;
+  height?: number;
+  grow?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      className="nav-press"
+      disabled={disabled}
+      onClick={() => {
+        haptic.press();
+        onClick();
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        flex: grow ? 1 : "none",
+        height,
+        padding: grow ? undefined : "0 16px",
+        borderRadius: height / 2,
+        background: "var(--color-nav-action)",
+        color: "#0A0A0A",
+        fontSize: 13,
+        fontWeight: 600,
+        letterSpacing: "-0.01em",
+        opacity: disabled ? 0.4 : 1,
+        boxShadow: disabled ? undefined : "0 6px 20px rgba(223,252,142,.2)",
+      }}
+    >
+      {Icon ? <Icon size={14} /> : null}
+      {children}
+    </button>
+  );
+}
+
+/** The glass twin of ActionButton — shuffle next to Play all, Cancel next to Save. */
+export function GhostButton({
+  children,
+  onClick,
+  icon: Icon,
+  label,
+  width,
+  height = 38,
+}: {
+  children?: ReactNode;
+  onClick: () => void;
+  icon?: (props: IconProps) => ReactNode;
+  label?: string;
+  width?: number;
+  height?: number;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="nav-press nav-glass"
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        flex: width ? "none" : 1,
+        width,
+        height,
+        borderRadius: height / 2,
+        color: "rgba(255,255,255,.82)",
+        fontSize: 13,
+        fontWeight: 600,
+      }}
+    >
+      {Icon ? <Icon size={15} /> : null}
+      {children}
+    </button>
+  );
+}
+
+// --- States ------------------------------------------------------------------
+
+/**
+ * An empty section. Says what would be here and how to put something in it —
+ * an empty state that only says "Nothing here" has wasted the one moment the
+ * user was looking for instructions.
+ */
+export function Empty({
+  title,
+  body,
+  action,
+  onAction,
+}: {
+  title: string;
+  body?: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div
+      className="nav-fade"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 7,
+        padding: "34px 24px",
+        textAlign: "center",
+      }}
+    >
+      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{title}</span>
+      {body ? (
+        <span
+          style={{
+            fontSize: 11.5,
+            lineHeight: 1.5,
+            color: "rgba(255,255,255,.52)",
+            maxWidth: 260,
+          }}
+        >
+          {body}
+        </span>
+      ) : null}
+      {action ? (
+        <div style={{ marginTop: 8 }}>
+          <ActionButton grow={false} onClick={() => onAction?.()}>
+            {action}
+          </ActionButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The loading state: the shape of the rows that are coming, not a spinner.
+ * Breathing rather than sweeping — a shimmer keyframe across a full screen of
+ * placeholders is the single most expensive thing a phone can be asked to
+ * paint while it is also opening a websocket and decoding audio.
+ */
+export function Skeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+      {Array.from({ length: rows }, (_, i) => (
+        <div
+          key={i}
+          className="nav-row-in"
+          style={
+            {
+              "--i": i,
+              display: "flex",
+              alignItems: "center",
+              gap: 11,
+              height: 52,
+              opacity: 0.5,
+            } as React.CSSProperties
+          }
+        >
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 9,
+              flex: "none",
+              background: "rgba(255,255,255,.06)",
+            }}
+          />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div
+              style={{
+                height: 9,
+                width: `${52 + ((i * 13) % 34)}%`,
+                borderRadius: 5,
+                background: "rgba(255,255,255,.07)",
+              }}
+            />
+            <div
+              style={{
+                height: 7,
+                width: `${28 + ((i * 9) % 20)}%`,
+                borderRadius: 4,
+                background: "rgba(255,255,255,.045)",
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --- Sheets ------------------------------------------------------------------
+
+/**
+ * The bottom sheet behind every `⋯`.
+ *
+ * A sheet rather than a popover because the menus here are lists of five to
+ * nine actions on a phone held in one hand, and a popover anchored to a 30px
+ * button either covers the row it belongs to or opens somewhere the thumb
+ * cannot reach.
+ *
+ * It animates out as well as in, which is why the open state is held here
+ * rather than by the caller: unmounting on close would make it disappear.
+ */
+export function Sheet({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: ReactNode;
+}) {
+  const [mounted, setMounted] = useState(open);
+  const closing = mounted && !open;
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    if (!mounted) return;
+    const timer = window.setTimeout(() => setMounted(false), 220);
+    return () => window.clearTimeout(timer);
+  }, [open, mounted]);
+
+  if (!mounted) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 70,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
+      }}
+    >
+      <button
+        aria-label="Close"
+        onClick={onClose}
+        className="nav-fade"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(0,0,0,.55)",
+          opacity: closing ? 0 : 1,
+          transition: "opacity 200ms var(--ease)",
+        }}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`nav-sheet ${closing ? "" : "nav-rise"}`}
+        style={{
+          position: "relative",
+          padding: "10px 8px",
+          paddingBottom: "calc(var(--tg-safe-bottom) + 10px)",
+          transform: closing ? "translateY(100%)" : undefined,
+          transition: closing ? "transform 200ms var(--ease-in)" : undefined,
+        }}
+      >
+        <div
+          style={{
+            width: 38,
+            height: 4,
+            borderRadius: 2,
+            background: "rgba(255,255,255,.22)",
+            margin: "2px auto 10px",
+          }}
+        />
+        {title ? (
+          <div
+            className="nav-clip"
+            style={{
+              fontSize: 11,
+              color: "rgba(255,255,255,.52)",
+              padding: "0 14px 8px",
+            }}
+          >
+            {title}
+          </div>
+        ) : null}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** One line in a sheet. Destructive actions are the only coloured ones. */
+export function SheetItem({
+  icon: Icon,
+  label,
+  onClick,
+  destructive,
+  disabled,
+}: {
+  icon: (props: IconProps) => ReactNode;
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      className="nav-press"
+      disabled={disabled}
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 13,
+        width: "100%",
+        minHeight: 46,
+        padding: "0 14px",
+        borderRadius: 12,
+        fontSize: 13.5,
+        textAlign: "left",
+        color: destructive ? "#FF8A8A" : "rgba(255,255,255,.9)",
+        opacity: disabled ? 0.35 : 1,
+      }}
+    >
+      <Icon size={17} style={{ opacity: 0.8, flex: "none" }} />
+      <span className="nav-clip">{label}</span>
+    </button>
+  );
+}
+
+// --- Gestures ----------------------------------------------------------------
+
+/**
+ * Long-press, with the tap still working.
+ *
+ * Used for entering selection mode and for picking up a queue row. Every
+ * long-press in the app has a visible alternative somewhere — a Select button,
+ * a Move up in the overflow menu — because a hidden gesture is not a control.
+ * This exists to make the shortcut available, not to be the only way in.
+ */
+export function useLongPress(onLongPress: () => void, ms = 420) {
+  const timer = useRef<number | null>(null);
+  const fired = useRef(false);
+
+  const clear = () => {
+    if (timer.current != null) window.clearTimeout(timer.current);
+    timer.current = null;
+  };
+
+  return {
+    onPointerDown: () => {
+      fired.current = false;
+      clear();
+      timer.current = window.setTimeout(() => {
+        fired.current = true;
+        haptic.press();
+        onLongPress();
+      }, ms);
+    },
+    onPointerUp: clear,
+    onPointerLeave: clear,
+    onPointerCancel: clear,
+    /** True when the press already fired, so the click handler can stand down. */
+    consumed: () => fired.current,
+  };
+}

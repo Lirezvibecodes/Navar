@@ -1,10 +1,34 @@
 import { randomUUID } from "node:crypto";
 import type { Telegraf } from "telegraf";
-import { createTrack, ensureUser } from "./repo";
-import { resolveCoverArt } from "./cover-art";
+import {
+  createTrackInGroupCrate,
+  createTrackInSession,
+  ensureUser,
+  purgeExpiredTracks,
+} from "./repo";
+import type { IngestSession, NewTrack } from "./repo";
+import { readAudioTags } from "./cover-art";
 import type { Track } from "./types";
 
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Soft-deleted tracks past their undo window have to be swept by something,
+ * and the free tier has no scheduler. Ingest is the hook: a user is present,
+ * nothing is waiting on a render, and it happens often enough that tombstones
+ * never pile up. Throttled so a forty-file batch does not run forty sweeps.
+ */
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
+let lastPurgeAt = 0;
+
+function maybePurgeExpiredTracks(): void {
+  const now = Date.now();
+  if (now - lastPurgeAt < PURGE_INTERVAL_MS) return;
+  lastPurgeAt = now;
+  void purgeExpiredTracks().catch((err) => {
+    console.warn("[ingest] expired-track sweep failed:", err);
+  });
+}
 
 export interface IncomingAudio {
   fileId: string;
@@ -21,17 +45,20 @@ export interface IncomingAudio {
 export class AudioTooLargeError extends Error {}
 
 /**
- * Records a track pointing at the file Telegram already stores — the audio
- * itself is never downloaded or copied anywhere; only its tag header is read,
- * to lift out the album art. Streaming later re-resolves the file_id through
- * the Bot API on demand.
+ * Everything that happens to a file before it is written down, which is the
+ * same wherever the file was posted: the size and reachability checks, and the
+ * one pass over its tag header.
+ *
+ * The audio itself is never downloaded or copied anywhere — only the header is
+ * read, to lift out the album art and what the file says about itself.
+ * Streaming later re-resolves the file_id through the Bot API on demand.
  */
-export async function ingestAudioMessage(
+async function prepareTrack(
   bot: Telegraf,
   ownerTelegramId: number,
   username: string | undefined,
   audio: IncomingAudio
-): Promise<Track> {
+): Promise<NewTrack> {
   await ensureUser(ownerTelegramId, username);
 
   if (audio.fileSize && audio.fileSize > MAX_FILE_SIZE_BYTES) {
@@ -54,19 +81,66 @@ export async function ingestAudioMessage(
     throw err;
   }
 
-  const fallbackTitle = audio.fileName?.replace(/\.[a-zA-Z0-9]+$/, "");
-  const cover = await resolveCoverArt(audio);
+  maybePurgeExpiredTracks();
 
-  return createTrack({
+  const fallbackTitle = audio.fileName?.replace(/\.[a-zA-Z0-9]+$/, "");
+  // Telegram's own metadata is preferred where it exists — it is what the user
+  // saw in the chat — and the file's tags fill the gaps. Only the tags carry an
+  // album, which is what /album groups a batch by.
+  const tags = await readAudioTags(audio);
+
+  return {
     id: randomUUID(),
     ownerTelegramId,
-    title: audio.title ?? fallbackTitle ?? null,
-    artist: audio.performer ?? null,
-    album: null,
+    title: audio.title ?? tags.title ?? fallbackTitle ?? null,
+    artist: audio.performer ?? tags.artist ?? null,
+    album: tags.album,
     durationSeconds: audio.durationSeconds ?? null,
     telegramFileId: audio.fileId,
     mimeType: audio.mimeType ?? null,
-    coverImage: cover?.image ?? null,
-    coverMimeType: cover?.mimeType ?? null,
-  });
+    coverImage: tags.cover?.image ?? null,
+    coverMimeType: tags.cover?.mimeType ?? null,
+    // A fresh ingest is the origin by definition; the save path overrides this.
+    originAdderId: ownerTelegramId,
+  };
+}
+
+/**
+ * A file sent to the bot in a direct message.
+ *
+ * Returns the sender's open batch alongside the track, when there is one: the
+ * session is read inside the same transaction as the insert, so this is the
+ * only trustworthy answer to "did that file land in a batch".
+ */
+export async function ingestAudioMessage(
+  bot: Telegraf,
+  ownerTelegramId: number,
+  username: string | undefined,
+  audio: IncomingAudio
+): Promise<{ track: Track; session: IngestSession | null }> {
+  return createTrackInSession(
+    await prepareTrack(bot, ownerTelegramId, username, audio)
+  );
+}
+
+/**
+ * A file posted in a group the bot is in.
+ *
+ * The track belongs to the person who posted it, exactly as in a direct
+ * message, and is additionally filed into that chat's shared crate. A batch
+ * session the sender happens to have open in their DMs is deliberately not
+ * consulted: /playlist is a conversation between one person and the bot, and a
+ * group post is not part of it.
+ */
+export async function ingestGroupAudioMessage(
+  bot: Telegraf,
+  senderTelegramId: number,
+  username: string | undefined,
+  audio: IncomingAudio,
+  cratePlaylistId: string
+): Promise<{ track: Track; position: number | null }> {
+  return createTrackInGroupCrate(
+    await prepareTrack(bot, senderTelegramId, username, audio),
+    cratePlaylistId
+  );
 }

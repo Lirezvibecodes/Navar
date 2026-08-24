@@ -4,6 +4,9 @@ import type { Telegraf } from "telegraf";
 import { authRouter } from "./routes/auth";
 import { tracksRouter } from "./routes/tracks";
 import { playlistsRouter } from "./routes/playlists";
+import { albumsRouter, artistsRouter } from "./routes/collections";
+import { usersRouter } from "./routes/users";
+import { friendsRouter } from "./routes/friends";
 
 // The web app is built into this package (see the build script) and served
 // from the same origin, so the Mini App only ever depends on this one domain
@@ -18,11 +21,17 @@ export function createApp(bot: Telegraf | null): Express {
   // there is no record of what actually reached the server — which makes it
   // impossible to tell a client that never connected from one that got an
   // error back. The user agent distinguishes Telegram's in-app WebView.
+  //
+  // Only the path is logged, never the query string: <audio> and <img> cannot
+  // send an Authorization header, so the stream and cover URLs carry the
+  // session JWT as ?token=. Logging originalUrl would print a valid seven-day
+  // credential into the log stream on every seek.
   app.use((req, res, next) => {
     const startedAt = Date.now();
     res.on("finish", () => {
+      const pathOnly = req.originalUrl.split("?")[0];
       console.log(
-        `[http] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - startedAt}ms ` +
+        `[http] ${req.method} ${pathOnly} ${res.statusCode} ${Date.now() - startedAt}ms ` +
           `ua="${req.get("user-agent") ?? "-"}"`
       );
     });
@@ -40,13 +49,18 @@ export function createApp(bot: Telegraf | null): Express {
   app.use("/api/auth", authRouter());
   app.use("/api/tracks", tracksRouter());
   app.use("/api/playlists", playlistsRouter());
+  app.use("/api/albums", albumsRouter());
+  app.use("/api/artists", artistsRouter());
+  app.use("/api/users", usersRouter());
+  app.use("/api/friends", friendsRouter());
 
   app.use(express.static(webDist));
   app.get(/^\/(?!api|health|telegraf).*/, (_req, res) => {
     res.sendFile(path.join(webDist, "index.html"));
   });
 
-  // Catches errors forwarded by asyncHandler (e.g. DB/R2 failures) so one
+  // Catches errors forwarded by asyncHandler (e.g. database or Telegram API
+  // failures) so one
   // request's failure returns a 500 instead of crashing the whole process.
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
