@@ -160,8 +160,13 @@ function Shell({ me }: { me: Me }) {
 
   return (
     <div
-      className="nav-screen-bg"
-      style={{ display: "flex", flexDirection: "column", height: "100%" }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        position: "relative",
+        zIndex: 1,
+      }}
     >
       <TopBar
         title={title}
@@ -222,8 +227,13 @@ function Boot() {
   if (!me) {
     return (
       <div
-        className="nav-screen-bg"
-        style={{ height: "100%", display: "flex", flexDirection: "column" }}
+        style={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+          zIndex: 1,
+        }}
       >
         {error ? (
           <Empty
@@ -249,6 +259,10 @@ function Boot() {
 export default function App() {
   return (
     <ToastProvider>
+      {/* The wash is its own layer rather than a class on the shell. It is
+          pointer-events: none by design — worn as a container it is inherited
+          by every descendant and the whole app stops responding to taps. */}
+      <div className="nav-screen-bg" aria-hidden="true" />
       <Boot />
     </ToastProvider>
   );
