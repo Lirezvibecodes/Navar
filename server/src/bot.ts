@@ -244,7 +244,6 @@ export function createBot(): Telegraf | null {
 
     try {
       const { session } = await ingestAudioMessage(
-        botInstance,
         userId,
         ctx.from?.username,
         audio
@@ -309,7 +308,6 @@ export function createBot(): Telegraf | null {
     try {
       const crate = await crateForGroup(botInstance, chat, from.id);
       const { position } = await ingestGroupAudioMessage(
-        botInstance,
         from.id,
         from.username,
         audio,

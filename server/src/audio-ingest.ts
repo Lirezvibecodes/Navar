@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { Telegraf } from "telegraf";
 import {
   createTrackInGroupCrate,
   createTrackInSession,
@@ -8,6 +7,7 @@ import {
 } from "./repo";
 import type { IngestSession, NewTrack } from "./repo";
 import { readAudioTags } from "./cover-art";
+import { getTelegramFileDownloadUrl } from "./telegram-files";
 import type { Track } from "./types";
 
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -46,15 +46,22 @@ export class AudioTooLargeError extends Error {}
 
 /**
  * Everything that happens to a file before it is written down, which is the
- * same wherever the file was posted: the size and reachability checks, and the
- * one pass over its tag header.
+ * same wherever the file was posted: the size check, and the one pass over its
+ * tag header.
  *
  * The audio itself is never downloaded or copied anywhere — only the header is
  * read, to lift out the album art and what the file says about itself.
  * Streaming later re-resolves the file_id through the Bot API on demand.
+ *
+ * Only one thing here is allowed to fail an ingest, and that is the file being
+ * bigger than the Bot API will ever hand over. Everything else about Telegram
+ * is treated as weather: the row we are about to write stores a file_id, not
+ * bytes, and every reader of that file_id resolves it again when it needs it.
+ * A getFile that is rate-limited or briefly unavailable at this moment says
+ * nothing about whether the track can be played in a minute's time, so it must
+ * not be the reason a forwarded track is refused.
  */
 async function prepareTrack(
-  bot: Telegraf,
   ownerTelegramId: number,
   username: string | undefined,
   audio: IncomingAudio
@@ -67,10 +74,12 @@ async function prepareTrack(
     );
   }
 
+  // Resolving the download URL up front does two things: it catches the "too
+  // big" answer for the files Telegram did not report a size for, and it warms
+  // the URL cache that the tag read is about to want — so ingesting a track
+  // costs one getFile rather than the two it used to.
   try {
-    // Confirms the file is actually fetchable (and catches the "too big"
-    // case when Telegram didn't report a file_size up front).
-    await bot.telegram.getFile(audio.fileId);
+    await getTelegramFileDownloadUrl(audio.fileId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.toLowerCase().includes("too big")) {
@@ -78,7 +87,7 @@ async function prepareTrack(
         "File exceeds Telegram's 20MB Bot API download limit."
       );
     }
-    throw err;
+    console.warn("[ingest] could not resolve file up front:", message);
   }
 
   maybePurgeExpiredTracks();
@@ -113,13 +122,12 @@ async function prepareTrack(
  * only trustworthy answer to "did that file land in a batch".
  */
 export async function ingestAudioMessage(
-  bot: Telegraf,
   ownerTelegramId: number,
   username: string | undefined,
   audio: IncomingAudio
 ): Promise<{ track: Track; session: IngestSession | null }> {
   return createTrackInSession(
-    await prepareTrack(bot, ownerTelegramId, username, audio)
+    await prepareTrack(ownerTelegramId, username, audio)
   );
 }
 
@@ -133,14 +141,13 @@ export async function ingestAudioMessage(
  * group post is not part of it.
  */
 export async function ingestGroupAudioMessage(
-  bot: Telegraf,
   senderTelegramId: number,
   username: string | undefined,
   audio: IncomingAudio,
   cratePlaylistId: string
 ): Promise<{ track: Track; position: number | null }> {
   return createTrackInGroupCrate(
-    await prepareTrack(bot, senderTelegramId, username, audio),
+    await prepareTrack(senderTelegramId, username, audio),
     cratePlaylistId
   );
 }
