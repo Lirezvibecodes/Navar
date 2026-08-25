@@ -8,10 +8,10 @@ import {
 } from "react";
 import { authenticate } from "./api";
 import { BottomNav } from "./components/BottomNav";
-import { ChooseName } from "./components/ChooseName";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
 import { Empty } from "./components/ui";
+import { FirstRun } from "./components/Welcome";
 import { LibraryProvider, useLibrary } from "./context/LibraryContext";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
 import { ToastProvider } from "./context/ToastContext";
@@ -310,12 +310,7 @@ function Boot() {
   // creates rows for people who have only ever forwarded a file, so this is the
   // first screen of the app rather than a step in a sign-up the app never had.
   if (me.handle == null) {
-    return (
-      <ChooseName
-        suggestion={me.username ?? ""}
-        onChosen={(handle) => setMe({ ...me, handle })}
-      />
-    );
+    return <FirstRun me={me} onChosen={(handle) => setMe({ ...me, handle })} />;
   }
 
   return (

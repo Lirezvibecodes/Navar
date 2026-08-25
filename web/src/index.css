@@ -396,6 +396,20 @@ body {
   flex: none;
 }
 
+/* A shelf whose items are pages rather than tiles: one card per viewport, and
+   the snap is mandatory because there is no such thing as resting between two
+   of three cards. Layered on .nav-shelf rather than replacing it — the
+   touch-action and overscroll rules above are what keep a horizontal swipe
+   from being swallowed, and a pager needs them for the same reason a shelf
+   does. See Welcome. */
+.nav-pager {
+  scroll-snap-type: x mandatory;
+}
+.nav-pager > * {
+  scroll-snap-align: center;
+  width: 100%;
+}
+
 /* The room the active chip's glow needs, on all four sides, given back to the
    layout as an exactly equal negative margin so the shelf still measures as if
    it were tight against its neighbours.
