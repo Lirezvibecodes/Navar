@@ -361,52 +361,70 @@ function SelectionBar({
   // bar was being painted behind the nav bar rather than over it.
   return (
     <Portal>
+      {/* Sized from the top down rather than pinned to `bottom`. A fixed box's
+          bottom edge is the bottom of the layout viewport, and Android does not
+          shrink that for its own keyboard — so this bar sat behind the keyboard
+          the moment the search field took focus, which is exactly when it is
+          most likely to be open. --tg-viewport-height follows the visual
+          viewport instead. */}
       <div
-        className="nav-bar-in"
         style={{
           position: "fixed",
+          top: 0,
           left: 0,
           right: 0,
-          // --nav-bottomnav-h is published from the nav's own offsetHeight and
-          // already carries the safe inset; adding it again lifts the bar by a
-          // whole home indicator.
-          bottom: "var(--nav-bottomnav-h)",
-          padding: "8px 12px 0",
+          height: "var(--tg-viewport-height, 100%)",
           zIndex: 40,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-end",
+          pointerEvents: "none",
         }}
       >
         <div
-          className="nav-glass"
+          className="nav-bar-in"
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            height: 58,
-            borderRadius: 29,
-            padding: "0 8px 0 14px",
+            // --nav-bottomnav-h is published from the nav's own offsetHeight and
+            // already carries the safe inset; adding it again lifts the bar by a
+            // whole home indicator.
+            marginBottom: "var(--nav-bottomnav-h)",
+            padding: "8px 12px 0",
+            pointerEvents: "auto",
           }}
         >
-          <button
-            className="nav-press"
-            onClick={onCancel}
-            style={{ fontSize: 12.5, fontWeight: 600, minHeight: 44, flex: "none" }}
+          <div
+            className="nav-glass"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              height: 58,
+              borderRadius: 29,
+              padding: "0 8px 0 14px",
+            }}
           >
-            {count === 0 ? "Cancel" : `${count} selected`}
-          </button>
-          <span style={{ flex: 1 }} />
-          <GhostButton onClick={onSelectAll} height={38} width={54}>
-            All
-          </GhostButton>
-          <GhostButton
-            icon={TrashIcon}
-            label="Remove selected"
-            width={44}
-            onClick={onRemove}
-            disabled={count === 0}
-          />
-          <ActionButton grow={false} onClick={onAdd} disabled={count === 0}>
-            Add to…
-          </ActionButton>
+            <button
+              className="nav-press"
+              onClick={onCancel}
+              style={{ fontSize: 12.5, fontWeight: 600, minHeight: 44, flex: "none" }}
+            >
+              {count === 0 ? "Cancel" : `${count} selected`}
+            </button>
+            <span style={{ flex: 1 }} />
+            <GhostButton onClick={onSelectAll} height={38} width={54}>
+              All
+            </GhostButton>
+            <GhostButton
+              icon={TrashIcon}
+              label="Remove selected"
+              width={44}
+              onClick={onRemove}
+              disabled={count === 0}
+            />
+            <ActionButton grow={false} onClick={onAdd} disabled={count === 0}>
+              Add to…
+            </ActionButton>
+          </div>
         </div>
       </div>
     </Portal>

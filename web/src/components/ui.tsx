@@ -631,10 +631,19 @@ export function Sheet({
 
   return (
     <Portal>
+      {/* Sized from the top to the height Telegram is actually showing rather
+          than pinned inset: 0. A fixed element resolves against the layout
+          viewport, which on Android does not shrink when the keyboard opens —
+          so a sheet justified to flex-end was laying its content out behind
+          the keyboard. --tg-viewport-height tracks the visual viewport, so the
+          sheet shrinks with it and its contents stay reachable. */}
       <div
         style={{
           position: "fixed",
-          inset: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          height: "var(--tg-viewport-height, 100%)",
           zIndex: 70,
           display: "flex",
           flexDirection: "column",

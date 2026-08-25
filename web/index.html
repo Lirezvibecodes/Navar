@@ -3,13 +3,121 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) resolve to
+         anything at all. Without it Android reports zero for every inset, and
+         Telegram's own safeAreaInset is zero on plenty of Android devices that
+         do have a gesture bar, so the bottom nav had no correct number to sit
+         on from either source. index.css combines the two with max(). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>Music</title>
     <!-- Served from our own origin (see scripts/copy-telegram-sdk.mjs); loading
          it from telegram.org breaks on networks where that domain is blocked. -->
     <script src="/telegram-web-app.js"></script>
+
+    <!-- The first frame.
+         
+         Inline, in the document, deliberately: a cold Render dyno takes about
+         thirty seconds to wake, and anything that has to wait for the bundle
+         paints nothing for all of it. This markup and these rules are parsed
+         before any script runs, so the very first frame the WebView composites
+         is already the app's own black rather than the browser's white.
+
+         Pixelify Sans has not loaded yet either, so the wordmark asks for it
+         and lands on the same monospace fallback --font-display declares. When
+         the face is warm in the cache it simply gets the real one. -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        background: #030303;
+        opacity: 1;
+        transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      #boot[data-leaving="true"] {
+        opacity: 0;
+      }
+      #boot-mark {
+        font-family: "Pixelify Sans", monospace;
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: #ffffff;
+      }
+      /* Five blocks lighting in sequence, not a spinner: a rotating ring is a
+         browser's idiom and this app is drawn on a pixel grid. Slow on purpose
+         — the wait it covers is measured in seconds, and a fast indicator over
+         a long wait reads as something being stuck. */
+      #boot-bar {
+        display: flex;
+        gap: 5px;
+      }
+      #boot-bar i {
+        width: 9px;
+        height: 9px;
+        background: #dffc8e;
+        opacity: 0.16;
+        animation: boot-block 1.6s ease-in-out infinite;
+      }
+      #boot-bar i:nth-child(2) {
+        animation-delay: 0.16s;
+      }
+      #boot-bar i:nth-child(3) {
+        animation-delay: 0.32s;
+      }
+      #boot-bar i:nth-child(4) {
+        animation-delay: 0.48s;
+      }
+      #boot-bar i:nth-child(5) {
+        animation-delay: 0.64s;
+      }
+      @keyframes boot-block {
+        0%,
+        70%,
+        100% {
+          opacity: 0.16;
+        }
+        30% {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-bar i {
+          animation: none;
+          opacity: 0.55;
+        }
+        #boot {
+          transition-duration: 1ms;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot">
+      <span id="boot-mark">Navaar</span>
+      <span id="boot-bar" aria-hidden="true"
+        ><i></i><i></i><i></i><i></i><i></i
+      ></span>
+      <span
+        style="
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+        "
+        role="status"
+        >Loading Navaar</span
+      >
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

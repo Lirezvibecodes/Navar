@@ -103,62 +103,81 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider value={api}>
       {children}
       {current ? (
+        // The toast measures its offset from the bottom of the screen, and a
+        // fixed element's bottom is the bottom of the *layout* viewport, which
+        // Android does not shrink for its own keyboard — so a toast raised
+        // above the nav still ended up behind it. This column is the viewport
+        // Telegram is actually showing, from the top down, and the toast is
+        // simply the last thing in it.
         <div
-          className="nav-rise"
-          role="status"
-          aria-live="polite"
           style={{
             position: "fixed",
-            left: 14,
-            right: 14,
-            // Clears the bottom nav, the Now Playing bar and the device inset,
-            // plus whatever the contextual action bar has asked for.
-            bottom: `calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + ${lift}px + 8px)`,
+            top: 0,
+            left: 0,
+            right: 0,
+            height: "var(--tg-viewport-height, 100%)",
             zIndex: 60,
             display: "flex",
-            alignItems: "center",
-            gap: 10,
-            minHeight: 44,
-            padding: "0 14px",
-            borderRadius: 22,
-            fontSize: 12.5,
+            flexDirection: "column",
+            justifyContent: "flex-end",
+            pointerEvents: "none",
           }}
         >
           <div
-            className="nav-glass"
+            className="nav-rise"
+            role="status"
+            aria-live="polite"
             style={{
-              position: "absolute",
-              inset: 0,
+              position: "relative",
+              // Clears the bottom nav, the Now Playing bar and the device inset,
+              // plus whatever the contextual action bar has asked for.
+              margin: `0 14px calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + ${lift}px + 8px)`,
+              pointerEvents: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              minHeight: 44,
+              padding: "0 14px",
               borderRadius: 22,
-              pointerEvents: "none",
+              fontSize: 12.5,
             }}
-          />
-          <span
-            className="nav-clip"
-            style={{ position: "relative", flex: 1, padding: "11px 0" }}
           >
-            {current.message}
-          </span>
-          {current.onAction ? (
-            <button
-              className="nav-press"
+            <div
+              className="nav-glass"
               style={{
-                position: "relative",
-                color: "#DFFC8E",
-                fontWeight: 600,
-                fontSize: 12.5,
-                minHeight: 44,
-                paddingLeft: 6,
+                position: "absolute",
+                inset: 0,
+                borderRadius: 22,
+                pointerEvents: "none",
               }}
-              onClick={() => {
-                haptic.tap();
-                current.onAction?.();
-                setCurrent(null);
-              }}
+            />
+            <span
+              className="nav-clip"
+              style={{ position: "relative", flex: 1, padding: "11px 0" }}
             >
-              {current.actionLabel}
-            </button>
-          ) : null}
+              {current.message}
+            </span>
+            {current.onAction ? (
+              <button
+                className="nav-press"
+                style={{
+                  position: "relative",
+                  color: "#DFFC8E",
+                  fontWeight: 600,
+                  fontSize: 12.5,
+                  minHeight: 44,
+                  paddingLeft: 6,
+                }}
+                onClick={() => {
+                  haptic.tap();
+                  current.onAction?.();
+                  setCurrent(null);
+                }}
+              >
+                {current.actionLabel}
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </Ctx.Provider>

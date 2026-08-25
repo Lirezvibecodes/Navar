@@ -137,13 +137,26 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
       className={grew ? "nav-player-in" : "nav-rise"}
       style={{
         position: "fixed",
-        inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        // Not inset: 0. A fixed box resolves against the layout viewport, which
+        // Android does not shrink for its own keyboard; the player would lay
+        // itself out behind it. --tg-viewport-height follows the visual
+        // viewport instead. See applyViewport in telegram.ts.
+        height: "var(--tg-viewport-height, 100%)",
         zIndex: 60,
         display: "flex",
         flexDirection: "column",
         background: "#030303",
         paddingTop: "var(--nav-top-inset)",
         paddingBottom: "var(--tg-safe-bottom)",
+        // The whole screen is a drag-to-dismiss surface (see useDragToDismiss),
+        // and on Telegram clients older than 7.7 there is no
+        // disableVerticalSwipes to stop the client reading that same drag as
+        // "collapse the Mini App". Claiming the vertical axis here is the
+        // floor underneath that version gate.
+        touchAction: "pan-y",
         ...focalRiseVars(),
       }}
     >

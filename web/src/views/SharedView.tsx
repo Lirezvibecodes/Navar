@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { CollectionArt } from "../components/PixelArt";
 import { Empty, Skeleton } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../icons";
 import { formatDuration, pluralise } from "../lib/format";
+import { hideSplash } from "../lib/splash";
 import type { SharedPlaylistPage, SharedTrack } from "../types";
 
 /**
@@ -28,6 +29,11 @@ export function SharedView({ slug }: { slug: string }) {
   const [tracks, setTracks] = useState<SharedTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // This screen has a real loading state of its own — the skeleton below — so
+  // index.html's splash has done its job the moment this commits. Nobody else
+  // will take it down on this route: the share page never reaches Boot.
+  useLayoutEffect(() => hideSplash(), []);
 
   useEffect(() => {
     let live = true;

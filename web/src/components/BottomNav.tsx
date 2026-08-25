@@ -97,8 +97,14 @@ export function BottomNav({
               <Icon size={20} />
             </span>
             {/* Rendered at zero width when inactive rather than removed, so the
-                name grows out of the disc instead of popping in beside it. */}
-            <span className="nav-tab-label">{label}</span>
+                name grows out of the disc instead of popping in beside it. The
+                inner span exists to carry the spacing as margins: margins are
+                inside the clipped box and collapse with it, where padding on
+                the label itself would survive the collapse and leave every
+                inactive glyph off-centre. See .nav-tab-label. */}
+            <span className="nav-tab-label">
+              <span>{label}</span>
+            </span>
           </button>
         );
       })}

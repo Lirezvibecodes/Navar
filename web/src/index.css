@@ -94,11 +94,23 @@
 }
 
 :root {
-  /* Telegram's own insets, written by telegram.ts on every viewport event.
-     CSS env(safe-area-inset-*) resolves to zero inside the iOS Mini App
-     WebView, so nothing in this app may read it. */
-  --tg-safe-top: 0px;
-  --tg-safe-bottom: 0px;
+  /* Neither source knows about every device, so both are asked and the larger
+     answer wins.
+
+     env(safe-area-inset-*) resolves to zero inside the iOS Mini App WebView —
+     a layout built on it alone looks perfect in a desktop browser and then
+     clips under the notch. Telegram is the authority there, and telegram.ts
+     mirrors its numbers onto the --tg-*-tg properties below on every viewport
+     event. Android is the other way round: Telegram reports 0 on plenty of
+     devices that do have a gesture bar, and env() is the one that knows —
+     provided index.html asks for viewport-fit=cover, which it now does.
+
+     max() is the right combinator precisely because each source reports zero,
+     rather than nonsense, when it is the one that does not know. */
+  --tg-safe-top-tg: 0px;
+  --tg-safe-bottom-tg: 0px;
+  --tg-safe-top: max(var(--tg-safe-top-tg), env(safe-area-inset-top, 0px));
+  --tg-safe-bottom: max(var(--tg-safe-bottom-tg), env(safe-area-inset-bottom, 0px));
   --tg-content-top: 0px;
 
   /* The two are additive, and nothing in the app may use either on its own.
@@ -148,9 +160,18 @@ textarea,
 }
 
 html,
-body,
-#root {
+body {
   height: 100%;
+}
+
+/* Not 100%. 100% of what the WebView claims to be, which on Android is
+   routinely taller than the part of it Telegram is actually showing — which is
+   how the bottom nav ended up under the gesture bar and every sheet ended up
+   under the keyboard. --tg-viewport-height is the measured live height (see
+   applyViewport in telegram.ts); outside Telegram nothing writes it and the
+   fallback is the old behaviour exactly. */
+#root {
+  height: var(--tg-viewport-height, 100%);
 }
 
 body {
@@ -188,10 +209,19 @@ body {
    They are classes rather than Tailwind utilities because each is a stack of
    five properties that must stay in step; spelling them out per component is
    how the blur radius ends up different on one sheet.
+
+   Every blurred surface here is followed by a
+   `@supports not (backdrop-filter: blur(1px))` branch that replaces the
+   translucent film with a solid-enough one. Android WebViews without the
+   feature would otherwise render these as a barely-tinted sheet of nothing
+   with the page legible straight through it. Android also silently no-ops the
+   blur under battery saver while still reporting support, which @supports
+   cannot see — so the base alphas are set high enough that an unblurred
+   surface still reads as a surface rather than as a smear.
    --------------------------------------------------------------------------- */
 
 .nav-glass {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.045));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.075));
   backdrop-filter: blur(28px) saturate(190%);
   -webkit-backdrop-filter: blur(28px) saturate(190%);
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -199,6 +229,11 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.24),
     inset 0 -1px 0 rgba(255, 255, 255, 0.05),
     0 10px 30px rgba(0, 0, 0, 0.55);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .nav-glass {
+    background: linear-gradient(180deg, rgba(46, 48, 52, 0.94), rgba(24, 25, 28, 0.94));
+  }
 }
 
 /* The floating bars at the bottom. Darker and less lit than .nav-glass: they
@@ -213,6 +248,11 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.14),
     0 14px 34px rgba(0, 0, 0, 0.6);
 }
+@supports not (backdrop-filter: blur(1px)) {
+  .nav-bar-glass {
+    background: linear-gradient(180deg, rgba(32, 34, 36, 0.985), rgba(13, 14, 15, 0.985));
+  }
+}
 
 /* The player's queue/lyrics sheet: deeper blur, light only from above, and a
    shadow that falls upward because the sheet sits on top of the screen. */
@@ -225,6 +265,11 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.24),
     0 -16px 44px rgba(0, 0, 0, 0.55);
   border-radius: 22px 22px 0 0;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .nav-sheet {
+    background: linear-gradient(180deg, rgba(42, 44, 48, 0.96), rgba(20, 21, 24, 0.96));
+  }
 }
 
 .nav-card {
@@ -270,6 +315,11 @@ body {
   -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
   mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
 }
+@supports not (backdrop-filter: blur(1px)) {
+  .nav-topbar::before {
+    background: linear-gradient(180deg, rgba(3, 3, 3, 0.97), rgba(3, 3, 3, 0));
+  }
+}
 .nav-topbar > * {
   position: relative;
 }
@@ -295,8 +345,11 @@ body {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   /* Contains the bounce so a list at its end does not hand the gesture to the
-     WebView, which would read it as a dismissal. */
-  overscroll-behavior-y: contain;
+     WebView, which would read it as a dismissal. Both axes, not just y:
+     disableVerticalSwipes is gated at client 7.7 and older Android Telegram
+     builds have no such method, so this is the version-independent floor
+     underneath it rather than a nicety on top. */
+  overscroll-behavior: contain;
   scrollbar-width: none;
 }
 .nav-scroll::-webkit-scrollbar {
@@ -550,7 +603,14 @@ button {
 
    Every property that moves runs on one duration and one curve. Splitting them
    across two clocks is what made the switch look broken: the capsule finished
-   widening while the name was still fading in. */
+   widening while the name was still fading in.
+
+   No backdrop-filter here, deliberately. The row already floats over the page
+   rather than over a bar, the inactive disc is near-opaque anyway, and a blur
+   on the pill meant re-rasterising a backdrop on every frame of a width
+   animation — the single most expensive thing this stylesheet was doing, on
+   the one element that animates a layout property on purpose. The active pill
+   keeps its light-glass look from its own translucent background. */
 .nav-tab {
   display: flex;
   align-items: center;
@@ -560,11 +620,8 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 26px;
   color: #fff;
-  background: rgba(23, 23, 23, 0.9);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: rgba(23, 23, 23, 0.94);
   transition:
-    padding var(--dur-tab) var(--ease),
     background-color var(--dur-tab) var(--ease),
     border-color var(--dur-tab) var(--ease),
     box-shadow var(--dur-tab) var(--ease),
@@ -572,8 +629,7 @@ button {
     opacity var(--dur-tap) var(--ease-in);
 }
 .nav-tab[aria-current="page"] {
-  padding: 3px 14px 3px 3px;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.2);
   border-color: rgba(255, 255, 255, 0.22);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
@@ -602,23 +658,28 @@ button {
   box-shadow: 0 6px 18px rgba(223, 252, 142, 0.34);
 }
 
-/* The 8px between the disc and the name is padding rather than the row's gap,
-   so that it collapses with the label instead of leaving a permanent notch in
-   the inactive circle.
+/* The room the name occupies — the 8px between it and the disc, the name
+   itself, and the 11px before the capsule's edge — is one clipped box with one
+   animated property.
 
-   That padding has to be animated to zero along with the width. max-width: 0
-   collapses the *content* box and nothing else, so an inactive tab was still
-   carrying 8px of padding it had no content for: the circle measured 60px
-   wide instead of 52 and its glyph sat 4px left of the middle. Every inactive
-   icon in the row was off-centre by exactly half the gap.
+   Getting that down to one property took moving the spacing onto an inner
+   span's *margins*. Padding on the label could not collapse: max-width: 0
+   shrinks the content box and padding sits outside it, so an inactive tab kept
+   carrying 8px it had no content for — the circle measured 60px instead of 52
+   and its glyph sat 4px left of the middle. A child's margin is inside the
+   parent's content box, so overflow: hidden takes it away with everything
+   else, and both the 3px capsule padding and the 3px+1px inset that centres
+   the lime disc can now stay constant. 11px + 3px padding + 1px border is the
+   reference's 15px from the name to the capsule's end, unchanged.
 
-   The name slides out of the disc rather than appearing beside it, and its
-   opacity finishes early so it is readable while the capsule is still
-   settling — which is what makes the switch read as one movement instead of a
-   width animation with text taped to it. */
+   The name itself moves only on transform and opacity: it slides out of the
+   disc rather than appearing beside it, and its opacity finishes early so it
+   is readable while the capsule is still settling — which is what makes the
+   switch read as one movement instead of a width animation with text taped to
+   it. */
 .nav-tab-label {
+  display: flex;
   max-width: 0;
-  padding-left: 0;
   opacity: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -629,13 +690,14 @@ button {
   transform: translate3d(-10px, 0, 0);
   transition:
     max-width var(--dur-tab) var(--ease),
-    padding-left var(--dur-tab) var(--ease),
     transform var(--dur-tab) var(--ease),
     opacity calc(var(--dur-tab) * 0.55) var(--ease);
 }
+.nav-tab-label > span {
+  margin: 0 11px 0 8px;
+}
 .nav-tab[aria-current="page"] .nav-tab-label {
-  max-width: 120px;
-  padding-left: 8px;
+  max-width: 140px;
   opacity: 1;
   transform: none;
 }

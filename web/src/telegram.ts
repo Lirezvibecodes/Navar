@@ -9,11 +9,18 @@
  * for the people on the oldest apps. `call()` swallows that, so a missing
  * feature degrades to nothing happening.
  *
- * The second is that safe areas come from Telegram, never from CSS. Inside the
- * iOS Mini App WebView `env(safe-area-inset-*)` resolves to zero: a layout
- * built on it looks perfect in a desktop browser and then clips under the
- * notch and the home indicator on a real phone. The insets are mirrored onto
- * `--tg-safe-*` custom properties here and read from CSS everywhere else.
+ * The second is that safe areas come from Telegram, and from CSS, and neither
+ * one alone is enough. Inside the iOS Mini App WebView
+ * `env(safe-area-inset-*)` resolves to zero: a layout built on it looks
+ * perfect in a desktop browser and then clips under the notch and the home
+ * indicator on a real phone. Android is the mirror image — Telegram reports
+ * `safeAreaInset: 0` on plenty of devices that do have a gesture bar, and it
+ * is `env()` that knows about it (now that index.html asks for
+ * `viewport-fit=cover`, without which env() is dead there too).
+ *
+ * So Telegram numbers are mirrored onto `--tg-safe-*-tg` here, and index.css
+ * combines each with its `env()` counterpart using `max()`. Whichever source
+ * knows about the hardware wins, and the one reporting zero costs nothing.
  */
 
 export interface SafeAreaInset {
@@ -131,18 +138,37 @@ function applyInsets(tg: TelegramWebApp): void {
   // header imposes on top of it are separate numbers, and both matter: the
   // first keeps content out of the hardware, the second keeps it out from
   // under the client's chrome.
-  root.setProperty("--tg-safe-top", px(safe?.top));
-  root.setProperty("--tg-safe-bottom", px(safe?.bottom));
+  // The -tg suffix matters: index.css owns --tg-safe-top / --tg-safe-bottom
+  // and derives them as max(these, env(...)). Writing the unsuffixed names
+  // here would be an inline style on the same element and would win outright,
+  // throwing away whatever env() knew.
+  root.setProperty("--tg-safe-top-tg", px(safe?.top));
+  root.setProperty("--tg-safe-bottom-tg", px(safe?.bottom));
   root.setProperty("--tg-content-top", px(content?.top));
 }
 
+/**
+ * Publishes how much of the WebView Telegram is actually showing.
+ *
+ * Two numbers, because the app needs both. `--tg-viewport-stable-height` is
+ * the keyboard-free figure: the floor for anything that must not leap up the
+ * screen the moment a search field takes focus. `--tg-viewport-height` is the
+ * live one, and it is what #root and every fixed overlay size themselves to.
+ *
+ * The visual viewport is in there because Android Telegram does not reliably
+ * fire `viewportChanged` when its own keyboard opens, while
+ * `window.visualViewport` always does — an overlay pinned to the stable
+ * height simply sits underneath the keyboard there. min() of the two, so a
+ * WebView that is taller than the part Telegram is showing cannot win.
+ */
 function applyViewport(tg: TelegramWebApp): void {
-  // viewportStableHeight, not viewportHeight: the stable one excludes the
-  // keyboard, so the Now Playing bar does not leap up the screen the moment a
-  // search field takes focus.
-  document.documentElement.style.setProperty(
+  const stable = tg.viewportStableHeight || tg.viewportHeight || window.innerHeight;
+  const visible = window.visualViewport?.height ?? stable;
+  const root = document.documentElement.style;
+  root.setProperty("--tg-viewport-stable-height", `${Math.round(stable)}px`);
+  root.setProperty(
     "--tg-viewport-height",
-    `${Math.round(tg.viewportStableHeight || window.innerHeight)}px`
+    `${Math.round(Math.min(stable, visible))}px`
   );
 }
 
@@ -181,10 +207,18 @@ export function initTelegramPlatform(): () => void {
   tg.onEvent("contentSafeAreaChanged", onSafeArea);
   tg.onEvent("viewportChanged", onViewport);
 
+  // The keyboard, on the clients that do not announce it. See applyViewport.
+  const vv = window.visualViewport;
+  const onVisualViewport = () => applyViewport(tg);
+  vv?.addEventListener("resize", onVisualViewport);
+  vv?.addEventListener("scroll", onVisualViewport);
+
   return () => {
     tg.offEvent("safeAreaChanged", onSafeArea);
     tg.offEvent("contentSafeAreaChanged", onSafeArea);
     tg.offEvent("viewportChanged", onViewport);
+    vv?.removeEventListener("resize", onVisualViewport);
+    vv?.removeEventListener("scroll", onVisualViewport);
   };
 }
 

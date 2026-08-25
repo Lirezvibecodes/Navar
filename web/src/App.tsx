@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { authenticate } from "./api";
 import { BottomNav } from "./components/BottomNav";
 import { ChooseName } from "./components/ChooseName";
@@ -18,6 +25,7 @@ import { ProfileView } from "./views/ProfileView";
 import { FriendLibraryView } from "./views/FriendLibraryView";
 import { PlayerView } from "./views/PlayerView";
 import { SharedView } from "./views/SharedView";
+import { hideSplash } from "./lib/splash";
 import { getTelegramWebApp, initTelegramPlatform, setBackButton } from "./telegram";
 import type { Me } from "./types";
 import type { RootTab, View } from "./view";
@@ -216,29 +224,60 @@ function Shell({ me }: { me: Me }) {
   );
 }
 
+/**
+ * Signing in, and the three states that takes.
+ *
+ * Loading is the interesting one, because it is the longest: a Render free
+ * dyno takes about thirty seconds to wake, and every one of those seconds is
+ * spent on this component. It deliberately renders nothing — index.html's
+ * splash is still up, is still the thing on screen, and is not taken down
+ * until one of the other two states has actually committed. Rendering a
+ * spinner here as well would put two loading screens on top of each other.
+ */
 function Boot() {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether a sign-in is in flight, and whether one has ever finished. The
+  // second is what says who owns the screen: until the first attempt lands,
+  // index.html's splash is still up and Boot draws nothing. Afterwards the
+  // splash is gone for good, so a retry has to show its own waiting state.
+  const [busy, setBusy] = useState(true);
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => initTelegramPlatform(), []);
 
+  // A layout effect, so the splash is only ever released after the frame that
+  // replaces it has been committed. In an effect it would release one frame
+  // early and flash whatever was underneath.
+  useLayoutEffect(() => {
+    if (me || attempted) hideSplash();
+  }, [me, attempted]);
+
   const signIn = useCallback(async () => {
+    setBusy(true);
     setError(null);
     const initData = getTelegramWebApp()?.initData;
-    if (!initData) {
-      setError("Open Navaar from Telegram to sign in.");
-      return;
-    }
     try {
+      if (!initData) {
+        setError("Open Navaar from Telegram to sign in.");
+        return;
+      }
       setMe(await authenticate(initData));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign you in");
+    } finally {
+      setBusy(false);
+      setAttempted(true);
     }
   }, []);
 
   useEffect(() => {
     void signIn();
   }, [signIn]);
+
+  // The first attempt, still running. The splash in index.html is what the
+  // user is looking at, and it stays until this resolves one way or the other.
+  if (!me && !attempted) return null;
 
   if (!me) {
     return (
@@ -247,18 +286,20 @@ function Boot() {
           height: "100%",
           display: "flex",
           flexDirection: "column",
+          justifyContent: "center",
           position: "relative",
           zIndex: 1,
+          padding: "0 8px",
         }}
       >
-        {error ? (
-          <Empty
-            title="Not signed in"
-            body={error}
-            action="Try again"
-            onAction={() => void signIn()}
-          />
-        ) : null}
+        <Empty
+          title="Not signed in"
+          body={error ?? "Could not sign you in"}
+          action={busy ? "Signing in…" : "Try again"}
+          onAction={() => {
+            if (!busy) void signIn();
+          }}
+        />
       </div>
     );
   }
