@@ -352,6 +352,98 @@ export function GhostButton({
   );
 }
 
+/**
+ * A labelled switch.
+ *
+ * The entire row is the control, because a 30px track cannot carry a 44px hit
+ * area on its own and putting a second tappable thing beside it would make the
+ * label look like it did something different from the switch. The knob is dark
+ * when the switch is on, since the track it sits on is then the pale accent.
+ */
+export function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      className="nav-press"
+      onClick={() => {
+        haptic.select();
+        onChange(!checked);
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        width: "100%",
+        minHeight: 52,
+        textAlign: "left",
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span
+          style={{
+            display: "block",
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {label}
+        </span>
+        {hint ? (
+          <span
+            style={{
+              display: "block",
+              fontSize: 11.5,
+              lineHeight: 1.35,
+              color: "var(--color-nav-muted)",
+              marginTop: 3,
+            }}
+          >
+            {hint}
+          </span>
+        ) : null}
+      </span>
+      <span
+        style={{
+          position: "relative",
+          flex: "none",
+          width: 44,
+          height: 26,
+          borderRadius: 13,
+          background: checked
+            ? "var(--color-nav-action)"
+            : "rgba(255,255,255,.14)",
+          transition: "background .18s ease",
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            top: 3,
+            left: checked ? 21 : 3,
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: checked ? "#0b0d10" : "rgba(255,255,255,.62)",
+            transition: "left .18s cubic-bezier(.2,.8,.3,1), background .18s ease",
+          }}
+        />
+      </span>
+    </button>
+  );
+}
+
 // --- States ------------------------------------------------------------------
 
 /**

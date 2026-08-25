@@ -21,7 +21,10 @@ export function authRouter(): Router {
       return;
     }
 
-    const { handle } = await ensureUser(validated.user.id, validated.user.username);
+    const { handle, listeningPublic } = await ensureUser(
+      validated.user.id,
+      validated.user.username
+    );
     const token = signSession(validated.user.id, validated.user.username);
     // The identity comes back alongside the token because the client needs it
     // for every ownership decision it renders — whether to draw a heart, an
@@ -37,6 +40,10 @@ export function authRouter(): Router {
         // the one thing the client must handle before it can draw anything
         // else: there is no sensible way to render a person with no name.
         handle,
+        // Whether their listening is shown to friends. Off for anybody who has
+        // never said otherwise, and carried here so the switch on the profile
+        // screen renders in the right position without a request of its own.
+        listening_public: listeningPublic,
       },
     });
   }));

@@ -11,6 +11,7 @@ import {
   Screen,
   SectionHeader,
   Skeleton,
+  Toggle,
 } from "../components/ui";
 import { LibraryIcon, ShareIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
@@ -86,6 +87,27 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 
   const name = personName(isMe ? me : person);
 
+  /**
+   * The listening switch.
+   *
+   * Applied to local state first, which is what actually turns reporting on:
+   * the player watches this flag, so flipping it sends the track you are on
+   * within the same tick rather than at the next song. Put back if the server
+   * disagrees — this is the one setting where being wrong about it means
+   * telling people something they asked not to tell.
+   */
+  const setListening = async (next: boolean) => {
+    if (!me) return;
+    setMe({ ...me, listening_public: next });
+    try {
+      await api.setListeningPrivacy(next);
+      haptic.success();
+    } catch (err) {
+      setMe({ ...me, listening_public: !next });
+      toast(err instanceof Error ? err.message : "Could not change that");
+    }
+  };
+
   const rename = async (typed: string) => {
     if (!me) return;
     try {
@@ -159,6 +181,14 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 
       {isMe ? (
         <>
+          <SectionHeader title="Listening" />
+          <Toggle
+            label="Show friends what I am playing"
+            hint="Only your friends, only while you are playing something, and only for a few minutes after you stop."
+            checked={me?.listening_public ?? false}
+            onChange={(next) => void setListening(next)}
+          />
+
           <SectionHeader title="Your library" />
           <GhostButton
             icon={LibraryIcon}

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { Cover, CollectionArt } from "../components/PixelArt";
@@ -8,7 +8,7 @@ import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
-import type { Playlist } from "../types";
+import type { Playlist, Track } from "../types";
 
 /**
  * The first thing you see.
@@ -17,9 +17,9 @@ import type { Playlist } from "../types";
  * something the app is asking you to finish. There is no editorial shelf and
  * nothing recommended: Navaar knows only what you forwarded to it.
  *
- * The sections that need somebody else's listening state — Friends listening,
- * From your friends — arrive with the social phase. A section with no data
- * behind it renders nothing rather than an empty frame.
+ * The sections that need somebody else's listening state live on Social,
+ * which is where the one scheduled request in this app is spent. A section
+ * with no data behind it renders nothing rather than an empty frame.
  */
 /**
  * The nudge stays quiet until a handful of tracks have piled up. One stray
@@ -41,13 +41,29 @@ export function HomeView({ nav }: { nav: Navigation }) {
 
   const unsorted = useMemo(() => tracks.filter((t) => !t.in_playlist).length, [tracks]);
 
-  // What you were listening to, then what arrived while you were away. Until
-  // the plays table exists this is the honest version of "continue listening":
-  // the app knows where you stopped and what is new, and nothing else.
+  // What was actually played, which is a different list from what arrived
+  // most recently. Fetched rather than derived: history includes tracks heard
+  // out of somebody else's library, which were never in this one.
+  const [played, setPlayed] = useState<Track[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .listRecentlyPlayed()
+      .then((rows) => live && setPlayed(rows))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // What you were listening to, then what you played before that — and what
+  // arrived while you were away for somebody who has not played anything yet,
+  // so a first session still has a shelf instead of a gap.
   const shelf = useMemo(() => {
-    if (!current) return recent;
-    return [current, ...recent.filter((t) => t.id !== current.id)];
-  }, [current, recent]);
+    const base = played && played.length > 0 ? played.slice(0, 12) : recent;
+    if (!current) return base;
+    return [current, ...base.filter((t) => t.id !== current.id)];
+  }, [current, played, recent]);
 
   if (loading) {
     return (

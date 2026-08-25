@@ -2,24 +2,30 @@ import { useCallback, useEffect, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
+import { CollectionArt } from "../components/PixelArt";
 import { ActionButton, Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { UserCheckIcon, UserPlusIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
-import { personName } from "../lib/format";
-import { haptic, shareLink } from "../telegram";
-import type { Person } from "../types";
+import { formatAge, personName, trackTitle } from "../lib/format";
+import { haptic, onActivationChange, shareLink } from "../telegram";
+import type { ActivityItem, Person } from "../types";
 
 /**
  * People.
  *
- * Listening status, the activity feed and suggestions all need tables that
- * arrive with the social phase; until they do, this screen shows what the
- * server can already answer — who you are friends with, who is waiting on you,
- * and the person behind a name you were given. A section with no data behind it
- * renders nothing at all rather than an empty frame, so the screen grows as the
- * backend does instead of being a grid of placeholders.
+ * Who is playing something right now, what the people you know have been
+ * doing, who is waiting on you, and the person behind a name you were given.
+ * A section with no data behind it renders nothing at all rather than an empty
+ * frame — most of this screen is blank on the first day and that is correct.
+ *
+ * Everything in the feed comes from one call. A row never names somebody you
+ * cannot already see: the server leaves that name out, and this file has no
+ * branch for it, because the safest version of that rule is the one the client
+ * cannot get wrong.
  */
+/** The one scheduled refetch in the app. See the effect that owns it. */
+const ACTIVITY_REFRESH_MS = 30_000;
 export function SocialView({ nav }: { nav: Navigation }) {
   const { toast } = useToast();
   const { me } = useLibrary();
@@ -28,15 +34,18 @@ export function SocialView({ nav }: { nav: Navigation }) {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<Person | null>(null);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const [people, requests] = await Promise.all([
+      const [people, requests, feed] = await Promise.all([
         api.listFriends(),
         api.listFriendRequests(),
+        api.socialActivity(),
       ]);
       setFriends(people);
       setIncoming(requests.incoming);
+      setActivity(feed);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not load your friends");
     } finally {
@@ -47,6 +56,38 @@ export function SocialView({ nav }: { nav: Navigation }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * The only thing in Navaar that is fetched on a schedule.
+   *
+   * It runs while this screen is mounted, which is exactly while its tab is on
+   * screen — leaving the tab unmounts it — and it skips any tick where the Mini
+   * App is not the thing being looked at, because a suspended WebView that
+   * wakes and fires six missed intervals at a sleeping free instance is the
+   * traffic this app is shaped around avoiding. Thirty seconds is already
+   * finer-grained than the ten-minute window the server ages a status out on;
+   * asking faster would learn nothing.
+   *
+   * A failed refresh is silent. What is on screen stays on screen, and the
+   * next tick is thirty seconds away.
+   */
+  useEffect(() => {
+    let onScreen = true;
+    const stop = onActivationChange((active) => {
+      onScreen = active;
+    });
+    const timer = window.setInterval(() => {
+      if (!onScreen || document.hidden) return;
+      api
+        .socialActivity()
+        .then(setActivity)
+        .catch(() => undefined);
+    }, ACTIVITY_REFRESH_MS);
+    return () => {
+      window.clearInterval(timer);
+      stop();
+    };
+  }, []);
 
   const accept = async (person: Person) => {
     setIncoming((rows) =>
@@ -104,6 +145,9 @@ export function SocialView({ nav }: { nav: Navigation }) {
       </Screen>
     );
   }
+
+  const listening = activity.filter((row) => row.kind === "listening");
+  const feed = activity.filter((row) => row.kind !== "listening");
 
   const alreadyFriends =
     found != null &&
@@ -182,11 +226,98 @@ export function SocialView({ nav }: { nav: Navigation }) {
         </>
       ) : null}
 
+      {listening.length > 0 ? (
+        <>
+          <SectionHeader title="Listening now" spaceAbove={22} />
+          <div className="nav-shelf" style={{ gap: 12 }}>
+            {listening.map((row, i) => (
+              <button
+                key={row.person.telegram_user_id}
+                className="nav-press nav-row-in"
+                onClick={() => {
+                  haptic.tap();
+                  nav.push({
+                    type: "profile",
+                    userId: Number(row.person.telegram_user_id),
+                  });
+                }}
+                style={
+                  {
+                    "--i": i,
+                    width: 64,
+                    flex: "none",
+                    textAlign: "center",
+                  } as React.CSSProperties
+                }
+              >
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Avatar
+                    userId={row.person.telegram_user_id}
+                    username={row.person.handle ?? row.person.username}
+                    hasAvatar={row.person.has_avatar}
+                    size={52}
+                    ring
+                  />
+                </div>
+                <span
+                  className="nav-clip"
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    marginTop: 6,
+                  }}
+                >
+                  {personName(row.person)}
+                </span>
+                <span
+                  className="nav-clip"
+                  style={{
+                    display: "block",
+                    fontSize: 10.5,
+                    color: "var(--color-nav-muted)",
+                  }}
+                >
+                  {row.track ? trackTitle(row.track) : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {feed.length > 0 ? (
+        <>
+          <SectionHeader title="Going around" spaceAbove={22} />
+          {feed.map((item, i) => (
+            <ActivityRow
+              key={item.kind + item.person.telegram_user_id + item.at}
+              item={item}
+              index={i}
+              onOpen={() => {
+                if (item.kind === "shared" && item.playlist) {
+                  nav.push({ type: "playlist", id: item.playlist.id });
+                  return;
+                }
+                nav.push({
+                  type: "profile",
+                  userId: Number(item.person.telegram_user_id),
+                });
+              }}
+            />
+          ))}
+        </>
+      ) : null}
+
       <SectionHeader
         title="Friends"
         action="Invite"
         onAction={() => void invite()}
-        spaceAbove={incoming.length > 0 || found ? 22 : 16}
+        spaceAbove={
+          incoming.length > 0 || found || listening.length > 0 || feed.length > 0
+            ? 22
+            : 16
+        }
       />
 
       {friends.length === 0 ? (
@@ -209,6 +340,92 @@ export function SocialView({ nav }: { nav: Navigation }) {
         ))
       )}
     </Screen>
+  );
+}
+
+/**
+ * One thing that happened.
+ *
+ * A save carries two people — whoever kept the track and whoever they got it
+ * from — and the second is here only if the server sent it. It leaves that
+ * name out for anybody the viewer cannot already see, so there is no branch
+ * here deciding whether a stranger may be introduced: the row simply says less.
+ */
+function ActivityRow({
+  item,
+  index,
+  onOpen,
+}: {
+  item: ActivityItem;
+  index: number;
+  onOpen: () => void;
+}) {
+  const title = item.playlist
+    ? item.playlist.name
+    : item.track
+      ? trackTitle(item.track)
+      : "Something";
+  const verb = item.kind === "shared" ? "shared a playlist" : "saved a track";
+  const credit = item.from ? " · from " + personName(item.from) : "";
+
+  return (
+    <button
+      className="nav-press nav-row-in"
+      onClick={() => {
+        haptic.tap();
+        onOpen();
+      }}
+      style={
+        {
+          "--i": index,
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          width: "100%",
+          minHeight: 56,
+          textAlign: "left",
+        } as React.CSSProperties
+      }
+    >
+      <CollectionArt
+        name={title}
+        coverTrackId={item.playlist?.cover_track_id ?? item.track?.cover_track_id}
+        src={item.playlist ? api.playlistArtworkUrl(item.playlist) : null}
+        size={42}
+        radius={9}
+      />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span
+          className="nav-clip"
+          style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}
+        >
+          {title}
+        </span>
+        <span
+          className="nav-clip"
+          style={{
+            display: "block",
+            fontSize: 11,
+            color: "var(--color-nav-muted)",
+            marginTop: 2,
+          }}
+        >
+          {personName(item.person)} {verb}
+          {credit}
+        </span>
+      </span>
+      <Avatar
+        userId={item.person.telegram_user_id}
+        username={item.person.handle ?? item.person.username}
+        hasAvatar={item.person.has_avatar}
+        size={26}
+      />
+      <span
+        style={{ fontSize: 10.5, color: "var(--color-nav-faint)", flex: "none" }}
+      >
+        {formatAge(item.at)}
+      </span>
+    </button>
   );
 }
 

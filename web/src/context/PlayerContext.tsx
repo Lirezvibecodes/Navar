@@ -8,7 +8,13 @@ import {
   useState,
 } from "react";
 import type { Track } from "../types";
-import { trackCoverUrl, trackStreamUrl } from "../api";
+import {
+  recordPlay,
+  setListeningStatus,
+  trackCoverUrl,
+  trackStreamUrl,
+} from "../api";
+import { useLibrary } from "./LibraryContext";
 import {
   haptic,
   onActivationChange,
@@ -46,6 +52,10 @@ export interface PlaybackContextSource {
 
 const RESUME_KEY = "navaar.resume";
 const PROGRESS_SAVE_MS = 5000;
+/** Comfortably inside the ten minutes the server gives a status to live. */
+const STATUS_HEARTBEAT_MS = 4 * 60_000;
+/** How much of a track has to be heard before it counts as played. */
+const PLAY_LOG_SECONDS = 30;
 
 interface ResumeState {
   trackId: string;
@@ -437,6 +447,59 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     };
   }, [prev, next, seek]);
+
+  // --- Reporting ------------------------------------------------------------
+  //
+  // Two things leave for the server while music plays, and neither is allowed
+  // to matter: a status friends may be shown, and a play for your own history.
+  // Both are fire-and-forget. Nothing on screen reads either of them back, so
+  // a failed one is not retried and never becomes a message.
+
+  const { me } = useLibrary();
+  const listeningPublic = me?.listening_public ?? false;
+
+  /**
+   * What you are playing, while you are playing it.
+   *
+   * Sent only when the switch on your profile is on, so an account that never
+   * turns it on never spends a request on it — and turning it on reports at
+   * once, because this effect re-runs on the flag. Nothing is sent on a pause:
+   * a status disappears because the server-side window closes over it, not
+   * because this client managed to send a goodbye. A Mini App that is swiped
+   * away never gets to send anything at all, so nothing may depend on one.
+   */
+  useEffect(() => {
+    if (!listeningPublic || !current || !isPlaying) return;
+    const id = current.id;
+    const report = () => void setListeningStatus(id).catch(() => {});
+    report();
+    const timer = window.setInterval(report, STATUS_HEARTBEAT_MS);
+    return () => window.clearInterval(timer);
+  }, [listeningPublic, current, isPlaying]);
+
+  /**
+   * One play per track, once it has genuinely been listened to.
+   *
+   * The timer is armed by playback and disarmed by a pause, so skipping
+   * through six songs looking for one logs nothing. Seeking is invisible to it
+   * by construction rather than by a guard: the position is not an input.
+   * Short tracks count at their halfway mark, or they could never count at all.
+   */
+  const lastLogged = useRef<string | null>(null);
+  useEffect(() => {
+    if (!current || !isPlaying || lastLogged.current === current.id) return;
+    const id = current.id;
+    const length = current.duration_seconds ?? PLAY_LOG_SECONDS * 2;
+    const after = Math.max(5, Math.min(PLAY_LOG_SECONDS, length / 2));
+    const timer = window.setTimeout(() => {
+      lastLogged.current = id;
+      void recordPlay(id).catch(() => {
+        // Leave it eligible again, in case this track is still the one playing.
+        if (lastLogged.current === id) lastLogged.current = null;
+      });
+    }, after * 1000);
+    return () => window.clearTimeout(timer);
+  }, [current, isPlaying]);
 
   // --- Resume ---------------------------------------------------------------
 

@@ -4,6 +4,7 @@ import { asyncHandler } from "../asyncHandler";
 import {
   acceptFriendship,
   listFriends,
+  listFriendsListening,
   listOutgoingFriendRequests,
   listPendingFriendRequests,
   removeFriendship,
@@ -45,6 +46,24 @@ export function friendsRouter(): Router {
         listOutgoingFriendRequests(userId),
       ]);
       res.json({ incoming, outgoing });
+    })
+  );
+
+  /**
+   * Who is playing something right now.
+   *
+   * Only friends who turned their listening on, and only within the last few
+   * minutes. Everybody else is absent rather than present-and-hidden: a row
+   * saying somebody has opted out is a row that tells you the one thing they
+   * opted out of telling you.
+   *
+   * Declared before /:id for the same reason /pending is.
+   */
+  router.get(
+    "/listening",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      res.json(await listFriendsListening((req as AuthedRequest).telegramUserId));
     })
   );
 

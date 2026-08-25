@@ -70,6 +70,8 @@ export interface Me {
   first_name: string | null;
   /** Null until this person has chosen one, which the app asks for on first launch. */
   handle: string | null;
+  /** Whether friends are shown what you are playing. Off until you say so. */
+  listening_public: boolean;
 }
 
 /**
@@ -111,4 +113,53 @@ export interface SharedPlaylist {
  */
 export interface SharedPlaylistPage extends SharedPlaylist {
   app_link: string | null;
+}
+
+/**
+ * A track as a social row carries it: enough to name, not enough to play.
+ *
+ * `cover_track_id` is the id to fetch artwork from, and is null whenever the
+ * viewer may not fetch it — a friend can be playing something out of a
+ * playlist you have never been shown. Null draws the generated tile, which is
+ * what the app already does for a track that simply has no picture.
+ */
+export interface ActivityTrack {
+  id: string;
+  title: string | null;
+  artist: string | null;
+  cover_track_id: string | null;
+}
+
+/** A playlist as a social row carries it. No share_slug — that is a credential. */
+export interface ActivityPlaylist {
+  id: string;
+  name: string;
+  has_cover: boolean;
+  cover_track_id: string | null;
+  updated_at: string;
+}
+
+/** Somebody playing something right now, as one of their friends sees it. */
+export interface ListeningNow {
+  person: Person;
+  track: ActivityTrack;
+  at: string;
+}
+
+export type ActivityKind = "listening" | "shared" | "saved";
+
+/**
+ * One row of the Social feed.
+ *
+ * `from` is the second name a save carries, and is null unless the server
+ * decided the viewer may see that person — a row never introduces a stranger,
+ * and the client does not get to make that call. Render what is here.
+ */
+export interface ActivityItem {
+  kind: ActivityKind;
+  at: string;
+  person: Person;
+  from: Person | null;
+  track: ActivityTrack | null;
+  playlist: ActivityPlaylist | null;
 }

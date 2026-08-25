@@ -1,5 +1,7 @@
 import type {
+  ActivityItem,
   Collection,
+  ListeningNow,
   Me,
   Person,
   Playlist,
@@ -235,7 +237,9 @@ export function setPlaylistCover(
  * that moves, an <img> already showing the old picture would never go and
  * fetch the new one.
  */
-export function playlistArtworkUrl(playlist: Playlist): string | null {
+export function playlistArtworkUrl(
+  playlist: Pick<Playlist, "id" | "has_cover" | "updated_at">
+): string | null {
   if (!playlist.has_cover) return null;
   const v = encodeURIComponent(playlist.updated_at);
   return `${API_BASE}/api/playlists/${playlist.id}/artwork?v=${v}&token=${encodeURIComponent(sessionToken ?? "")}`;
@@ -337,6 +341,66 @@ export function acceptFriend(id: string | number): Promise<void> {
 
 export function removeFriend(id: string | number): Promise<void> {
   return request<void>(`/api/friends/${id}`, { method: "DELETE" });
+}
+
+// --- Listening, history and activity ----------------------------------------
+
+/**
+ * Say what is playing, or pass null to say nothing is.
+ *
+ * Sent on a track change and on a slow heartbeat while playing, and never
+ * while paused: what makes a status disappear is the server-side window
+ * expiring, not a message from here. A WebView that is swiped away gets no
+ * chance to send a goodbye, so nothing may depend on one arriving.
+ */
+export function setListeningStatus(trackId: string | null): Promise<void> {
+  return request<void>("/api/me/listening-status", {
+    method: "PATCH",
+    body: json({ trackId }),
+  });
+}
+
+/** Whether friends see any of that. Off until the profile switch turns it on. */
+export function setListeningPrivacy(
+  listeningPublic: boolean
+): Promise<{ listening_public: boolean }> {
+  return request("/api/me/privacy", {
+    method: "PATCH",
+    body: json({ listeningPublic }),
+  });
+}
+
+/** Log a play, once a track has genuinely been listened to. */
+export function recordPlay(trackId: string): Promise<void> {
+  return request<void>("/api/me/plays", {
+    method: "POST",
+    body: json({ trackId }),
+  });
+}
+
+/** The last fifty distinct tracks this person played, most recent first. */
+export function listRecentlyPlayed(): Promise<Track[]> {
+  return request<Track[]>("/api/me/recently-played");
+}
+
+/**
+ * Friends playing something right now. Anybody who has not turned listening on,
+ * or who stopped a while ago, is simply absent — there is no hidden row to
+ * render, because a row saying somebody is private tells you the one thing they
+ * asked not to tell you.
+ */
+export function listFriendsListening(): Promise<ListeningNow[]> {
+  return request<ListeningNow[]>("/api/friends/listening");
+}
+
+/**
+ * Everything the Social tab shows, in one call.
+ *
+ * The only endpoint this app refetches on a schedule — see SocialView for the
+ * rule that governs it: while its tab is on screen, at most once every 30s.
+ */
+export function socialActivity(): Promise<ActivityItem[]> {
+  return request<ActivityItem[]>("/api/social/activity");
 }
 
 // --- The share page ---------------------------------------------------------

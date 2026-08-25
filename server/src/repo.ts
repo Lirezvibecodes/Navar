@@ -15,20 +15,34 @@ import type {
  * every caller that creates a session immediately needs to know whether this
  * person has chosen a name yet, and a second query to learn it would be a
  * round trip for a column already under the cursor.
+ *
+ * The listening switch rides along for the same reason and at the same price —
+ * a subquery on a primary key — rather than becoming a settings endpoint the
+ * app would have to call before it could draw a switch. Absent means off:
+ * somebody who has never touched it has no listen_status row at all.
  */
 export async function ensureUser(
   telegramUserId: number,
   username: string | undefined
-): Promise<{ handle: string | null }> {
-  const { rows } = await getPool().query<{ handle: string | null }>(
+): Promise<{ handle: string | null; listeningPublic: boolean }> {
+  const { rows } = await getPool().query<{
+    handle: string | null;
+    listening_public: boolean;
+  }>(
     `INSERT INTO users (telegram_user_id, username)
      VALUES ($1, $2)
      ON CONFLICT (telegram_user_id)
      DO UPDATE SET username = EXCLUDED.username
-     RETURNING handle`,
+     RETURNING handle,
+       COALESCE((SELECT ls.is_public FROM listen_status ls
+                 WHERE ls.telegram_user_id = users.telegram_user_id), false)
+         AS listening_public`,
     [telegramUserId, username ?? null]
   );
-  return { handle: rows[0]?.handle ?? null };
+  return {
+    handle: rows[0]?.handle ?? null,
+    listeningPublic: rows[0]?.listening_public ?? false,
+  };
 }
 
 export interface NewTrack {
@@ -2006,4 +2020,427 @@ export async function setAppChannel(
            updated_at = now()`,
     [role, chatId, title]
   );
+}
+
+// ---------------------------------------------------------------------------
+// Listening, history and activity
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a listening status counts as "now".
+ *
+ * Nothing can be relied on to clear one. A Mini App is closed by swiping it
+ * away and a WebView that is killed never runs its teardown, so a status that
+ * had to be switched off would sit there forever claiming somebody is still
+ * playing a song they finished on the bus this morning. The window clears it
+ * instead: the player re-posts while it is playing and stops the moment it is
+ * not, so the row goes stale on its own and the feed stops returning it. Ten
+ * minutes is longer than nearly every track and short enough that "listening
+ * now" is not a lie.
+ */
+const LISTENING_WINDOW_MINUTES = 10;
+
+/**
+ * How long a play stays in the history.
+ *
+ * `plays` is the only table here that grows without bound, and there is no
+ * cron on a free instance that sleeps — so the prune rides along with the
+ * insert. Ninety days is well past anything the app shows and keeps the table
+ * a fixed size rather than a slowly filling one.
+ */
+const PLAY_RETENTION_DAYS = 90;
+
+/** How far back the activity feed looks, and how many rows it will carry. */
+const ACTIVITY_WINDOW_DAYS = 30;
+const ACTIVITY_LIMIT = 30;
+
+const RECENTLY_PLAYED_LIMIT = 50;
+
+/**
+ * The person columns, prefixed, so one row can carry two different people.
+ *
+ * A save names two: whoever saved the track and whoever they got it from. They
+ * come back from the same row and have to be told apart, which is what the
+ * prefix is for — and pairing the SELECT list with the reader below is what
+ * stops the two from drifting apart.
+ */
+function personColumns(alias: string, prefix: string): string {
+  return `${alias}.telegram_user_id AS ${prefix}_id,
+          ${alias}.username AS ${prefix}_username,
+          ${alias}.handle AS ${prefix}_handle,
+          (${alias}.avatar_file_id IS NOT NULL) AS ${prefix}_has_avatar`;
+}
+
+/** Reads back what personColumns wrote. Null when the join found nobody. */
+function personFrom(
+  row: Record<string, unknown>,
+  prefix: string
+): PersonSummary | null {
+  const id = row[`${prefix}_id`];
+  if (id == null) return null;
+  return {
+    telegram_user_id: String(id),
+    username: (row[`${prefix}_username`] as string | null) ?? null,
+    handle: (row[`${prefix}_handle`] as string | null) ?? null,
+    has_avatar: Boolean(row[`${prefix}_has_avatar`]),
+  };
+}
+
+/**
+ * A track as a social row carries it: enough to name, not enough to play.
+ *
+ * `cover_track_id` is the id to fetch artwork from and is null unless the
+ * viewer may actually fetch it — a friend can be listening to a track that is
+ * in none of the playlists they share, and the cover route would rightly 404
+ * on it. A null here draws the generated tile instead of a broken image.
+ */
+export interface ActivityTrack {
+  id: string;
+  title: string | null;
+  artist: string | null;
+  cover_track_id: string | null;
+}
+
+/** Somebody's listening status, as one of their friends sees it. */
+export interface ListeningNow {
+  person: PersonSummary;
+  track: ActivityTrack;
+  /** When they were last heard from; always inside the listening window. */
+  at: string;
+}
+
+/** A playlist as a social row carries it. Deliberately without share_slug. */
+export interface ActivityPlaylist {
+  id: string;
+  name: string;
+  has_cover: boolean;
+  cover_track_id: string | null;
+  updated_at: string;
+}
+
+export type ActivityKind = "listening" | "shared" | "saved";
+
+/**
+ * One row of the Social feed.
+ *
+ * `person` is who did the thing, and is always someone the viewer can see —
+ * that is the whole filter on every branch of the feed. `from` is the second
+ * name a save carries, and is null unless the viewer can see that person too:
+ * "@sara saved — from @ali" hands Ali's name to everyone Sara is friends with,
+ * which is a stranger's name to most of them. The row stops at "@sara saved"
+ * rather than naming him, and the SQL is what decides that, not the client.
+ */
+export interface ActivityItem {
+  kind: ActivityKind;
+  at: string;
+  person: PersonSummary;
+  from: PersonSummary | null;
+  track: ActivityTrack | null;
+  playlist: ActivityPlaylist | null;
+}
+
+/**
+ * Say what this person is playing, or clear it.
+ *
+ * The track is checked against the same visibility expression the read paths
+ * use, so a status can only ever name a track its owner may actually have —
+ * a client that posted somebody else's id would broadcast a title out of a
+ * library it cannot open. Returns false when there is no such track for them,
+ * which the route answers with a 404 like every other invisible resource.
+ *
+ * is_public is untouched here. It is set on its own route and must survive a
+ * status write, or every track change would quietly re-open the curtains.
+ */
+export async function setListeningStatus(
+  telegramUserId: number,
+  trackId: string | null
+): Promise<boolean> {
+  const pool = getPool();
+
+  if (trackId === null) {
+    await pool.query(
+      `INSERT INTO listen_status (telegram_user_id, track_id, updated_at)
+       VALUES ($1, NULL, now())
+       ON CONFLICT (telegram_user_id)
+       DO UPDATE SET track_id = NULL, updated_at = now()`,
+      [telegramUserId]
+    );
+    return true;
+  }
+
+  const { rowCount } = await pool.query(
+    `INSERT INTO listen_status (telegram_user_id, track_id, updated_at)
+     SELECT $1, t.id, now()
+     FROM tracks t
+     WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
+     ON CONFLICT (telegram_user_id)
+     DO UPDATE SET track_id = EXCLUDED.track_id, updated_at = now()`,
+    [telegramUserId, trackId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Whether this person's listening is shown to their friends at all.
+ *
+ * Switching it off clears the track as well as the flag. Leaving the last one
+ * behind would mean that turning it back on an hour later re-broadcasts
+ * whatever was playing when it went off, which is not what the switch appears
+ * to promise; the player posts the current track again as soon as it is on.
+ */
+export async function setListeningPrivacy(
+  telegramUserId: number,
+  isPublic: boolean
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO listen_status (telegram_user_id, is_public, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (telegram_user_id)
+     DO UPDATE SET is_public = EXCLUDED.is_public,
+       track_id = CASE WHEN EXCLUDED.is_public THEN listen_status.track_id END`,
+    [telegramUserId, isPublic]
+  );
+}
+
+/**
+ * What this viewer's friends are playing right now.
+ *
+ * Three conditions and no fourth: an accepted friendship, a status they chose
+ * to make public, and a timestamp inside the window. Anyone outside that
+ * returns nothing at all — there is no row saying somebody is hidden, because
+ * a placeholder for a person who opted out tells you exactly the thing they
+ * opted out of telling you.
+ */
+export async function listFriendsListening(
+  viewerTelegramId: number
+): Promise<ListeningNow[]> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `SELECT ${personColumns("u", "person")},
+       t.id AS track_id, t.title, t.artist,
+       CASE WHEN ${HAS_COVER_T} AND ${trackVisibleTo("$1", "t")} THEN t.id END
+         AS cover_track_id,
+       ls.updated_at AS at
+     FROM listen_status ls
+     JOIN users u ON u.telegram_user_id = ls.telegram_user_id
+     JOIN tracks t ON t.id = ls.track_id
+     WHERE ls.is_public
+       AND ls.updated_at > now() - interval '${LISTENING_WINDOW_MINUTES} minutes'
+       AND ${LIVE_T}
+       AND EXISTS (
+         SELECT 1 FROM friendships f
+         WHERE f.status = 'accepted'
+           AND ((f.requester_id = $1 AND f.addressee_id = ls.telegram_user_id)
+             OR (f.requester_id = ls.telegram_user_id AND f.addressee_id = $1))
+       )
+     ORDER BY ls.updated_at DESC`,
+    [viewerTelegramId]
+  );
+
+  return rows.map((row) => ({
+    person: personFrom(row, "person")!,
+    track: {
+      id: String(row.track_id),
+      title: (row.title as string | null) ?? null,
+      artist: (row.artist as string | null) ?? null,
+      cover_track_id: (row.cover_track_id as string | null) ?? null,
+    },
+    at: new Date(row.at as string | Date).toISOString(),
+  }));
+}
+
+/**
+ * Record a play, and take out the old ones on the way past.
+ *
+ * The prune is part of the insert rather than a job of its own because there
+ * is nowhere to run a job: the instance sleeps after fifteen idle minutes, so
+ * anything on a timer is anything that never runs. Doing it here means the
+ * table is trimmed exactly as often as it grows, and most calls delete nothing
+ * at all — an index probe that finds no row older than the cutoff.
+ *
+ * The track is visibility-checked for the same reason the status is: a play is
+ * the input to your own history, and a history should not be able to hold a
+ * row out of a library you cannot open.
+ */
+export async function recordPlay(
+  telegramUserId: number,
+  trackId: string
+): Promise<boolean> {
+  const { rowCount } = await getPool().query(
+    `WITH pruned AS (
+       DELETE FROM plays
+       WHERE played_at < now() - interval '${PLAY_RETENTION_DAYS} days'
+     )
+     INSERT INTO plays (telegram_user_id, track_id)
+     SELECT $1, t.id
+     FROM tracks t
+     WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}`,
+    [telegramUserId, trackId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * The last fifty distinct tracks this person played, most recent first.
+ *
+ * Distinct, because a history that lists the song you had on repeat fifty
+ * times is a history with one song in it. A track that has since been deleted
+ * — or that sat in a playlist whose owner has stopped sharing it — drops out
+ * rather than appearing as a row that cannot be played.
+ */
+export async function listRecentlyPlayed(
+  telegramUserId: number
+): Promise<Track[]> {
+  const { rows } = await getPool().query<Track>(
+    `SELECT ${TRACK_COLUMNS_T}
+     FROM (
+       SELECT track_id, MAX(played_at) AS last_at
+       FROM plays
+       WHERE telegram_user_id = $1
+       GROUP BY track_id
+     ) recent
+     JOIN tracks t ON t.id = recent.track_id
+     WHERE ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
+     ORDER BY recent.last_at DESC
+     LIMIT ${RECENTLY_PLAYED_LIMIT}`,
+    [telegramUserId]
+  );
+  return rows;
+}
+
+/**
+ * Playlists the people this viewer knows have opened up lately.
+ *
+ * Ordered by when the playlist last changed, which is the nearest thing
+ * recorded to when it was shared — a visibility change bumps `updated_at`, and
+ * so does a rename. That imprecision is deliberate rather than a column: what
+ * the row is for is "there is something of theirs worth opening", and a
+ * playlist they renamed and added four tracks to yesterday is exactly that.
+ *
+ * Two predicates, because they answer two questions. `playlistVisibleTo` is the
+ * same one the playlist reads use, so the feed can never advertise something
+ * that would 404 when tapped — but it passes any link-shared playlist, and
+ * "anyone holding the link may open this" is not "everybody should be told
+ * about it, by name". `canSeePerson` is what keeps a stranger out of the feed.
+ */
+async function listRecentShares(
+  viewerTelegramId: number
+): Promise<ActivityItem[]> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `SELECT ${personColumns("u", "person")},
+       p.id, p.name, p.updated_at,
+       (p.cover_file_id IS NOT NULL) AS has_cover,
+       ${PLAYLIST_COVER}
+     FROM playlists p
+     JOIN users u ON u.telegram_user_id = p.owner_telegram_id
+     WHERE p.owner_telegram_id <> $1
+       AND p.visibility <> 'private'
+       AND p.group_chat_id IS NULL
+       AND p.updated_at > now() - interval '${ACTIVITY_WINDOW_DAYS} days'
+       AND ${playlistVisibleTo("$1")}
+       AND ${canSeePerson("$1", "p.owner_telegram_id")}
+     ORDER BY p.updated_at DESC
+     LIMIT ${ACTIVITY_LIMIT}`,
+    [viewerTelegramId]
+  );
+
+  return rows.map((row) => ({
+    kind: "shared" as const,
+    at: new Date(row.updated_at as string | Date).toISOString(),
+    person: personFrom(row, "person")!,
+    from: null,
+    track: null,
+    playlist: {
+      id: String(row.id),
+      name: String(row.name),
+      has_cover: Boolean(row.has_cover),
+      cover_track_id: (row.cover_track_id as string | null) ?? null,
+      updated_at: new Date(row.updated_at as string | Date).toISOString(),
+    },
+  }));
+}
+
+/**
+ * Tracks the people this viewer knows have kept from somebody.
+ *
+ * The second name is the point of the row and also its one hazard, so the
+ * join that fetches it carries the visibility test in its own ON clause: when
+ * the viewer cannot see the person the track came from, the LEFT JOIN finds
+ * nothing and `from` is null. There is no branch in the application code that
+ * could be forgotten, and no query that returns the name for the client to
+ * decide about.
+ */
+async function listRecentSaves(
+  viewerTelegramId: number
+): Promise<ActivityItem[]> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `SELECT ${personColumns("s", "person")},
+       ${personColumns("o", "from")},
+       ts.created_at,
+       t.id AS track_id, t.title, t.artist,
+       CASE WHEN ${HAS_COVER_T} AND ${trackVisibleTo("$1", "t")} THEN t.id END
+         AS cover_track_id
+     FROM track_saves ts
+     JOIN users s ON s.telegram_user_id = ts.saver_id
+     JOIN tracks t ON t.id = ts.saved_track_id
+     LEFT JOIN users o
+       ON o.telegram_user_id = ts.origin_id
+       AND ${canSeePerson("$1", "ts.origin_id")}
+     WHERE ts.saver_id <> $1
+       AND ts.created_at > now() - interval '${ACTIVITY_WINDOW_DAYS} days'
+       AND ${LIVE_T}
+       AND ${canSeePerson("$1", "ts.saver_id")}
+     ORDER BY ts.created_at DESC
+     LIMIT ${ACTIVITY_LIMIT}`,
+    [viewerTelegramId]
+  );
+
+  return rows.map((row) => ({
+    kind: "saved" as const,
+    at: new Date(row.created_at as string | Date).toISOString(),
+    person: personFrom(row, "person")!,
+    from: personFrom(row, "from"),
+    track: {
+      id: String(row.track_id),
+      title: (row.title as string | null) ?? null,
+      artist: (row.artist as string | null) ?? null,
+      cover_track_id: (row.cover_track_id as string | null) ?? null,
+    },
+    playlist: null,
+  }));
+}
+
+/**
+ * The Social feed: who is listening, what has been shared, what has been kept.
+ *
+ * Three queries rather than one union, because the three have almost nothing
+ * in common but their ordering — a union would have to pad each branch with
+ * the other two's columns and the result would be harder to read than the
+ * thing it saved. They go out together on one pool and are merged here.
+ *
+ * Every branch is already capped, so the merge is at most ninety rows in
+ * memory before the cap that matters. Listening rows are always inside the
+ * ten-minute window and therefore always sort to the top, which is the order
+ * the screen wants anyway.
+ */
+export async function listSocialActivity(
+  viewerTelegramId: number
+): Promise<ActivityItem[]> {
+  const [listening, shared, saved] = await Promise.all([
+    listFriendsListening(viewerTelegramId),
+    listRecentShares(viewerTelegramId),
+    listRecentSaves(viewerTelegramId),
+  ]);
+
+  const nowPlaying: ActivityItem[] = listening.map((row) => ({
+    kind: "listening" as const,
+    at: row.at,
+    person: row.person,
+    from: null,
+    track: row.track,
+    playlist: null,
+  }));
+
+  return [...nowPlaying, ...shared, ...saved]
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, ACTIVITY_LIMIT);
 }

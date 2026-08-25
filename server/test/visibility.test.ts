@@ -324,4 +324,196 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
       assert.equal(await repo.saveTrackToLibrary(withCover, OWNER), null);
     });
   });
+
+  /**
+   * Listening, history and the feed.
+   *
+   * The rule under test is not "the query returns rows" — it is who those rows
+   * are allowed to name. A feed that leaks a name leaks it once and forever,
+   * and the person it names never finds out, so every exclusion gets a test of
+   * its own rather than being implied by a happy path.
+   */
+  describe("listening, plays and the activity feed", () => {
+    const strangerTrack = randomUUID();
+    const friendTrack = randomUUID();
+    let strangerSaveId = "";
+    let friendSaveId = "";
+
+    async function publish(
+      ownerId: number,
+      name: string,
+      trackId: string
+    ): Promise<void> {
+      const pool = db.getPool();
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO playlists (owner_telegram_id, name, visibility)
+         VALUES ($1, $2, 'public') RETURNING id`,
+        [ownerId, name]
+      );
+      await pool.query(
+        `INSERT INTO playlist_tracks (playlist_id, track_id, position)
+         VALUES ($1, $2, 0)`,
+        [rows[0].id, trackId]
+      );
+    }
+
+    before(async () => {
+      for (const [id, ownerId, title] of [
+        [strangerTrack, STRANGER, "From a stranger"],
+        [friendTrack, FRIEND, "From the friend"],
+      ] as const) {
+        await repo.createTrack({
+          id,
+          ownerTelegramId: ownerId,
+          title,
+          artist: null,
+          album: null,
+          durationSeconds: null,
+          telegramFileId: `fixture-${title}`,
+          mimeType: "audio/mpeg",
+          coverImage: null,
+          coverMimeType: null,
+          coverFileId: null,
+          originAdderId: ownerId,
+        });
+      }
+      await publish(STRANGER, "a stranger share", strangerTrack);
+      await publish(FRIEND, "the friend share", friendTrack);
+
+      // The owner keeps both. Seen from the friend, one of these saves has an
+      // origin they know and the other has an origin they have never met.
+      strangerSaveId = (await repo.saveTrackToLibrary(strangerTrack, OWNER))!
+        .track.id;
+      friendSaveId = (await repo.saveTrackToLibrary(friendTrack, OWNER))!.track
+        .id;
+    });
+
+    test("nobody is listening until they turn it on", async () => {
+      assert.equal(await repo.setListeningStatus(OWNER, trackIds.friendsOnly), true);
+      assert.deepEqual(await repo.listFriendsListening(FRIEND), []);
+    });
+
+    test("a friend who turned it on is listening", async () => {
+      await repo.setListeningPrivacy(OWNER, true);
+      await repo.setListeningStatus(OWNER, trackIds.friendsOnly);
+
+      const rows = await repo.listFriendsListening(FRIEND);
+      assert.equal(rows.length, 1);
+      assert.equal(String(rows[0].person.telegram_user_id), String(OWNER));
+      assert.equal(rows[0].track.id, trackIds.friendsOnly);
+    });
+
+    test("somebody who is not their friend is told nothing", async () => {
+      assert.deepEqual(await repo.listFriendsListening(STRANGER), []);
+    });
+
+    test("a status ages out of the window on its own", async () => {
+      // Nothing clears a status. A Mini App that is swiped away never gets to
+      // send anything, so the window is the only thing that can end one.
+      await db.getPool().query(
+        `UPDATE listen_status SET updated_at = now() - interval '11 minutes'
+         WHERE telegram_user_id = $1`,
+        [OWNER]
+      );
+      assert.deepEqual(await repo.listFriendsListening(FRIEND), []);
+    });
+
+    test("turning it off takes the track with it", async () => {
+      await repo.setListeningStatus(OWNER, trackIds.friendsOnly);
+      await repo.setListeningPrivacy(OWNER, false);
+
+      const { rows } = await db.getPool().query<{
+        is_public: boolean;
+        track_id: string | null;
+      }>(
+        `SELECT is_public, track_id FROM listen_status WHERE telegram_user_id = $1`,
+        [OWNER]
+      );
+      assert.equal(rows[0].is_public, false);
+      assert.equal(rows[0].track_id, null);
+      assert.deepEqual(await repo.listFriendsListening(FRIEND), []);
+    });
+
+    test("a track they cannot see cannot become their status", async () => {
+      assert.equal(await repo.setListeningStatus(STRANGER, trackIds.unshared), false);
+    });
+
+    test("a track played twice is one row of history", async () => {
+      assert.equal(await repo.recordPlay(FRIEND, trackIds.linkShared), true);
+      assert.equal(await repo.recordPlay(FRIEND, trackIds.linkShared), true);
+
+      const history = await repo.listRecentlyPlayed(FRIEND);
+      assert.equal(history.filter((t) => t.id === trackIds.linkShared).length, 1);
+    });
+
+    test("a track they cannot see never enters their history", async () => {
+      assert.equal(await repo.recordPlay(STRANGER, trackIds.unshared), false);
+      const history = await repo.listRecentlyPlayed(STRANGER);
+      assert.equal(history.some((t) => t.id === trackIds.unshared), false);
+    });
+
+    test("logging a play sweeps plays past the retention window", async () => {
+      const pool = db.getPool();
+      await pool.query(
+        `INSERT INTO plays (telegram_user_id, track_id, played_at)
+         VALUES ($1, $2, now() - interval '91 days')`,
+        [FRIEND, trackIds.friendsOnly]
+      );
+      await repo.recordPlay(FRIEND, trackIds.linkShared);
+
+      const { rows } = await pool.query<{ n: string }>(
+        `SELECT count(*) AS n FROM plays
+         WHERE played_at < now() - interval '90 days'`
+      );
+      assert.equal(rows[0].n, "0");
+    });
+
+    test("a save names the person who saved it", async () => {
+      const feed = await repo.listSocialActivity(FRIEND);
+      const row = feed.find(
+        (item) => item.kind === "saved" && item.track?.id === friendSaveId
+      );
+      assert.ok(row, "the save should be in the feed");
+      assert.equal(String(row.person.telegram_user_id), String(OWNER));
+    });
+
+    test("a save names an origin the viewer can already see", async () => {
+      const feed = await repo.listSocialActivity(FRIEND);
+      const row = feed.find(
+        (item) => item.kind === "saved" && item.track?.id === friendSaveId
+      );
+      assert.equal(String(row?.from?.telegram_user_id), String(FRIEND));
+    });
+
+    test("a save does not name an origin the viewer has never met", async () => {
+      // The whole point of the LEFT JOIN. The row is still shown — a friend
+      // may know their friend kept a track — but the stranger it came from is
+      // not introduced by it.
+      const feed = await repo.listSocialActivity(FRIEND);
+      const row = feed.find(
+        (item) => item.kind === "saved" && item.track?.id === strangerSaveId
+      );
+      assert.ok(row, "the save should still be in the feed");
+      assert.equal(row.from, null);
+    });
+
+    test("a stranger's link-shared playlist stays out of the feed", async () => {
+      // Anyone holding the link may open it. That is not the same as being
+      // told about it, by name, by somebody you have never met.
+      const feed = await repo.listSocialActivity(FRIEND);
+      const named = feed.some(
+        (item) => String(item.person.telegram_user_id) === String(STRANGER)
+      );
+      assert.equal(named, false);
+    });
+
+    test("a friend's share is in the feed", async () => {
+      const feed = await repo.listSocialActivity(OWNER);
+      const row = feed.find(
+        (item) => item.kind === "shared" && item.playlist?.name === "the friend share"
+      );
+      assert.ok(row, "the friend's playlist should be in the feed");
+      assert.equal(String(row.person.telegram_user_id), String(FRIEND));
+    });
+  });
 });
