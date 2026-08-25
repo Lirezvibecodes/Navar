@@ -34,6 +34,13 @@ import { useToast } from "../context/ToastContext";
 import { applyFocalGrow, focalRiseVars } from "../lib/focal";
 import { formatDuration, formatRemaining, trackArtist, trackTitle } from "../lib/format";
 import { activeLineAt, parseLyrics, type Lyrics } from "../lib/lyrics";
+import {
+  artGlowCss,
+  backdropCss,
+  paletteFor,
+  peekPalette,
+  type Palette,
+} from "../lib/palette";
 import { haptic } from "../telegram";
 import type { Track } from "../types";
 
@@ -126,6 +133,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     return () => observer.disconnect();
   }, []);
 
+  const palette = usePalette(current?.id ?? null, current?.has_cover ?? false);
+
   if (!current) return null;
 
   const owned = owns(current);
@@ -160,6 +169,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         ...focalRiseVars(),
       }}
     >
+      <Backdrop palette={palette} />
+
       {/* Header. Telegram draws its own back button, but the player is a sheet
           over the app rather than a pushed screen, so it keeps a visible way
           down as well — the one place a chevron is not a duplicate. */}
@@ -202,8 +213,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               display: "grid",
               placeItems: "center",
               padding: "6px 0 4px",
-              background:
-                "radial-gradient(60% 78% at 50% 46%,rgba(137,174,255,.13),rgba(223,252,142,.05) 46%,transparent 72%)",
+              background: artGlowCss(palette),
             }}
           >
             <div
@@ -408,6 +418,88 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           />
         ) : null}
       </Sheet>
+    </div>
+  );
+}
+
+// --- Backdrop ----------------------------------------------------------------
+
+/**
+ * The colours of the track being played, once they are known.
+ *
+ * Seeded from the cache during render rather than in an effect, so a track that
+ * has been played before opens already wearing its colours instead of flashing
+ * the default for a frame first. A track being heard for the first time starts
+ * at null — the default — and the wash fades in when extraction lands.
+ */
+function usePalette(trackId: string | null, hasCover: boolean): Palette | null {
+  const [state, setState] = useState<{ id: string | null; palette: Palette | null }>(
+    () => ({ id: trackId, palette: (trackId && peekPalette(trackId)) || null })
+  );
+  // Corrected while rendering, like the Task 3 cache: an effect would paint one
+  // frame of the previous track's colours under the new track's artwork.
+  if (state.id !== trackId) {
+    setState({ id: trackId, palette: (trackId && peekPalette(trackId)) || null });
+  }
+
+  useEffect(() => {
+    if (!trackId) return;
+    let live = true;
+    void paletteFor(trackId, hasCover).then((palette) => {
+      if (!live) return;
+      setState((prev) => (prev.id === trackId ? { id: trackId, palette } : prev));
+    });
+    return () => {
+      live = false;
+    };
+  }, [trackId, hasCover]);
+
+  return state.palette;
+}
+
+/**
+ * The wash behind the player, and the fade from one track's to the next's.
+ *
+ * Two stacked layers rather than one whose background changes underneath it:
+ * background-image is not an animatable property, so a single layer would cut
+ * from one set of colours to the other, which is the one thing the transition
+ * exists to prevent. The incoming layer fades up over the outgoing one, which
+ * stays put until it is covered.
+ *
+ * The layer sits at z-index -1: inside the player's stacking context that paints
+ * it above the player's own flat background and below every line of content,
+ * which is where a backdrop belongs and costs the rest of the screen nothing.
+ * Under prefers-reduced-motion the global rule in index.css collapses the fade
+ * to a millisecond and the swap is simply instant.
+ */
+function Backdrop({ palette }: { palette: Palette | null }) {
+  const css = backdropCss(palette);
+  const [layers, setLayers] = useState<{ id: number; css: string | undefined }[]>(
+    () => [{ id: 0, css }]
+  );
+  const next = useRef(1);
+
+  useEffect(() => {
+    setLayers((prev) => {
+      const top = prev[prev.length - 1];
+      // Two tracks off the same sleeve, or two failures in a row, are the same
+      // backdrop; fading it into itself would be a flicker for no reason.
+      if (top.css === css) return prev;
+      return [...prev.slice(-1), { id: next.current++, css }];
+    });
+  }, [css]);
+
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: -1, overflow: "hidden" }}>
+      {layers.map((layer, i) => (
+        <div
+          key={layer.id}
+          // Only the arriving layer animates, and only when it arrives on top
+          // of something else — the first one is already correct.
+          className={i > 0 ? "nav-backdrop-in" : undefined}
+          style={{ position: "absolute", inset: 0, background: layer.css }}
+        />
+      ))}
     </div>
   );
 }

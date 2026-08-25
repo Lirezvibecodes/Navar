@@ -51,6 +51,7 @@ export const cacheKey = {
   friends: "friends",
   suggestions: "social:suggestions",
   activity: "social:activity",
+  palette: (id: string) => `palette:${id}`,
 } as const;
 
 /**
@@ -74,6 +75,8 @@ export const ttl = {
   suggestions: 300_000,
   /** In step with the poll SocialView runs while its tab is on screen. */
   activity: 30_000,
+  /** A cover is fixed, so the colours taken from it are too. */
+  palette: Infinity,
 } as const;
 
 /** What is held for this key right now, without asking for any of it. */

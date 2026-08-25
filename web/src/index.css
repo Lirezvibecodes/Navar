@@ -584,6 +584,21 @@ button {
   animation: nav-art-in var(--dur-focal) var(--ease) both;
 }
 
+/* The player's backdrop arriving over the one before it. On the same clock as
+   the bar becoming the player, because it is the same event: the colours of
+   what you are listening to changing. See Backdrop in PlayerView. */
+@keyframes nav-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.nav-backdrop-in {
+  animation: nav-backdrop-in var(--dur-focal) var(--ease) both;
+}
+
 /* --- The bottom nav ---------------------------------------------------------
 
    The bar hugs its contents and floats, so the label growing out of the active
