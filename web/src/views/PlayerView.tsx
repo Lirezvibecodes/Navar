@@ -372,7 +372,6 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         pane={pane}
         onSelect={setPane}
         queueCount={upNext.length + contextNext.length}
-        hasLyrics={current.has_lyrics}
       />
 
       <TrackMenu
@@ -737,12 +736,10 @@ function Segments({
   pane,
   onSelect,
   queueCount,
-  hasLyrics,
 }: {
   pane: Pane;
   onSelect: (pane: Pane) => void;
   queueCount: number;
-  hasLyrics: boolean;
 }) {
   // Queueing a track changes nothing on screen unless the queue is already
   // open, so the segment itself acknowledges it.
@@ -753,9 +750,13 @@ function Segments({
     previous.current = queueCount;
   }, [queueCount]);
 
+  // Always offered, even on a track whose words nobody has found yet. It used
+  // to appear only when the row already had lyrics, which meant the one thing
+  // that could put lyrics on a row — opening this pane and letting the server
+  // go and look — was reachable only on tracks that did not need it.
   const options: { key: Pane; label: string }[] = [
     { key: "player", label: "Player" },
-    ...(hasLyrics ? [{ key: "lyrics" as Pane, label: "Lyrics" }] : []),
+    { key: "lyrics", label: "Lyrics" },
     { key: "queue", label: `Up next · ${queueCount}` },
   ];
 
@@ -804,6 +805,12 @@ function Segments({
  * Lyrics. A timed file scrolls itself and every line is a seek target; a plain
  * paste is a page of text and stays still, because scrolling text nobody
  * timed would just be guessing.
+ *
+ * Opening this pane is what sends the server to look. The first person to open
+ * it on a given track waits on that lookup — which is why the waiting state
+ * says what is happening rather than showing a bare spinner — and everybody
+ * after them, including that person on their next play, gets the stored
+ * answer. A track LRCLIB does not have is asked about exactly once, ever.
  */
 function LyricsPane({
   track,
@@ -848,10 +855,12 @@ function LyricsPane({
   return (
     <div className="nav-scroll" style={{ flex: 1, minHeight: 0, padding: "10px 22px" }}>
       {state === "loading" ? (
-        <p style={{ fontSize: 12.5, color: "rgba(255,255,255,.4)" }}>Loading…</p>
+        <p style={{ fontSize: 12.5, color: "rgba(255,255,255,.4)" }}>
+          Looking for lyrics&hellip;
+        </p>
       ) : state === "none" || !lyrics ? (
         <p style={{ fontSize: 12.5, color: "rgba(255,255,255,.4)", lineHeight: 1.6 }}>
-          No lyrics for this one. Add them from the track&rsquo;s Edit details.
+          No lyrics found for this one.
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>

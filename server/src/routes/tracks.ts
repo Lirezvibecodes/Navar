@@ -15,6 +15,7 @@ import {
   softDeleteTracksBulk,
   updateTrackCover,
   getTrackLyrics,
+  recordLyricsLookup,
   updateTrackFields,
 } from "../repo";
 import type { TrackFilter } from "../repo";
@@ -25,6 +26,7 @@ function readTrackIds(body: unknown): string[] | null {
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) return null;
   return ids as string[];
 }
+import { lookupLyrics } from "../lyrics-provider";
 import { getTelegramFileDownloadUrl } from "../telegram-files";
 import { captionOf, personLabel } from "../channels";
 import { serveCover, storeCover } from "./covers";
@@ -142,6 +144,11 @@ export function tracksRouter(): Router {
   // Lyrics are a read path, not an ownership one: playing a friend's shared
   // track should show its words. Served separately from the track row so a
   // library listing never carries kilobytes of text per row.
+  //
+  // This is also the only place a lyrics lookup ever happens. Nothing scans
+  // the library and nothing runs in the background: LRCLIB is asked the first
+  // time a person opens this pane on a track nobody has opened it on before,
+  // and never again for that track whichever way the answer went.
   router.get(
     "/:id/lyrics",
     requireAuth,
@@ -152,7 +159,34 @@ export function tracksRouter(): Router {
         res.status(404).json({ error: "Not found" });
         return;
       }
-      res.json({ lyrics: await getTrackLyrics(track.id) });
+
+      const stored = await getTrackLyrics(track.id);
+      let lyrics = stored?.lyrics ?? null;
+
+      if (lyrics === null && stored !== null && stored.lyrics_checked_at === null) {
+        // Only the four fields LRCLIB matches on leave this server. Nothing
+        // identifies the listener, the owner or the library.
+        lyrics = await lookupLyrics({
+          title: track.title ?? "",
+          artist: track.artist,
+          album: track.album,
+          durationSeconds: track.duration_seconds,
+        });
+        // Written whether or not there were words, because the point of the
+        // marker is to make a miss cost one lookup in a track's lifetime
+        // rather than one per play. A failure to record it is not worth
+        // failing the response over — the pane still shows what we found.
+        await recordLyricsLookup(track.id, lyrics).catch((err: unknown) => {
+          console.error("[lyrics] could not record the lookup:", err);
+        });
+      }
+
+      // Words do not change while a track is playing, and the pane is opened
+      // and closed as a matter of course. Private, because the answer depends
+      // on who asked: a shared proxy holding one listener's copy would hand it
+      // to somebody the visibility check would have refused.
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.json({ lyrics });
     })
   );
 

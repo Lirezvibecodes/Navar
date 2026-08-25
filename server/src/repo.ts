@@ -444,12 +444,49 @@ export async function listTracksMissingCover(
  * not need a few kilobytes of text per row — only the player, for the one
  * track it is showing.
  */
-export async function getTrackLyrics(id: string): Promise<string | null> {
-  const { rows } = await getPool().query<{ lyrics: string | null }>(
-    `SELECT lyrics FROM tracks WHERE id = $1 AND ${LIVE}`,
+export async function getTrackLyrics(id: string): Promise<TrackLyrics | null> {
+  const { rows } = await getPool().query<TrackLyrics>(
+    `SELECT lyrics, lyrics_checked_at FROM tracks WHERE id = $1 AND ${LIVE}`,
     [id]
   );
-  return rows[0]?.lyrics ?? null;
+  return rows[0] ?? null;
+}
+
+export interface TrackLyrics {
+  lyrics: string | null;
+  /**
+   * When LRCLIB was last asked, or null if it never has been. The two nulls
+   * together are the only state that means "worth asking"; lyrics with a null
+   * timestamp is a set of words somebody typed in before the lookup existed.
+   */
+  lyrics_checked_at: Date | null;
+}
+
+/**
+ * File what LRCLIB said, hit or miss.
+ *
+ * Deliberately not routed through updateTrackFields, which is scoped to the
+ * owner. Lyrics are a read path — the whole point of getTrackLyrics being
+ * unscoped is that playing a friend's shared track shows its words — so the
+ * listener who triggers the lookup is frequently not the person who owns the
+ * row. Requiring ownership here would silently skip the write for exactly
+ * those listeners and ask LRCLIB again on every play.
+ *
+ * The timestamp is written either way; that is what stops a miss being asked
+ * twice. The words are only written over a NULL, so a lookup racing somebody
+ * pasting their own lyrics in cannot overwrite what they typed.
+ */
+export async function recordLyricsLookup(
+  id: string,
+  lyrics: string | null
+): Promise<void> {
+  await getPool().query(
+    `UPDATE tracks
+     SET lyrics = CASE WHEN lyrics IS NULL THEN $2::text ELSE lyrics END,
+         lyrics_checked_at = now()
+     WHERE id = $1 AND ${LIVE}`,
+    [id, lyrics]
+  );
 }
 
 /**

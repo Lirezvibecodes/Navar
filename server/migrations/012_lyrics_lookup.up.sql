@@ -1,0 +1,15 @@
+-- When we last asked LRCLIB about this track, or NULL if we never have.
+--
+-- The lookup is lazy: it happens the first time somebody actually opens the
+-- Lyrics pane, because a background scan of every library would cost hundreds
+-- of outbound calls for words most people will never read. That laziness needs
+-- a memory, or a track LRCLIB does not have would be looked up again on every
+-- play — and the miss is the common case, so it is the one worth remembering.
+--
+-- Separate from `lyrics` rather than inferred from it, because "no lyrics" and
+-- "not asked yet" are different states and only this column distinguishes
+-- them. A hit sets both; a miss sets only this one.
+--
+-- A timestamp rather than a boolean so that if LRCLIB's catalogue grows, the
+-- misses old enough to be worth retrying can be found. Nothing retries today.
+ALTER TABLE tracks ADD COLUMN lyrics_checked_at TIMESTAMPTZ;
