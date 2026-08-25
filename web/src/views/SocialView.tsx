@@ -6,6 +6,14 @@ import { CollectionArt } from "../components/PixelArt";
 import { ActionButton, Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { UserCheckIcon, UserPlusIcon } from "../icons";
 import { useToast } from "../context/ToastContext";
+import {
+  cached,
+  cacheKey,
+  dropCache,
+  peek,
+  revalidate,
+  ttl,
+} from "../lib/cache";
 import { formatAge, personName, trackTitle } from "../lib/format";
 import { haptic, onActivationChange, shareLink } from "../telegram";
 import type { ActivityItem, Person, PersonResult, Suggestion } from "../types";
@@ -38,21 +46,34 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 export function SocialView({ nav }: { nav: Navigation }) {
   const { toast } = useToast();
-  const [friends, setFriends] = useState<Person[]>([]);
+  // Seeded from the cache so that opening this tab a second time shows the
+  // feed that was there when it closed, rather than a skeleton over the same
+  // rows. Whatever is seeded is then revalidated by the load below.
+  const [friends, setFriends] = useState<Person[]>(
+    () => peek<Person[]>(cacheKey.friends) ?? []
+  );
   const [incoming, setIncoming] = useState<Person[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(
+    () => peek(cacheKey.friends) === undefined
+  );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PersonResult[]>([]);
   const [searched, setSearched] = useState(false);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>(
+    () => peek<Suggestion[]>(cacheKey.suggestions) ?? []
+  );
+  const [activity, setActivity] = useState<ActivityItem[]>(
+    () => peek<ActivityItem[]>(cacheKey.activity) ?? []
+  );
 
   const load = useCallback(async () => {
     try {
       const [people, requests, feed] = await Promise.all([
-        api.listFriends(),
+        cached(cacheKey.friends, api.listFriends, ttl.friends),
+        // Not cached: a request waiting on you is the one thing on this screen
+        // that must never be a minute old, and it is the cheapest of the four.
         api.listFriendRequests(),
-        api.socialActivity(),
+        cached(cacheKey.activity, api.socialActivity, ttl.activity),
       ]);
       setFriends(people);
       setIncoming(requests.incoming);
@@ -61,7 +82,13 @@ export function SocialView({ nav }: { nav: Navigation }) {
       // with an empty list would get an empty answer, and this screen is
       // already three requests deep.
       if (people.length > 0) {
-        setSuggestions(await api.friendSuggestions().catch(() => []));
+        setSuggestions(
+          await cached(
+            cacheKey.suggestions,
+            api.friendSuggestions,
+            ttl.suggestions
+          ).catch(() => [])
+        );
       }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not load your friends");
@@ -95,8 +122,9 @@ export function SocialView({ nav }: { nav: Navigation }) {
     });
     const timer = window.setInterval(() => {
       if (!onScreen || document.hidden) return;
-      api
-        .socialActivity()
+      // Through the cache rather than around it, so the entry this screen
+      // will be seeded from next time is the one just fetched.
+      revalidate(cacheKey.activity, api.socialActivity)
         .then(setActivity)
         .catch(() => undefined);
     }, ACTIVITY_REFRESH_MS);
@@ -146,6 +174,12 @@ export function SocialView({ nav }: { nav: Navigation }) {
     setFriends((rows) => [person, ...rows]);
     try {
       await api.acceptFriend(person.telegram_user_id);
+      dropCache(
+        cacheKey.friends,
+        cacheKey.suggestions,
+        cacheKey.activity,
+        cacheKey.profile(person.telegram_user_id)
+      );
       haptic.success();
       return true;
     } catch (err) {
@@ -615,6 +649,8 @@ export function AddFriendButton({
         void api
           .addFriend(userId)
           .then(() => {
+            // Their page now says pending, and they may have been a suggestion.
+            dropCache(cacheKey.profile(userId), cacheKey.suggestions);
             setState("sent");
             haptic.success();
             onDone?.();

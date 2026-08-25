@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
@@ -7,8 +7,8 @@ import { Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { ArrowRightIcon, PlayIcon } from "../icons";
 import { usePlayer } from "../context/PlayerContext";
 import { personName, pluralise, trackArtist, trackTitle } from "../lib/format";
+import { cached, cacheKey, ttl, useCached } from "../lib/cache";
 import { haptic } from "../telegram";
-import type { HomePayload } from "../types";
 
 /**
  * The first thing you see.
@@ -31,21 +31,13 @@ import type { HomePayload } from "../types";
 export function HomeView({ nav }: { nav: Navigation }) {
   const { current, playFrom } = usePlayer();
 
-  const [home, setHome] = useState<HomePayload | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    setFailed(false);
-    api
-      .getHome()
-      .then((payload) => live && setHome(payload))
-      .catch(() => live && setFailed(true));
-    return () => {
-      live = false;
-    };
-  }, [attempt]);
+  // Held across the remount every navigation performs, so coming back to Home
+  // paints the shelves in the first frame and revalidates behind them.
+  const {
+    data: home,
+    error,
+    refresh,
+  } = useCached(cacheKey.home, api.getHome, ttl.home);
 
   // What you have on now goes to the head of the shelf. It is the one thing on
   // this screen the client knows better than the server does: a play is
@@ -57,13 +49,13 @@ export function HomeView({ nav }: { nav: Navigation }) {
     return [current, ...base.filter((t) => t.id !== current.id)];
   }, [current, home]);
 
-  if (failed) {
+  if (error && !home) {
     return (
       <Empty
         title="Nothing loaded"
         body="Home could not be fetched. It may just be the connection."
         action="Try again"
-        onAction={() => setAttempt((n) => n + 1)}
+        onAction={refresh}
       />
     );
   }
@@ -358,7 +350,11 @@ function PlaylistCard({
         aria-label={`Play ${playlist.name}`}
         onClick={() => {
           haptic.press();
-          void api.listPlaylistTracks(playlist.id).then((rows) =>
+          void cached(
+            cacheKey.playlistTracks(playlist.id),
+            () => api.listPlaylistTracks(playlist.id),
+            ttl.playlistTracks
+          ).then((rows) =>
             playFrom({
               label: playlist.name,
               key: `playlist:${playlist.id}`,

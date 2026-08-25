@@ -17,6 +17,7 @@ import {
 } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
+import { cacheKey, ttl, useCached } from "../lib/cache";
 import { pluralise } from "../lib/format";
 import { haptic } from "../telegram";
 import type { PlaylistVisibility, Track } from "../types";
@@ -46,8 +47,6 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   const { playlists, putPlaylist, dropPlaylist } = useLibrary();
   const { toast, undoToast } = useToast();
 
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -58,20 +57,23 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
 
   const playlist = playlists.find((p) => p.id === id);
 
+  // The order lives on the server, so the rows are fetched rather than
+  // filtered — but they are also the same rows every time this playlist is
+  // opened, so the fetch is cached and the second visit paints immediately.
+  const {
+    data: rows,
+    loading,
+    error,
+  } = useCached(
+    cacheKey.playlistTracks(id),
+    () => api.listPlaylistTracks(id),
+    ttl.playlistTracks
+  );
+  const tracks = rows ?? [];
+
   useEffect(() => {
-    let live = true;
-    setLoading(true);
-    api
-      .listPlaylistTracks(id)
-      .then((rows) => live && setTracks(rows))
-      .catch((err: unknown) =>
-        toast(err instanceof Error ? err.message : "Could not load that playlist")
-      )
-      .finally(() => live && setLoading(false));
-    return () => {
-      live = false;
-    };
-  }, [id, toast]);
+    if (error) toast(error.message);
+  }, [error, toast]);
 
   const rename = async (name: string) => {
     if (!playlist) return;

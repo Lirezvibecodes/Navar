@@ -73,8 +73,37 @@ export function createApp(bot: Telegraf | null): Express {
   // this line knows who is calling and nothing below it does.
   app.use("/api/shared", sharedRouter());
 
-  app.use(express.static(webDist));
+  // Vite content-hashes everything it emits into /assets, so a file at a given
+  // name can never change its contents — a year and `immutable` are safe by
+  // construction, and they are the difference between a cold open
+  // re-downloading the whole bundle and re-downloading nothing.
+  app.use(
+    "/assets",
+    express.static(path.join(webDist, "assets"), {
+      maxAge: "1y",
+      immutable: true,
+    })
+  );
+
+  // The rest of the build — the fonts, the favicon, Telegram's own SDK — keeps
+  // its filename across deploys, so it gets a day and then a revalidation that
+  // usually answers 304. index.html is excluded outright: it is the file that
+  // names the hashed bundles, so serving a stale one serves a stale app. It
+  // may still be revalidated — no-cache forbids using a copy without asking,
+  // not keeping one.
+  app.use(
+    express.static(webDist, {
+      maxAge: "1d",
+      setHeaders: (res, filePath) => {
+        if (path.basename(filePath) === "index.html") {
+          res.setHeader("Cache-Control", "no-cache");
+        }
+      },
+    })
+  );
   app.get(/^\/(?!api|health|telegraf).*/, (_req, res) => {
+    // Same rule as above, for the deep links that fall through to the shell.
+    res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.join(webDist, "index.html"));
   });
 

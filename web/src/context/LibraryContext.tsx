@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import * as api from "../api";
+import { cacheKey, dropCache } from "../lib/cache";
 import type { Me, Playlist, Track } from "../types";
 
 /**
@@ -103,11 +104,25 @@ export function LibraryProvider({
     void reload();
   }, [reload]);
 
+  /**
+   * What the cached reads elsewhere in the app hold that this mutation makes
+   * wrong.
+   *
+   * These live here because this is where the app's writes already funnel:
+   * every heart, rename, delete and playlist change passes through one of the
+   * callbacks below, so the invalidation cannot be forgotten at a call site.
+   * `setFavorite` needs no case of its own — it does its work through
+   * `putTrack` twice, and inherits its drop both times.
+   */
+
   // Replace, or put in front if it is new — the same shape as putPlaylist. The
   // library is ordered newest first, so a track arriving here for the first
   // time (a save from a friend's playlist) belongs at the top, where the
   // reload it eventually gets would put it anyway.
   const putTrack = useCallback((track: Track) => {
+    // A retitled or newly hearted row is quoted by Home's shelves and sits
+    // inside whatever playlists hold it.
+    dropCache(cacheKey.home, "playlist:");
     setTracks((rows) =>
       rows.some((t) => t.id === track.id)
         ? rows.map((t) => (t.id === track.id ? track : t))
@@ -116,11 +131,15 @@ export function LibraryProvider({
   }, []);
 
   const dropTracks = useCallback((ids: string[]) => {
+    // Also the profile counts, which are the one thing a deletion changes that
+    // a retitle does not.
+    dropCache(cacheKey.home, "playlist:", "profile:", cacheKey.activity);
     const gone = new Set(ids);
     setTracks((rows) => rows.filter((t) => !gone.has(t.id)));
   }, []);
 
   const markInPlaylist = useCallback((ids: string[]) => {
+    dropCache(cacheKey.home, "playlist:");
     const filed = new Set(ids);
     setTracks((rows) =>
       rows.map((t) => (filed.has(t.id) ? { ...t, in_playlist: true } : t))
@@ -128,6 +147,9 @@ export function LibraryProvider({
   }, []);
 
   const putPlaylist = useCallback((playlist: Playlist) => {
+    // Home draws playlist cards and a profile counts them; the rows inside are
+    // untouched by a rename or a change of cover, so that key stays.
+    dropCache(cacheKey.home, "profile:");
     setPlaylists((rows) => {
       const exists = rows.some((p) => p.id === playlist.id);
       return exists
@@ -137,6 +159,7 @@ export function LibraryProvider({
   }, []);
 
   const dropPlaylist = useCallback((id: string) => {
+    dropCache(cacheKey.home, "profile:", `playlist:${id}`);
     setPlaylists((rows) => rows.filter((p) => p.id !== id));
   }, []);
 

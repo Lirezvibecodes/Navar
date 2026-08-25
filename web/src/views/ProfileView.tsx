@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton } from "./SocialView";
@@ -17,9 +17,10 @@ import {
 import { ChevronRightIcon, LibraryIcon, ShareIcon, StarIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
+import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { personName, pluralise } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
-import type { BadgeTier, UserProfile } from "../types";
+import type { BadgeTier } from "../types";
 
 /**
  * One person's page — yours or somebody else's.
@@ -38,20 +39,17 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 
   const isMe = me?.id === userId;
   const [renaming, setRenaming] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let live = true;
-    api
-      .getProfile(userId)
-      .then((row) => live && setProfile(row))
-      .catch(() => undefined)
-      .finally(() => live && setLoading(false));
-    return () => {
-      live = false;
-    };
-  }, [userId]);
+  // Cached per person, so stepping back out of somebody's page and into it
+  // again — which is most of how the Social tab is used — costs nothing.
+  const {
+    data: profile,
+    loading,
+    set: setProfile,
+  } = useCached(
+    cacheKey.profile(userId),
+    () => api.getProfile(userId),
+    ttl.profile
+  );
 
   const invite = async () => {
     try {
@@ -65,6 +63,8 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const unfriend = async () => {
     try {
       await api.removeFriend(userId);
+      // Their page, your friend list and the feed all said you were connected.
+      dropCache(cacheKey.profile(userId), cacheKey.friends, cacheKey.activity);
       haptic.warning();
       nav.pop();
     } catch (err) {

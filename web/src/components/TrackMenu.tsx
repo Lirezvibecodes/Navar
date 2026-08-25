@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import * as api from "../api";
 import type { Playlist, Track } from "../types";
+import { cacheKey, dropCache } from "../lib/cache";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
@@ -113,10 +114,15 @@ export function TrackMenu({
     }
   };
 
+  // The one membership change with no library row behind it: the track is
+  // still yours and still in the Crate, so nothing in LibraryContext moves and
+  // there is no invalidation to inherit. Undoing it goes back through
+  // markInPlaylist, which drops the same key again.
   const removeFromPlaylist = async (t: Track, playlistId: string) => {
     onClose();
     try {
       await api.removeTracksFromPlaylist(playlistId, [t.id]);
+      dropCache(cacheKey.playlistTracks(playlistId), cacheKey.home);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not remove that");
       return;
