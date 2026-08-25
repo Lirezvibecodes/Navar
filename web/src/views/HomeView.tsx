@@ -1,71 +1,74 @@
 import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
+import { Avatar } from "../components/Avatar";
 import { Cover, CollectionArt } from "../components/PixelArt";
-import { Screen, SectionHeader, Skeleton } from "../components/ui";
+import { Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { ArrowRightIcon, PlayIcon } from "../icons";
-import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
-import { pluralise, trackArtist, trackTitle } from "../lib/format";
+import { personName, pluralise, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
-import type { Playlist, Track } from "../types";
+import type { HomePayload } from "../types";
 
 /**
  * The first thing you see.
  *
- * Everything on this screen is either something you were already doing or
- * something the app is asking you to finish. There is no editorial shelf and
- * nothing recommended: Navaar knows only what you forwarded to it.
+ * Everything on this screen is either something you were already doing,
+ * something somebody you know is doing, or something the app is asking you to
+ * finish. There is no editorial shelf and nothing recommended: Navaar knows
+ * only what you and your friends forwarded to it.
  *
- * The sections that need somebody else's listening state live on Social,
- * which is where the one scheduled request in this app is spent. A section
- * with no data behind it renders nothing rather than an empty frame.
+ * One request holds the whole screen. It is the view that wakes a sleeping
+ * instance, and a shelf per call would pay that cost once per shelf — so the
+ * server composes it and this file renders what arrived. A section that is
+ * missing from the payload is missing from the screen entirely: no header, no
+ * placeholder, no explanation of what would have been there.
+ *
+ * Nothing is reachable only from here. Every shelf is a ranked, finite window
+ * onto a screen that keeps all of it, so a row scrolling off the end of Home
+ * never takes anything with it.
  */
-/**
- * The nudge stays quiet until a handful of tracks have piled up. One stray
- * track is not a mess worth a banner.
- */
-const UNSORTED_NUDGE_AT = 5;
-
 export function HomeView({ nav }: { nav: Navigation }) {
-  const { tracks, playlists, loading } = useLibrary();
   const { current, playFrom } = usePlayer();
 
-  const recent = useMemo(
-    () =>
-      [...tracks]
-        .sort((a, b) => b.created_at.localeCompare(a.created_at))
-        .slice(0, 12),
-    [tracks]
-  );
+  const [home, setHome] = useState<HomePayload | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
-  const unsorted = useMemo(() => tracks.filter((t) => !t.in_playlist).length, [tracks]);
-
-  // What was actually played, which is a different list from what arrived
-  // most recently. Fetched rather than derived: history includes tracks heard
-  // out of somebody else's library, which were never in this one.
-  const [played, setPlayed] = useState<Track[] | null>(null);
   useEffect(() => {
     let live = true;
+    setFailed(false);
     api
-      .listRecentlyPlayed()
-      .then((rows) => live && setPlayed(rows))
-      .catch(() => undefined);
+      .getHome()
+      .then((payload) => live && setHome(payload))
+      .catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
 
-  // What you were listening to, then what you played before that — and what
-  // arrived while you were away for somebody who has not played anything yet,
-  // so a first session still has a shelf instead of a gap.
+  // What you have on now goes to the head of the shelf. It is the one thing on
+  // this screen the client knows better than the server does: a play is
+  // reported once it has genuinely been listened to, so the track that started
+  // thirty seconds ago is not in the payload yet.
   const shelf = useMemo(() => {
-    const base = played && played.length > 0 ? played.slice(0, 12) : recent;
+    const base = home?.continue_listening ?? [];
     if (!current) return base;
     return [current, ...base.filter((t) => t.id !== current.id)];
-  }, [current, played, recent]);
+  }, [current, home]);
 
-  if (loading) {
+  if (failed) {
+    return (
+      <Empty
+        title="Nothing loaded"
+        body="Home could not be fetched. It may just be the connection."
+        action="Try again"
+        onAction={() => setAttempt((n) => n + 1)}
+      />
+    );
+  }
+
+  if (!home) {
     return (
       <Screen>
         <Skeleton />
@@ -73,51 +76,59 @@ export function HomeView({ nav }: { nav: Navigation }) {
     );
   }
 
-  if (tracks.length === 0) return <FirstRun />;
+  // No music of your own, played or filed. Whatever else the payload holds,
+  // the only thing worth saying is how to get a first track in — and the
+  // friends' half of this screen is on the Social tab as well, so nothing is
+  // hidden by saying it.
+  if (!home.continue_listening && !home.playlists) return <FirstRun />;
 
   return (
     <Screen>
-      <SectionHeader title="Continue listening" spaceAbove={6} />
-      <div className="nav-shelf" style={{ gap: 10 }}>
-        {shelf.map((track, i) => (
-          <button
-            key={track.id}
-            className="nav-press nav-row-in"
-            onClick={() => {
-              haptic.tap();
-              playFrom({ label: "Recent", key: "home:recent", tracks: shelf }, track);
-            }}
-            style={
-              {
-                "--i": i,
-                width: 72,
-                flex: "none",
-                textAlign: "left",
-              } as React.CSSProperties
-            }
-          >
-            <Cover trackId={track.id} hasCover={track.has_cover} size={72} radius={11} />
-            <span
-              className="nav-clip"
-              style={{ display: "block", fontSize: 11, marginTop: 5 }}
-            >
-              {trackTitle(track)}
-            </span>
-            <span
-              className="nav-clip"
-              style={{
-                display: "block",
-                fontSize: 10.5,
-                color: "rgba(255,255,255,.52)",
-              }}
-            >
-              {trackArtist(track)}
-            </span>
-          </button>
-        ))}
-      </div>
+      {shelf.length > 0 ? (
+        <>
+          <SectionHeader title="Continue listening" spaceAbove={6} />
+          <div className="nav-shelf" style={{ gap: 10 }}>
+            {shelf.map((track, i) => (
+              <button
+                key={track.id}
+                className="nav-press nav-row-in"
+                onClick={() => {
+                  haptic.tap();
+                  playFrom({ label: "Recent", key: "home:recent", tracks: shelf }, track);
+                }}
+                style={
+                  {
+                    "--i": i,
+                    width: 72,
+                    flex: "none",
+                    textAlign: "left",
+                  } as React.CSSProperties
+                }
+              >
+                <Cover trackId={track.id} hasCover={track.has_cover} size={72} radius={11} />
+                <span
+                  className="nav-clip"
+                  style={{ display: "block", fontSize: 11, marginTop: 5 }}
+                >
+                  {trackTitle(track)}
+                </span>
+                <span
+                  className="nav-clip"
+                  style={{
+                    display: "block",
+                    fontSize: 10.5,
+                    color: "rgba(255,255,255,.52)",
+                  }}
+                >
+                  {trackArtist(track)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
 
-      {playlists.length > 0 ? (
+      {home.playlists ? (
         <>
           <SectionHeader
             title="Your playlists"
@@ -125,10 +136,11 @@ export function HomeView({ nav }: { nav: Navigation }) {
             onAction={() => nav.push({ type: "library" })}
           />
           <div className="nav-shelf nav-shelf-bleed" style={{ gap: 12 }}>
-            {playlists.map((playlist, i) => (
+            {home.playlists.map((playlist, i) => (
               <PlaylistCard
                 key={playlist.id}
                 playlist={playlist}
+                subtitle={pluralise(playlist.track_count ?? 0, "track")}
                 index={i}
                 onOpen={() => nav.push({ type: "playlist", id: playlist.id })}
               />
@@ -137,7 +149,87 @@ export function HomeView({ nav }: { nav: Navigation }) {
         </>
       ) : null}
 
-      {unsorted >= UNSORTED_NUDGE_AT ? (
+      {/* Only people who turned listening on, and only inside the window their
+          own setting describes. Nobody who opted out leaves a gap here — a row
+          saying somebody is private is the one thing they asked not to say. */}
+      {home.friend_activity ? (
+        <>
+          <SectionHeader title="Listening now" />
+          <div className="nav-shelf" style={{ gap: 12 }}>
+            {home.friend_activity.map((row, i) => (
+              <button
+                key={row.person.telegram_user_id}
+                className="nav-press nav-row-in"
+                onClick={() => {
+                  haptic.tap();
+                  nav.push({
+                    type: "profile",
+                    userId: Number(row.person.telegram_user_id),
+                  });
+                }}
+                style={
+                  {
+                    "--i": i,
+                    width: 64,
+                    flex: "none",
+                    textAlign: "center",
+                  } as React.CSSProperties
+                }
+              >
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <Avatar
+                    userId={row.person.telegram_user_id}
+                    username={row.person.handle ?? row.person.username}
+                    hasAvatar={row.person.has_avatar}
+                    size={52}
+                    ring
+                  />
+                </div>
+                <span
+                  className="nav-clip"
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    marginTop: 6,
+                  }}
+                >
+                  {personName(row.person)}
+                </span>
+                <span
+                  className="nav-clip"
+                  style={{
+                    display: "block",
+                    fontSize: 10.5,
+                    color: "var(--color-nav-muted)",
+                  }}
+                >
+                  {trackTitle(row.track)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {home.from_friends ? (
+        <>
+          <SectionHeader title="From your friends" />
+          <div className="nav-shelf nav-shelf-bleed" style={{ gap: 12 }}>
+            {home.from_friends.map((playlist, i) => (
+              <PlaylistCard
+                key={playlist.id}
+                playlist={playlist}
+                subtitle={personName(playlist.person)}
+                index={i}
+                onOpen={() => nav.push({ type: "playlist", id: playlist.id })}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {home.unsorted ? (
         <button
           className="nav-press nav-rise"
           onClick={() => {
@@ -159,7 +251,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
           }}
         >
           <span className="nav-clip" style={{ flex: 1, textAlign: "left" }}>
-            {pluralise(unsorted, "track")} haven&rsquo;t found a home yet
+            {pluralise(home.unsorted, "track")} haven&rsquo;t found a home yet
           </span>
           <ArrowRightIcon size={13} style={{ color: "var(--color-nav-action)" }} />
         </button>
@@ -169,7 +261,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
 }
 
 /**
- * A playlist in the home shelf.
+ * A playlist in a home shelf — yours, or one a friend shares with you.
  *
  * The art is on top and the name is under it, in that order and never
  * overlapping: a cover is a picture of the playlist, not a background for its
@@ -181,16 +273,30 @@ export function HomeView({ nav }: { nav: Navigation }) {
  * a few pixels rather than taking a row of its own, which is what keeps the
  * card the size of its cover instead of the size of its controls. Every card
  * carries one — the old layout gave a Play only to the first, which meant the
- * shelf taught you a control that then vanished.
+ * shelf taught you a control that then vanished. A friend's card carries one
+ * too: the route behind it reads visibility rather than ownership, so playing
+ * theirs works exactly as playing yours does.
+ *
+ * The line under the name is the one thing that differs between the two
+ * shelves, and it is passed in rather than inferred: yours says how much is in
+ * it, theirs says whose it is.
  */
 const CARD = 138;
 
 function PlaylistCard({
   playlist,
+  subtitle,
   index,
   onOpen,
 }: {
-  playlist: Playlist;
+  playlist: {
+    id: string;
+    name: string;
+    has_cover?: boolean;
+    updated_at: string;
+    cover_track_id?: string | null;
+  };
+  subtitle: string;
   index: number;
   onOpen: () => void;
 }) {
@@ -235,6 +341,7 @@ function PlaylistCard({
           {playlist.name}
         </span>
         <span
+          className="nav-clip"
           style={{
             display: "block",
             marginTop: 1,
@@ -242,7 +349,7 @@ function PlaylistCard({
             color: "rgba(255,255,255,.52)",
           }}
         >
-          {pluralise(playlist.track_count ?? 0, "track")}
+          {subtitle}
         </span>
       </button>
 

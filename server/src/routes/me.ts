@@ -2,7 +2,6 @@ import { Router } from "express";
 import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
-  listRecentlyPlayed,
   recordPlay,
   setHandle,
   setListeningPrivacy,
@@ -134,15 +133,6 @@ export function meRouter(): Router {
         return;
       }
       res.status(204).end();
-    })
-  );
-
-  /** The last fifty distinct tracks, most recent first. */
-  router.get(
-    "/recently-played",
-    requireAuth,
-    asyncHandler(async (req, res) => {
-      res.json(await listRecentlyPlayed((req as AuthedRequest).telegramUserId));
     })
   );
 

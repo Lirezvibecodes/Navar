@@ -215,3 +215,25 @@ export interface UserProfile {
   can_endorse: boolean;
   playlists: Playlist[];
 }
+
+/** Somebody else's playlist as Home carries it: whose it is, and no share slug. */
+export interface FriendPlaylist extends ActivityPlaylist {
+  person: Person;
+  track_count: number;
+}
+
+/**
+ * The whole first screen, in one response.
+ *
+ * Every key is optional, and an absent key means that section is not on the
+ * screen at all — not empty, not a header with nothing under it. The server
+ * decides which sections exist; Home renders what it was given.
+ */
+export interface HomePayload {
+  continue_listening?: Track[];
+  playlists?: Playlist[];
+  friend_activity?: ListeningNow[];
+  from_friends?: FriendPlaylist[];
+  /** Present only once enough unfiled tracks have piled up to be worth saying. */
+  unsorted?: number;
+}

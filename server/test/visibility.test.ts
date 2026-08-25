@@ -442,14 +442,14 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
       assert.equal(await repo.recordPlay(FRIEND, trackIds.linkShared), true);
       assert.equal(await repo.recordPlay(FRIEND, trackIds.linkShared), true);
 
-      const history = await repo.listRecentlyPlayed(FRIEND);
-      assert.equal(history.filter((t) => t.id === trackIds.linkShared).length, 1);
+      const shelf = (await repo.getHome(FRIEND)).continue_listening ?? [];
+      assert.equal(shelf.filter((t) => t.id === trackIds.linkShared).length, 1);
     });
 
     test("a track they cannot see never enters their history", async () => {
       assert.equal(await repo.recordPlay(STRANGER, trackIds.unshared), false);
-      const history = await repo.listRecentlyPlayed(STRANGER);
-      assert.equal(history.some((t) => t.id === trackIds.unshared), false);
+      const shelf = (await repo.getHome(STRANGER)).continue_listening ?? [];
+      assert.equal(shelf.some((t) => t.id === trackIds.unshared), false);
     });
 
     test("logging a play sweeps plays past the retention window", async () => {
@@ -695,6 +695,146 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
 
     test("a profile for nobody is nothing, not an empty profile", async () => {
       assert.equal(await repo.getUserProfile(OWNER, ID_BASE + 99), null);
+    });
+  });
+
+  /**
+   * The four fullness levels Home has to be coherent at.
+   *
+   * Its own cast, because the point of these is what a payload does *not*
+   * carry and the fixtures above have accumulated friends, saves and shares
+   * that would make every section present for every reader. A section that is
+   * absent here is absent on the screen: no header, no placeholder row.
+   */
+  describe("the home payload", () => {
+    const NEWCOMER = ID_BASE + 20;
+    const SOLO = ID_BASE + 21;
+    const LISTENER = ID_BASE + 22;
+
+    const soloTracks = Array.from({ length: 6 }, () => randomUUID());
+    let soloPlaylist = "";
+
+    before(async () => {
+      const pool = db.getPool();
+      for (const [id, username] of [
+        [NEWCOMER, "newcomer"],
+        [SOLO, "solo"],
+        [LISTENER, "listener"],
+      ] as const) {
+        await repo.ensureUser(id, username);
+      }
+
+      for (const [i, id] of soloTracks.entries()) {
+        await repo.createTrack({
+          id,
+          ownerTelegramId: SOLO,
+          title: `solo ${i}`,
+          artist: null,
+          album: null,
+          durationSeconds: null,
+          telegramFileId: `fixture-solo-${i}`,
+          mimeType: "audio/mpeg",
+          coverImage: null,
+          coverMimeType: null,
+          coverFileId: null,
+          originAdderId: SOLO,
+        });
+      }
+
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO playlists (owner_telegram_id, name, visibility)
+         VALUES ($1, 'solo mixtape', 'friends') RETURNING id`,
+        [SOLO]
+      );
+      soloPlaylist = rows[0].id;
+      await pool.query(
+        `INSERT INTO playlist_tracks (playlist_id, track_id, position)
+         VALUES ($1, $2, 0)`,
+        [soloPlaylist, soloTracks[0]]
+      );
+
+      await pool.query(
+        `INSERT INTO friendships (requester_id, addressee_id, status)
+         VALUES ($1, $2, 'accepted')`,
+        [LISTENER, SOLO]
+      );
+    });
+
+    test("empty: somebody new gets no sections at all", async () => {
+      // Including the playlists other people have published to anyone: a
+      // stranger's name does not belong on a screen that opens itself.
+      assert.deepEqual(await repo.getHome(NEWCOMER), {});
+    });
+
+    test("solo: your own music, and no shelves you cannot fill", async () => {
+      const home = await repo.getHome(SOLO);
+      assert.equal(home.continue_listening?.length, 6);
+      assert.deepEqual(
+        home.playlists?.map((p) => p.name),
+        ["solo mixtape"]
+      );
+      assert.equal(home.friend_activity, undefined);
+      assert.equal(home.from_friends, undefined);
+    });
+
+    test("the nudge waits until enough tracks have piled up", async () => {
+      // Five of the six are in no playlist, which is the threshold exactly.
+      assert.equal((await repo.getHome(SOLO)).unsorted, 5);
+
+      await db.getPool().query(
+        `INSERT INTO playlist_tracks (playlist_id, track_id, position)
+         VALUES ($1, $2, 1)`,
+        [soloPlaylist, soloTracks[1]]
+      );
+      assert.equal((await repo.getHome(SOLO)).unsorted, undefined);
+    });
+
+    test("social: a friend's playlist arrives, and says whose it is", async () => {
+      const home = await repo.getHome(LISTENER);
+      assert.equal(home.from_friends?.length, 1);
+      assert.equal(home.from_friends?.[0].name, "solo mixtape");
+      assert.equal(
+        String(home.from_friends?.[0].person.telegram_user_id),
+        String(SOLO)
+      );
+      assert.equal(home.from_friends?.[0].track_count, 2);
+      // Nothing of their own yet, which is what puts the first-run screen up
+      // in front of all this rather than an empty shelf.
+      assert.equal(home.continue_listening, undefined);
+      assert.equal(home.playlists, undefined);
+    });
+
+    test("friend activity is opt-in, and absent until it is opted into", async () => {
+      await repo.setListeningStatus(SOLO, soloTracks[0]);
+      assert.equal((await repo.getHome(LISTENER)).friend_activity, undefined);
+
+      await repo.setListeningPrivacy(SOLO, true);
+      await repo.setListeningStatus(SOLO, soloTracks[0]);
+
+      const home = await repo.getHome(LISTENER);
+      assert.equal(home.friend_activity?.length, 1);
+      assert.equal(home.friend_activity?.[0].track.id, soloTracks[0]);
+    });
+
+    test("returning: what you played last leads the shelf", async () => {
+      assert.equal(await repo.recordPlay(SOLO, soloTracks[3]), true);
+
+      const home = await repo.getHome(SOLO);
+      assert.equal(home.continue_listening?.[0].id, soloTracks[3]);
+      // And appears once, however many times it was played.
+      assert.equal(await repo.recordPlay(SOLO, soloTracks[3]), true);
+      const again = await repo.getHome(SOLO);
+      assert.equal(again.continue_listening?.length, 6);
+    });
+
+    test("a track heard on somebody else's playlist stays on the shelf", async () => {
+      assert.equal(await repo.recordPlay(LISTENER, soloTracks[0]), true);
+
+      const home = await repo.getHome(LISTENER);
+      assert.deepEqual(
+        home.continue_listening?.map((t) => t.id),
+        [soloTracks[0]]
+      );
     });
   });
 });

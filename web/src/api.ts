@@ -1,6 +1,7 @@
 import type {
   ActivityItem,
   Collection,
+  HomePayload,
   ListeningNow,
   Me,
   Person,
@@ -374,9 +375,15 @@ export function recordPlay(trackId: string): Promise<void> {
   });
 }
 
-/** The last fifty distinct tracks this person played, most recent first. */
-export function listRecentlyPlayed(): Promise<Track[]> {
-  return request<Track[]>("/api/me/recently-played");
+/**
+ * The whole first screen, in one call.
+ *
+ * One request rather than one per shelf, because Home is what wakes a sleeping
+ * instance and five calls would each pay for that wake. Sections that have
+ * nothing behind them are missing from the response rather than empty in it.
+ */
+export function getHome(): Promise<HomePayload> {
+  return request<HomePayload>("/api/home");
 }
 
 /**

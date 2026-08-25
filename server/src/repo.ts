@@ -736,8 +736,16 @@ export async function createPlaylist(
   return rows[0];
 }
 
+/**
+ * Everything this person has made, newest change first.
+ *
+ * The limit is optional because Home wants the top few and the Library wants
+ * all of them, and `LIMIT NULL` is Postgres for no limit — one query rather
+ * than a near-copy of it that could be given a different ordering by mistake.
+ */
 export async function listPlaylists(
-  ownerTelegramId: number
+  ownerTelegramId: number,
+  limit?: number
 ): Promise<Playlist[]> {
   const { rows } = await getPool().query<Playlist>(
     `SELECT ${PLAYLIST_COLUMNS},
@@ -745,8 +753,9 @@ export async function listPlaylists(
        ${PLAYLIST_COVER}
      FROM playlists p
      WHERE p.owner_telegram_id = $1
-     ORDER BY p.updated_at DESC`,
-    [ownerTelegramId]
+     ORDER BY p.updated_at DESC
+     LIMIT $2`,
+    [ownerTelegramId, limit ?? null]
   );
   return rows;
 }
@@ -2043,8 +2052,6 @@ const PLAY_RETENTION_DAYS = 90;
 const ACTIVITY_WINDOW_DAYS = 30;
 const ACTIVITY_LIMIT = 30;
 
-const RECENTLY_PLAYED_LIMIT = 50;
-
 /**
  * The person columns, prefixed, so one row can carry two different people.
  *
@@ -2266,34 +2273,6 @@ export async function recordPlay(
     [telegramUserId, trackId]
   );
   return (rowCount ?? 0) > 0;
-}
-
-/**
- * The last fifty distinct tracks this person played, most recent first.
- *
- * Distinct, because a history that lists the song you had on repeat fifty
- * times is a history with one song in it. A track that has since been deleted
- * — or that sat in a playlist whose owner has stopped sharing it — drops out
- * rather than appearing as a row that cannot be played.
- */
-export async function listRecentlyPlayed(
-  telegramUserId: number
-): Promise<Track[]> {
-  const { rows } = await getPool().query<Track>(
-    `SELECT ${TRACK_COLUMNS_T}
-     FROM (
-       SELECT track_id, MAX(played_at) AS last_at
-       FROM plays
-       WHERE telegram_user_id = $1
-       GROUP BY track_id
-     ) recent
-     JOIN tracks t ON t.id = recent.track_id
-     WHERE ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
-     ORDER BY recent.last_at DESC
-     LIMIT ${RECENTLY_PLAYED_LIMIT}`,
-    [telegramUserId]
-  );
-  return rows;
 }
 
 /**
@@ -2686,4 +2665,171 @@ export async function endorsePerson(
     [endorserId, endorseeId]
   );
   return rows[0]?.exists ? "already" : "not-earned";
+}
+
+// ---------------------------------------------------------------------------
+// Home
+// ---------------------------------------------------------------------------
+
+/**
+ * How much of each shelf Home asks for.
+ *
+ * Home is a ranked, finite window onto screens that hold everything, so these
+ * are deliberately small: the shelf that runs out is the point. Nothing is
+ * reachable only from here — every section has a screen behind it that keeps
+ * the rest.
+ */
+const HOME_SHELF_LIMIT = 10;
+const HOME_PLAYLIST_LIMIT = 6;
+const HOME_FRIEND_PLAYLIST_LIMIT = 6;
+
+/**
+ * The nudge stays quiet until a handful of tracks have piled up. One stray
+ * track is not a mess worth a banner, and the threshold lives here rather than
+ * on the client so the count and the rule that reads it cannot drift apart.
+ */
+const UNSORTED_NUDGE_AT = 5;
+
+/** Somebody else's playlist as Home carries it: whose it is, and no share slug. */
+export interface FriendPlaylist extends ActivityPlaylist {
+  person: PersonSummary;
+  track_count: number;
+}
+
+/**
+ * Everything the first screen shows, in one payload.
+ *
+ * Every key is optional and an absent key means the section is not there at
+ * all — not empty, not pending, not a header with nothing under it. That is
+ * what lets a new user with one track and no friends see a coherent screen
+ * instead of four empty shelves, and it is why the empty cases are pruned
+ * here rather than rendered away on the client.
+ */
+export interface HomePayload {
+  continue_listening?: Track[];
+  playlists?: Playlist[];
+  friend_activity?: ListeningNow[];
+  from_friends?: FriendPlaylist[];
+  unsorted?: number;
+}
+
+/**
+ * What to put back on, and what arrived while you were away.
+ *
+ * One query for both because they are one shelf. Anything played sorts ahead
+ * of anything merely added, and a track that was played is joined to its own
+ * last play rather than repeated per play — a history that lists the song you
+ * had on repeat ten times is a shelf with one song on it.
+ *
+ * History reaches outside the library on purpose: a track heard on somebody
+ * else's playlist is a thing you were listening to, and it stays on the shelf
+ * for as long as they still share it. The newly-arrived half is owned tracks
+ * only, since "what turned up while you were away" is about your own inbox.
+ */
+async function homeShelf(telegramUserId: number): Promise<Track[]> {
+  const { rows } = await getPool().query<Track>(
+    `SELECT ${TRACK_COLUMNS_T}
+     FROM tracks t
+     LEFT JOIN (
+       SELECT track_id, MAX(played_at) AS last_at
+       FROM plays
+       WHERE telegram_user_id = $1
+       GROUP BY track_id
+     ) recent ON recent.track_id = t.id
+     WHERE ${LIVE_T}
+       AND (recent.last_at IS NOT NULL OR t.owner_telegram_id = $1)
+       AND ${trackVisibleTo("$1", "t")}
+     ORDER BY (recent.last_at IS NOT NULL) DESC,
+              COALESCE(recent.last_at, t.created_at) DESC
+     LIMIT ${HOME_SHELF_LIMIT}`,
+    [telegramUserId]
+  );
+  return rows;
+}
+
+/**
+ * Playlists the people this viewer knows have opened up to them.
+ *
+ * The same two predicates the Social feed uses and for the same reasons:
+ * `playlistVisibleTo` is what the playlist reads use, so nothing here can
+ * advertise something that would 404 when tapped, and `canSeePerson` is what
+ * stops a stranger's name appearing next to it. No time window, unlike the
+ * feed — a feed is about what happened lately, and this shelf is about what
+ * there is to listen to.
+ */
+async function homeFriendPlaylists(
+  viewerTelegramId: number
+): Promise<FriendPlaylist[]> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `SELECT ${personColumns("u", "person")},
+       p.id, p.name, p.updated_at,
+       (p.cover_file_id IS NOT NULL) AS has_cover,
+       ${PLAYLIST_COVER},
+       ${PLAYLIST_TRACK_COUNT}
+     FROM playlists p
+     JOIN users u ON u.telegram_user_id = p.owner_telegram_id
+     WHERE p.owner_telegram_id <> $1
+       AND p.visibility <> 'private'
+       AND p.group_chat_id IS NULL
+       AND ${playlistVisibleTo("$1")}
+       AND ${canSeePerson("$1", "p.owner_telegram_id")}
+     ORDER BY p.updated_at DESC
+     LIMIT ${HOME_FRIEND_PLAYLIST_LIMIT}`,
+    [viewerTelegramId]
+  );
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    name: row.name as string,
+    has_cover: Boolean(row.has_cover),
+    cover_track_id: (row.cover_track_id as string | null) ?? null,
+    updated_at: new Date(row.updated_at as string | Date).toISOString(),
+    track_count: Number(row.track_count ?? 0),
+    person: personFrom(row, "person")!,
+  }));
+}
+
+/** How many of this person's tracks are in no playlist at all. */
+async function countUnsorted(ownerTelegramId: number): Promise<number> {
+  const { rows } = await getPool().query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n
+     FROM tracks t
+     WHERE t.owner_telegram_id = $1 AND ${LIVE_T}
+       AND NOT EXISTS (
+         SELECT 1 FROM playlist_tracks pt WHERE pt.track_id = t.id
+       )`,
+    [ownerTelegramId]
+  );
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * The whole first screen, in one round trip.
+ *
+ * Five reads on one pool rather than five requests from the client: the
+ * landing view is what pays the cold start, and a sleeping instance charges
+ * for being woken once, not for the rows it returns. They are independent, so
+ * they go out together.
+ *
+ * Empty sections are dropped rather than returned empty. The client renders
+ * what is in the payload and decides nothing about what belongs there, which
+ * is what keeps "a section with nothing in it shows nothing" a single rule in
+ * a single place instead of five conditions on a screen.
+ */
+export async function getHome(telegramUserId: number): Promise<HomePayload> {
+  const [shelf, playlists, listening, fromFriends, unsorted] = await Promise.all([
+    homeShelf(telegramUserId),
+    listPlaylists(telegramUserId, HOME_PLAYLIST_LIMIT),
+    listFriendsListening(telegramUserId),
+    homeFriendPlaylists(telegramUserId),
+    countUnsorted(telegramUserId),
+  ]);
+
+  const home: HomePayload = {};
+  if (shelf.length > 0) home.continue_listening = shelf;
+  if (playlists.length > 0) home.playlists = playlists;
+  if (listening.length > 0) home.friend_activity = listening;
+  if (fromFriends.length > 0) home.from_friends = fromFriends;
+  if (unsorted >= UNSORTED_NUDGE_AT) home.unsorted = unsorted;
+  return home;
 }

@@ -9,6 +9,7 @@ import { usersRouter } from "./routes/users";
 import { meRouter } from "./routes/me";
 import { friendsRouter } from "./routes/friends";
 import { socialRouter } from "./routes/social";
+import { homeRouter } from "./routes/home";
 import { sharedRouter } from "./routes/shared";
 
 // The web app is built into this package (see the build script) and served
@@ -67,6 +68,7 @@ export function createApp(bot: Telegraf | null): Express {
   app.use("/api/me", meRouter());
   app.use("/api/friends", friendsRouter());
   app.use("/api/social", socialRouter());
+  app.use("/api/home", homeRouter());
   // Deliberately last, and deliberately without requireAuth: everything above
   // this line knows who is calling and nothing below it does.
   app.use("/api/shared", sharedRouter());
