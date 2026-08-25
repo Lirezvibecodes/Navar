@@ -4,12 +4,15 @@ import type {
   ListeningNow,
   Me,
   Person,
+  PersonResult,
   Playlist,
   PlaylistVisibility,
   SharedPlaylist,
   SharedPlaylistPage,
   SharedTrack,
+  Suggestion,
   Track,
+  UserProfile,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -68,13 +71,6 @@ export function setHandle(handle: string): Promise<{ handle: string }> {
     method: "POST",
     body: json({ handle }),
   });
-}
-
-/** Find one person by their exact handle. Rejects when there is nobody. */
-export function findPersonByHandle(handle: string): Promise<Person> {
-  return request<Person>(
-    `/api/users/by-handle/${encodeURIComponent(handle.replace(/^@+/, ""))}`
-  );
 }
 
 // --- Tracks -----------------------------------------------------------------
@@ -401,6 +397,47 @@ export function listFriendsListening(): Promise<ListeningNow[]> {
  */
 export function socialActivity(): Promise<ActivityItem[]> {
   return request<ActivityItem[]>("/api/social/activity");
+}
+
+// --- Discovery and profiles -------------------------------------------------
+
+/**
+ * Look for people by the start of their name.
+ *
+ * A query too short to be a search comes back as an empty list rather than an
+ * error, so a screen that calls this on every keystroke has nothing to catch.
+ */
+export function searchPeople(query: string): Promise<PersonResult[]> {
+  return request<PersonResult[]>(
+    `/api/users/search?q=${encodeURIComponent(query)}`
+  );
+}
+
+/**
+ * People your friends know.
+ *
+ * Asked once when the Social tab opens and deliberately not part of the
+ * activity payload above: that one refetches every thirty seconds, and the
+ * friend graph cannot have changed in the meantime.
+ */
+export function friendSuggestions(): Promise<Suggestion[]> {
+  return request<Suggestion[]>("/api/social/suggestions");
+}
+
+/** Somebody's page, already narrowed to what you are allowed to see of it. */
+export function getProfile(id: string | number): Promise<UserProfile> {
+  return request<UserProfile>(`/api/users/${id}/profile`);
+}
+
+/**
+ * Say somebody's taste is worth following.
+ *
+ * Only offered when the profile came back with `can_endorse`; the server
+ * refuses it outright otherwise, since an endorsement has to be earned by
+ * keeping something of theirs first.
+ */
+export function endorse(id: string | number): Promise<void> {
+  return request<void>(`/api/users/${id}/endorse`, { method: "POST" });
 }
 
 // --- The share page ---------------------------------------------------------

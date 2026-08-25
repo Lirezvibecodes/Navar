@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { getPool, withTransaction } from "./db";
+import { tierFor, type BadgeTier } from "./badges";
 import type {
   Playlist,
   PlaylistVisibility,
@@ -1500,18 +1501,6 @@ export async function setHandle(
   }
 }
 
-/** Look someone up by the name they chose. Case-insensitive, as the index is. */
-export async function findPersonByHandle(
-  handle: string
-): Promise<PersonSummary | null> {
-  const { rows } = await getPool().query<PersonSummary>(
-    `SELECT telegram_user_id, username, handle, (avatar_file_id IS NOT NULL) AS has_avatar
-     FROM users WHERE LOWER(handle) = LOWER($1)`,
-    [handle]
-  );
-  return rows[0] ?? null;
-}
-
 export async function listFriends(userId: number): Promise<PersonSummary[]> {
   const { rows } = await getPool().query<PersonSummary>(
     `SELECT u.telegram_user_id, u.username, u.handle, (u.avatar_file_id IS NOT NULL) AS has_avatar
@@ -2443,4 +2432,258 @@ export async function listSocialActivity(
   return [...nowPlaying, ...shared, ...saved]
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, ACTIVITY_LIMIT);
+}
+
+// ---------------------------------------------------------------------------
+// Discovery, profiles and endorsements
+// ---------------------------------------------------------------------------
+
+/** How many people a search will name, and how many suggestions are offered. */
+const SEARCH_LIMIT = 20;
+const SUGGESTION_LIMIT = 20;
+
+/**
+ * The shortest thing that counts as looking for somebody.
+ *
+ * One character is not a search, it is the first page of the membership list.
+ * Two is still short, but it is short in the way a name somebody told you is
+ * short, and the result set is capped either way.
+ */
+const SEARCH_MIN_LENGTH = 2;
+
+/**
+ * Where the viewer stands with somebody, as a single column.
+ *
+ * Search results need this per row or every row would render an Add button
+ * that is wrong for half of them — already friends, or already asked, or
+ * waiting on an answer the viewer owes. Computing it in the query is what
+ * makes the screen one request instead of one plus a friends list plus a
+ * pending list.
+ *
+ * Spliced into larger queries, so both arguments must be placeholders or
+ * column references and never anything out of a request.
+ *
+ * The ordering inside the subquery is defensive. Only one row per pair is ever
+ * written — requestFriendship takes a lock and checks both directions — but a
+ * scalar subquery that found two would raise rather than return, and a search
+ * screen is not where that should be discovered.
+ */
+function friendshipState(viewer: string, other: string): string {
+  return `(CASE WHEN ${other} = ${viewer} THEN 'self' ELSE COALESCE((
+    SELECT CASE
+             WHEN f.status = 'accepted' THEN 'friends'
+             WHEN f.requester_id = ${viewer} THEN 'pending_out'
+             ELSE 'pending_in'
+           END
+    FROM friendships f
+    WHERE (f.requester_id = ${viewer} AND f.addressee_id = ${other})
+       OR (f.requester_id = ${other} AND f.addressee_id = ${viewer})
+    ORDER BY (f.status = 'accepted') DESC
+    LIMIT 1
+  ), 'none') END)`;
+}
+
+export type FriendshipState =
+  | "self"
+  | "friends"
+  | "pending_out"
+  | "pending_in"
+  | "none";
+
+/** A person as a search result carries them: who they are, and where you stand. */
+export interface PersonResult extends PersonSummary {
+  state: FriendshipState;
+}
+
+/** Somebody the viewer has not met, and how many friends they have in common. */
+export interface Suggestion extends PersonSummary {
+  mutual_count: number;
+}
+
+/**
+ * Look for somebody by the name they chose, or by their Telegram username.
+ *
+ * Prefix matching over the local users table and nothing else: there is no
+ * remote lookup to make, and matching in the middle of a name would turn a
+ * two-letter query into a directory dump. The handle is tried first and
+ * ordered first, because it is the name that belongs to this app and the one
+ * people are told to hand out.
+ *
+ * The query is escaped rather than interpolated, so a search for "50%" is a
+ * search for two characters and not for everybody.
+ */
+export async function searchPeople(
+  viewerTelegramId: number,
+  query: string
+): Promise<PersonResult[]> {
+  const trimmed = query.trim().replace(/^@+/, "");
+  if (trimmed.length < SEARCH_MIN_LENGTH) return [];
+  const prefix = trimmed.replace(/[\\%_]/g, "\\$&") + "%";
+
+  const { rows } = await getPool().query<PersonResult>(
+    `SELECT u.telegram_user_id, u.username, u.handle,
+       (u.avatar_file_id IS NOT NULL) AS has_avatar,
+       ${friendshipState("$1", "u.telegram_user_id")} AS state
+     FROM users u
+     WHERE u.telegram_user_id <> $1
+       AND (u.handle ILIKE $2 OR u.username ILIKE $2)
+     ORDER BY (u.handle ILIKE $2) DESC, LOWER(COALESCE(u.handle, u.username))
+     LIMIT ${SEARCH_LIMIT}`,
+    [viewerTelegramId, prefix]
+  );
+  return rows;
+}
+
+/**
+ * People the viewer's friends are friends with.
+ *
+ * Two hops, and the second hop is the last one — a third would reach people
+ * with no relationship to the viewer at all, which is a recommendation engine
+ * rather than an introduction. Anyone already connected is excluded, and that
+ * includes pending requests in both directions: this list exists so that the
+ * answer to every row is "add them", and somebody already asked, or waiting on
+ * the viewer's own answer, does not belong in it.
+ *
+ * The mutual count is what makes the ordering mean anything, and it is the one
+ * number here that is safe to show: it counts the viewer's own friends, so
+ * every person it is derived from is somebody the viewer already knows.
+ */
+export async function listFriendSuggestions(
+  viewerTelegramId: number
+): Promise<Suggestion[]> {
+  const { rows } = await getPool().query<Suggestion>(
+    `WITH mine AS (
+       SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS id
+       FROM friendships
+       WHERE status = 'accepted' AND $1 IN (requester_id, addressee_id)
+     ),
+     connected AS (
+       SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS id
+       FROM friendships
+       WHERE $1 IN (requester_id, addressee_id)
+     )
+     SELECT u.telegram_user_id, u.username, u.handle,
+       (u.avatar_file_id IS NOT NULL) AS has_avatar,
+       COUNT(*)::int AS mutual_count
+     FROM mine m
+     JOIN friendships f
+       ON f.status = 'accepted' AND m.id IN (f.requester_id, f.addressee_id)
+     JOIN users u ON u.telegram_user_id =
+       CASE WHEN f.requester_id = m.id THEN f.addressee_id ELSE f.requester_id END
+     WHERE u.telegram_user_id <> $1
+       AND u.telegram_user_id NOT IN (SELECT id FROM connected)
+     GROUP BY u.telegram_user_id, u.username, u.handle, u.avatar_file_id
+     ORDER BY mutual_count DESC, LOWER(COALESCE(u.handle, u.username))
+     LIMIT ${SUGGESTION_LIMIT}`,
+    [viewerTelegramId]
+  );
+  return rows;
+}
+
+/**
+ * One person's page.
+ *
+ * Everything on it is already scoped by whatever produced it: the playlists
+ * come from the listener-scoped read, so somebody unconnected gets the ones
+ * published to anyone and a friend gets more, and neither case needs a branch
+ * here.
+ *
+ * The endorsement count is turned into a tier inside this function and never
+ * returned. Somewhere the raw number has to be counted, and this is the only
+ * place it exists — a route that wanted to render "12 endorsements" would have
+ * to come here and change this line, which is the point of putting it here.
+ */
+export interface UserProfile {
+  person: PersonSummary;
+  state: FriendshipState;
+  tier: BadgeTier;
+  /** Whether the viewer has already endorsed them. */
+  endorsed: boolean;
+  /**
+   * Whether the viewer is allowed to. True only once they have kept a track
+   * that came from this person — the same rule the insert enforces, asked
+   * ahead of time so the button is absent rather than refused.
+   */
+  can_endorse: boolean;
+  playlists: Playlist[];
+}
+
+export async function getUserProfile(
+  viewerTelegramId: number,
+  targetTelegramId: number
+): Promise<UserProfile | null> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `SELECT u.telegram_user_id, u.username, u.handle,
+       (u.avatar_file_id IS NOT NULL) AS has_avatar,
+       ${friendshipState("$1", "u.telegram_user_id")} AS state,
+       (SELECT COUNT(*)::int FROM endorsements e
+         WHERE e.endorsee_id = u.telegram_user_id) AS endorsement_count,
+       EXISTS (SELECT 1 FROM endorsements e
+         WHERE e.endorsee_id = u.telegram_user_id AND e.endorser_id = $1) AS endorsed,
+       EXISTS (SELECT 1 FROM track_saves ts
+         WHERE ts.saver_id = $1 AND ts.origin_id = u.telegram_user_id) AS has_saved
+     FROM users u
+     WHERE u.telegram_user_id = $2`,
+    [viewerTelegramId, targetTelegramId]
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  const endorsed = Boolean(row.endorsed);
+  return {
+    person: {
+      telegram_user_id: String(row.telegram_user_id),
+      username: (row.username as string | null) ?? null,
+      handle: (row.handle as string | null) ?? null,
+      has_avatar: Boolean(row.has_avatar),
+    },
+    state: row.state as FriendshipState,
+    tier: tierFor(Number(row.endorsement_count ?? 0)),
+    endorsed,
+    can_endorse: !endorsed && Boolean(row.has_saved),
+    playlists: await listPlaylistsVisibleTo(targetTelegramId, viewerTelegramId),
+  };
+}
+
+/**
+ * Endorse somebody, if it has been earned.
+ *
+ * The rule is that you may only endorse a person whose music you have actually
+ * kept, and it is the INSERT that enforces it: the row only comes into being
+ * if the SELECT feeding it finds a save. There is no read-then-write for a
+ * second request to slip between, and no route that can decide to skip the
+ * check because the caller looked like somebody who would pass it.
+ *
+ * Three outcomes rather than a boolean, because the route answers them
+ * differently: an endorsement that is already there is not a failure and must
+ * not read as one, while an endorsement that was never earned is a refusal.
+ */
+export async function endorsePerson(
+  endorserId: number,
+  endorseeId: number
+): Promise<"ok" | "already" | "not-earned"> {
+  if (endorserId === endorseeId) return "not-earned";
+
+  const { rowCount } = await getPool().query(
+    `INSERT INTO endorsements (endorser_id, endorsee_id)
+     SELECT $1, $2
+     WHERE EXISTS (
+       SELECT 1 FROM track_saves ts
+       WHERE ts.saver_id = $1 AND ts.origin_id = $2
+     )
+     ON CONFLICT DO NOTHING`,
+    [endorserId, endorseeId]
+  );
+  if ((rowCount ?? 0) > 0) return "ok";
+
+  // Nothing was inserted, which is either of two very different things.
+  const { rows } = await getPool().query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM endorsements
+       WHERE endorser_id = $1 AND endorsee_id = $2
+     ) AS exists`,
+    [endorserId, endorseeId]
+  );
+  return rows[0]?.exists ? "already" : "not-earned";
 }

@@ -3,6 +3,7 @@ import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton } from "./SocialView";
 import { Avatar } from "../components/Avatar";
+import { CollectionArt } from "../components/PixelArt";
 import { NameSheet } from "../components/NameSheet";
 import {
   ActionButton,
@@ -13,12 +14,12 @@ import {
   Skeleton,
   Toggle,
 } from "../components/ui";
-import { LibraryIcon, ShareIcon } from "../icons";
+import { ChevronRightIcon, LibraryIcon, ShareIcon, StarIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { personName, pluralise } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
-import type { Person } from "../types";
+import type { BadgeTier, UserProfile } from "../types";
 
 /**
  * One person's page — yours or somebody else's.
@@ -26,9 +27,10 @@ import type { Person } from "../types";
  * There is one screen rather than two because the difference between them is
  * only which affordances are live: your own page offers an invite link and
  * counts drawn from the library already in memory, and someone else's offers
- * the relationship. Profiles proper — badges, endorsements, public content for
- * strangers — need the discovery endpoints from the social phase; until those
- * exist this page states plainly what it knows.
+ * the relationship. Everything else — where you stand, what they have earned,
+ * and whatever of theirs you are allowed to open — arrives in a single call
+ * that is already scoped to you, so nothing on this page decides who may see
+ * what.
  */
 export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }) {
   const { me, setMe, tracks, playlists } = useLibrary();
@@ -36,27 +38,20 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 
   const isMe = me?.id === userId;
   const [renaming, setRenaming] = useState(false);
-  const [person, setPerson] = useState<Person | null>(null);
-  const [known, setKnown] = useState(!isMe);
-  const [loading, setLoading] = useState(!isMe);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isMe) return;
     let live = true;
     api
-      .listFriends()
-      .then((friends) => {
-        if (!live) return;
-        const match = friends.find((f) => Number(f.telegram_user_id) === userId);
-        setPerson(match ?? null);
-        setKnown(match != null);
-      })
+      .getProfile(userId)
+      .then((row) => live && setProfile(row))
       .catch(() => undefined)
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [isMe, userId]);
+  }, [userId]);
 
   const invite = async () => {
     try {
@@ -77,6 +72,24 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     }
   };
 
+  /**
+   * Say their taste is worth following.
+   *
+   * Only offered when the server said it had been earned, so the failure path
+   * here is a genuine failure rather than the ordinary refusal.
+   */
+  const endorse = async () => {
+    if (!profile) return;
+    setProfile({ ...profile, endorsed: true, can_endorse: false });
+    try {
+      await api.endorse(userId);
+      haptic.success();
+    } catch (err) {
+      setProfile({ ...profile, endorsed: false, can_endorse: true });
+      toast(err instanceof Error ? err.message : "Could not endorse them");
+    }
+  };
+
   if (loading) {
     return (
       <Screen>
@@ -85,7 +98,10 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     );
   }
 
+  const person = profile?.person ?? null;
   const name = personName(isMe ? me : person);
+  const known = profile?.state === "friends";
+  const shared = !isMe && !known ? (profile?.playlists ?? []) : [];
 
   /**
    * The listening switch.
@@ -151,6 +167,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         >
           {name}
         </button>
+        {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
         {isMe ? (
           <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.52)" }}>
             {pluralise(tracks.length, "track")} ·{" "}
@@ -159,23 +176,40 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         ) : null}
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
         {isMe ? (
           <ActionButton icon={ShareIcon} onClick={() => void invite()}>
             Invite a friend
           </ActionButton>
-        ) : known ? (
-          <>
-            <ActionButton
-              icon={LibraryIcon}
-              onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
-            >
-              Their library
-            </ActionButton>
-            <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
-          </>
         ) : (
-          <AddFriendButton userId={userId} />
+          <>
+            {known ? (
+              <>
+                <ActionButton
+                  icon={LibraryIcon}
+                  onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
+                >
+                  Their library
+                </ActionButton>
+                <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
+              </>
+            ) : profile?.state === "pending_out" ? (
+              <ActionButton disabled onClick={() => undefined}>
+                Request sent
+              </ActionButton>
+            ) : (
+              <AddFriendButton userId={userId} />
+            )}
+            {profile?.can_endorse ? (
+              <GhostButton icon={StarIcon} onClick={() => void endorse()}>
+                Endorse
+              </GhostButton>
+            ) : profile?.endorsed ? (
+              <GhostButton icon={StarIcon} disabled onClick={() => undefined}>
+                Endorsed
+              </GhostButton>
+            ) : null}
+          </>
         )}
       </div>
 
@@ -198,12 +232,74 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             Open The Crate
           </GhostButton>
         </>
-      ) : !known ? (
-        <Empty
-          title="Not connected yet"
-          body="Send a request. Once they accept, anything they share with friends shows up for you."
-        />
-      ) : null}
+      ) : (
+        <>
+          {/* What somebody you are not connected to has published to anyone.
+              A friend gets the dedicated screen above instead, which is the
+              same list with room to breathe. */}
+          {shared.length > 0 ? (
+            <>
+              <SectionHeader title="Shared with everyone" />
+              {shared.map((playlist, i) => (
+                <button
+                  key={playlist.id}
+                  className="nav-press nav-row-in"
+                  onClick={() => {
+                    haptic.tap();
+                    nav.push({ type: "playlist", id: playlist.id });
+                  }}
+                  style={
+                    {
+                      "--i": i,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 11,
+                      width: "100%",
+                      minHeight: 58,
+                      textAlign: "left",
+                    } as React.CSSProperties
+                  }
+                >
+                  <CollectionArt
+                    name={playlist.name}
+                    coverTrackId={playlist.cover_track_id}
+                    src={api.playlistArtworkUrl(playlist)}
+                    size={44}
+                    radius={9}
+                  />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span
+                      className="nav-clip"
+                      style={{ display: "block", fontSize: 13, fontWeight: 600 }}
+                    >
+                      {playlist.name}
+                    </span>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 11,
+                        color: "var(--color-nav-muted)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {pluralise(playlist.track_count ?? 0, "track")}
+                    </span>
+                  </span>
+                  <ChevronRightIcon
+                    size={15}
+                    style={{ color: "rgba(255,255,255,.3)", flex: "none" }}
+                  />
+                </button>
+              ))}
+            </>
+          ) : !known ? (
+            <Empty
+              title="Not connected yet"
+              body="Send a request. Once they accept, anything they share with friends shows up for you."
+            />
+          ) : null}
+        </>
+      )}
 
       <NameSheet
         open={renaming}
@@ -216,5 +312,40 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         onClose={() => setRenaming(false)}
       />
     </Screen>
+  );
+}
+
+/**
+ * What somebody has earned, as a word.
+ *
+ * Every tier renders identically — same icon, same weight, same size — because
+ * the alternative is a chip that gets louder as the number behind it grows,
+ * which is the number again wearing a costume. The number itself never leaves
+ * the server.
+ *
+ * The tier everybody starts on is shown on your own page and nowhere else: a
+ * column of identical chips down a list of people would say nothing about any
+ * of them, and would bury the ones that mean something.
+ */
+function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
+  if (tier.min === 0 && !own) return null;
+  return (
+    <span
+      className="nav-glass"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        height: 24,
+        padding: "0 11px",
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 600,
+        color: "#fff",
+      }}
+    >
+      <StarIcon size={11} />
+      {tier.label}
+    </span>
   );
 }

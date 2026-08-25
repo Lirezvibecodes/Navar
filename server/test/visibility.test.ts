@@ -516,4 +516,185 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
       assert.equal(String(row.person.telegram_user_id), String(FRIEND));
     });
   });
+
+  /**
+   * Discovery, profiles and endorsements.
+   *
+   * Three separate rules meet here and each one fails quietly when it breaks.
+   * Search is the first place in Navaar where a name is shown to somebody with
+   * no relationship to its owner, so what it will and will not match is the
+   * test. Suggestions walk the friend graph, and the thing to prove is where
+   * the walk stops — a third hop reaches people whose only connection to the
+   * viewer is that the graph is small. And an endorsement is the one action in
+   * the app with a precondition, so the precondition is checked from both
+   * sides: it lets through somebody who earned it and refuses somebody who
+   * did not.
+   */
+  describe("discovery, profiles and endorsements", () => {
+    // Two hops out and three hops out, so the boundary has something on each
+    // side of it. MUTUAL knows FRIEND and not OWNER; FAR knows only MUTUAL.
+    const MUTUAL = ID_BASE + 6;
+    const FAR = ID_BASE + 7;
+
+    before(async () => {
+      const pool = db.getPool();
+      await repo.ensureUser(MUTUAL, "mutual");
+      await repo.ensureUser(FAR, "faraway");
+
+      for (const [a, b] of [
+        [FRIEND, MUTUAL],
+        [MUTUAL, FAR],
+        // A second route to somebody OWNER has already been asked by. Being a
+        // friend of a friend is not enough to put them back in the list.
+        [FRIEND, PENDING_FRIEND],
+      ] as const) {
+        await pool.query(
+          `INSERT INTO friendships (requester_id, addressee_id, status)
+           VALUES ($1, $2, 'accepted')`,
+          [a, b]
+        );
+      }
+
+      await repo.setHandle(MUTUAL, "navtestmutual");
+    });
+
+    test("a search finds somebody by their username", async () => {
+      const rows = await repo.searchPeople(OWNER, "frie");
+      assert.equal(rows.length, 1);
+      assert.equal(String(rows[0].telegram_user_id), String(FRIEND));
+    });
+
+    test("a search finds somebody by the name they chose", async () => {
+      const rows = await repo.searchPeople(OWNER, "navtest");
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].handle, "navtestmutual");
+    });
+
+    test("a leading @ is not part of the name", async () => {
+      const rows = await repo.searchPeople(OWNER, "@navtest");
+      assert.equal(rows.length, 1);
+    });
+
+    test("a search never returns the person searching", async () => {
+      const rows = await repo.searchPeople(OWNER, "owner");
+      assert.deepEqual(rows, []);
+    });
+
+    test("one letter is not a search", async () => {
+      assert.deepEqual(await repo.searchPeople(OWNER, "f"), []);
+    });
+
+    test("a wildcard is searched for literally", async () => {
+      // Not an escaping nicety: "%_" unescaped matches every account that has
+      // any name at all, which is the membership list.
+      assert.deepEqual(await repo.searchPeople(OWNER, "%_"), []);
+    });
+
+    test("each result says where the searcher stands", async () => {
+      const [friend] = await repo.searchPeople(OWNER, "frie");
+      assert.equal(friend.state, "friends");
+
+      const [waiting] = await repo.searchPeople(OWNER, "pend");
+      assert.equal(waiting.state, "pending_in");
+
+      const [asked] = await repo.searchPeople(PENDING_FRIEND, "owner");
+      assert.equal(asked.state, "pending_out");
+
+      const [nobody] = await repo.searchPeople(OWNER, "group");
+      assert.equal(nobody.state, "none");
+    });
+
+    test("a friend of a friend is suggested, with the count that ranks them", async () => {
+      const rows = await repo.listFriendSuggestions(OWNER);
+      const mutual = rows.find(
+        (row) => String(row.telegram_user_id) === String(MUTUAL)
+      );
+      assert.ok(mutual, "the friend of a friend should be suggested");
+      assert.equal(mutual.mutual_count, 1);
+    });
+
+    test("the walk stops at two hops", async () => {
+      const rows = await repo.listFriendSuggestions(OWNER);
+      assert.equal(
+        rows.some((row) => String(row.telegram_user_id) === String(FAR)),
+        false
+      );
+    });
+
+    test("somebody already connected is not suggested", async () => {
+      const rows = await repo.listFriendSuggestions(OWNER);
+      const ids = rows.map((row) => String(row.telegram_user_id));
+      assert.equal(ids.includes(String(FRIEND)), false, "already a friend");
+      assert.equal(
+        ids.includes(String(PENDING_FRIEND)),
+        false,
+        "a request is already open"
+      );
+      assert.equal(ids.includes(String(OWNER)), false, "themselves");
+    });
+
+    test("somebody with no friends is suggested nobody", async () => {
+      assert.deepEqual(await repo.listFriendSuggestions(GROUP_MATE), []);
+    });
+
+    test("endorsing is refused until something of theirs was kept", async () => {
+      // MUTUAL, because MUTUAL is this block's own fixture and has kept
+      // nothing. Everybody seeded further up has saved a track from OWNER at
+      // some point, so a refusal there would be refusing something earned.
+      assert.equal(await repo.endorsePerson(MUTUAL, OWNER), "not-earned");
+    });
+
+    test("endorsing yourself is refused", async () => {
+      assert.equal(await repo.endorsePerson(OWNER, OWNER), "not-earned");
+    });
+
+    test("endorsing is allowed once something of theirs was kept", async () => {
+      // OWNER kept a track that came from STRANGER, in the block above.
+      assert.equal(await repo.endorsePerson(OWNER, STRANGER), "ok");
+    });
+
+    test("endorsing twice is not a failure", async () => {
+      assert.equal(await repo.endorsePerson(OWNER, STRANGER), "already");
+    });
+
+    test("an endorsement moves the tier and is never returned as a count", async () => {
+      const profile = await repo.getUserProfile(OWNER, STRANGER);
+      assert.equal(profile?.tier.id, "selector");
+      assert.equal(profile?.endorsed, true);
+      assert.equal(profile?.can_endorse, false);
+      assert.equal("endorsement_count" in (profile ?? {}), false);
+    });
+
+    test("somebody unendorsed holds the tier everybody starts on", async () => {
+      const profile = await repo.getUserProfile(OWNER, FRIEND);
+      assert.equal(profile?.tier.id, "listener");
+      // OWNER kept a track that came from FRIEND, so the button is offered.
+      assert.equal(profile?.can_endorse, true);
+    });
+
+    test("a profile says where the viewer stands", async () => {
+      assert.equal((await repo.getUserProfile(OWNER, OWNER))?.state, "self");
+      assert.equal((await repo.getUserProfile(OWNER, FRIEND))?.state, "friends");
+      assert.equal((await repo.getUserProfile(OWNER, MUTUAL))?.state, "none");
+    });
+
+    test("a stranger's profile carries only what was published to anyone", async () => {
+      const profile = await repo.getUserProfile(STRANGER, OWNER);
+      const names = profile?.playlists.map((p) => p.name) ?? [];
+      assert.equal(names.includes("link-shared"), true, "published to anyone");
+      assert.equal(names.includes("friends-only"), false, "friends only");
+      assert.equal(names.includes("group crate"), false, "a group they are not in");
+    });
+
+    test("a friend's profile carries what was shared with friends", async () => {
+      const profile = await repo.getUserProfile(FRIEND, OWNER);
+      const names = profile?.playlists.map((p) => p.name) ?? [];
+      assert.equal(names.includes("friends-only"), true);
+      assert.equal(names.includes("link-shared"), true);
+    });
+
+    test("a profile for nobody is nothing, not an empty profile", async () => {
+      assert.equal(await repo.getUserProfile(OWNER, ID_BASE + 99), null);
+    });
+  });
 });

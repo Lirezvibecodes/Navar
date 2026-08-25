@@ -2,33 +2,40 @@ import { Router } from "express";
 import { Readable } from "node:stream";
 import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
-import { findPersonByHandle, getUserAvatarFileId, listPlaylistsVisibleTo } from "../repo";
+import {
+  endorsePerson,
+  getUserAvatarFileId,
+  getUserProfile,
+  listPlaylistsVisibleTo,
+  searchPeople,
+} from "../repo";
 import { getTelegramFileDownloadUrl } from "../telegram-files";
+
+/** Rejects a path parameter that is not a Telegram user id. */
+function readUserId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
 export function usersRouter(): Router {
   const router = Router();
 
   /**
-   * Find one person by their exact handle.
+   * Find people whose name starts with what was typed.
    *
-   * Exact rather than a prefix search, and it is the whole of discovery for
-   * now: you can reach somebody whose name you were told, and you cannot page
-   * through the membership. Ranked search over partial names is a social-phase
-   * feature with its own privacy questions; this is the part that makes "add
-   * me, I am @lirez" work, which is what a handle is for.
+   * A short query is answered with an empty list rather than an error: the
+   * client types into this as the letters arrive, and the first keystroke
+   * being a failure would make every search flash a message on its way to a
+   * result. The floor and the cap both live in the repo, where the query is.
    *
-   * Declared before /:id/... so a handle is never read as a user id.
+   * Declared before /:id/... so a search is never read as a user id.
    */
   router.get(
-    "/by-handle/:handle",
+    "/search",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const person = await findPersonByHandle(req.params.handle);
-      if (!person) {
-        res.status(404).json({ error: "Nobody by that name" });
-        return;
-      }
-      res.json(person);
+      const q = typeof req.query.q === "string" ? req.query.q : "";
+      res.json(await searchPeople((req as AuthedRequest).telegramUserId, q));
     })
   );
 
@@ -51,8 +58,8 @@ export function usersRouter(): Router {
     "/:id/avatar",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const userId = Number(req.params.id);
-      if (!Number.isSafeInteger(userId)) {
+      const userId = readUserId(req.params.id);
+      if (!userId) {
         res.status(404).json({ error: "Not found" });
         return;
       }
@@ -79,6 +86,65 @@ export function usersRouter(): Router {
   );
 
   /**
+   * Somebody's page: who they are, where the requester stands with them, what
+   * they have earned, and whatever of theirs the requester may open.
+   *
+   * There is one route rather than a public one and a private one. What a
+   * stranger sees is not a different endpoint, it is the same endpoint
+   * returning less, because every part of the answer is scoped by the reader
+   * that produced it.
+   */
+  router.get(
+    "/:id/profile",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const userId = readUserId(req.params.id);
+      const profile = userId
+        ? await getUserProfile((req as AuthedRequest).telegramUserId, userId)
+        : null;
+      if (!profile) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(profile);
+    })
+  );
+
+  /**
+   * Say that somebody's taste is worth following.
+   *
+   * The 403 here is the one place in this API that says "no" rather than
+   * "there is nothing here", and it is deliberate: this is not a resource
+   * being hidden, it is an action with a condition, and the person asking
+   * already knows the account exists because they are looking at it. Whether
+   * the condition is met is decided by the insert itself — see the repo.
+   *
+   * Endorsing twice is not an error. The first one already said it.
+   */
+  router.post(
+    "/:id/endorse",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const userId = readUserId(req.params.id);
+      if (!userId) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      const outcome = await endorsePerson(
+        (req as AuthedRequest).telegramUserId,
+        userId
+      );
+      if (outcome === "not-earned") {
+        res.status(403).json({
+          error: "Keep something of theirs first",
+        });
+        return;
+      }
+      res.status(204).end();
+    })
+  );
+
+  /**
    * What this person has opened up to the requester.
    *
    * An empty array is the honest answer both for someone who shares nothing
@@ -89,8 +155,8 @@ export function usersRouter(): Router {
     "/:id/playlists",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const ownerId = Number(req.params.id);
-      if (!Number.isSafeInteger(ownerId) || ownerId <= 0) {
+      const ownerId = readUserId(req.params.id);
+      if (!ownerId) {
         res.status(404).json({ error: "Not found" });
         return;
       }

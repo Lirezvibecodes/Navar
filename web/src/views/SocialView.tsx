@@ -5,17 +5,16 @@ import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
 import { ActionButton, Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { UserCheckIcon, UserPlusIcon } from "../icons";
-import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { formatAge, personName, trackTitle } from "../lib/format";
 import { haptic, onActivationChange, shareLink } from "../telegram";
-import type { ActivityItem, Person } from "../types";
+import type { ActivityItem, Person, PersonResult, Suggestion } from "../types";
 
 /**
  * People.
  *
  * Who is playing something right now, what the people you know have been
- * doing, who is waiting on you, and the person behind a name you were given.
+ * doing, who is waiting on you, and anybody you go looking for.
  * A section with no data behind it renders nothing at all rather than an empty
  * frame — most of this screen is blank on the first day and that is correct.
  *
@@ -26,14 +25,26 @@ import type { ActivityItem, Person } from "../types";
  */
 /** The one scheduled refetch in the app. See the effect that owns it. */
 const ACTIVITY_REFRESH_MS = 30_000;
+
+/**
+ * How long the typing has to stop before the search is sent.
+ *
+ * Long enough that a name typed straight through costs one request rather than
+ * one per letter, short enough that it still feels like the list is following
+ * along. The server ignores anything shorter than two characters, so the first
+ * keystroke never leaves the phone at all.
+ */
+const SEARCH_DEBOUNCE_MS = 250;
+
 export function SocialView({ nav }: { nav: Navigation }) {
   const { toast } = useToast();
-  const { me } = useLibrary();
   const [friends, setFriends] = useState<Person[]>([]);
   const [incoming, setIncoming] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [found, setFound] = useState<Person | null>(null);
+  const [results, setResults] = useState<PersonResult[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   const load = useCallback(async () => {
@@ -46,6 +57,12 @@ export function SocialView({ nav }: { nav: Navigation }) {
       setFriends(people);
       setIncoming(requests.incoming);
       setActivity(feed);
+      // Only worth asking once there is a friend to have friends of. Somebody
+      // with an empty list would get an empty answer, and this screen is
+      // already three requests deep.
+      if (people.length > 0) {
+        setSuggestions(await api.friendSuggestions().catch(() => []));
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not load your friends");
     } finally {
@@ -89,7 +106,40 @@ export function SocialView({ nav }: { nav: Navigation }) {
     };
   }, []);
 
-  const accept = async (person: Person) => {
+  /**
+   * Look for somebody as the name is typed.
+   *
+   * Every result arrives knowing where you stand with the person it names, so
+   * the row draws its own button without this screen cross-referencing the
+   * friends list and the pending list. A search that fails is silent: the last
+   * results stay put rather than the screen throwing a message at somebody who
+   * is still typing.
+   */
+  useEffect(() => {
+    const term = query.trim().replace(/^@+/, "");
+    if (term.length < 2) {
+      setResults([]);
+      setSearched(false);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      api
+        .searchPeople(term)
+        .then((rows) => {
+          if (!live) return;
+          setResults(rows);
+          setSearched(true);
+        })
+        .catch(() => undefined);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  const accept = async (person: Person): Promise<boolean> => {
     setIncoming((rows) =>
       rows.filter((r) => r.telegram_user_id !== person.telegram_user_id)
     );
@@ -97,36 +147,24 @@ export function SocialView({ nav }: { nav: Navigation }) {
     try {
       await api.acceptFriend(person.telegram_user_id);
       haptic.success();
+      return true;
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not accept that");
       void load();
+      return false;
     }
   };
 
-  /**
-   * Look up the exact name somebody gave you.
-   *
-   * Exact, and one result: this is following a name you were handed, not
-   * browsing the membership. The two answers that are not a stranger — it is
-   * you, or it is already a friend — are said plainly rather than dropped into
-   * the list, because both are cases where tapping Add would be the wrong move.
-   */
-  const find = async () => {
-    const handle = query.trim().replace(/^@+/, "");
-    if (handle.length === 0) return;
-    try {
-      const person = await api.findPersonByHandle(handle);
-      if (me && Number(person.telegram_user_id) === me.id) {
-        toast("That is you");
-        return;
-      }
-      haptic.tap();
-      setFound(person);
-      setQuery("");
-    } catch (err) {
-      setFound(null);
-      toast(err instanceof Error ? err.message : "Nobody by that name");
-    }
+  /** Accepting from a search result has to move that row too. */
+  const acceptFromSearch = async (person: PersonResult) => {
+    if (!(await accept(person))) return;
+    setResults((rows) =>
+      rows.map((row) =>
+        row.telegram_user_id === person.telegram_user_id
+          ? { ...row, state: "friends" }
+          : row
+      )
+    );
   };
 
   const invite = async () => {
@@ -138,6 +176,9 @@ export function SocialView({ nav }: { nav: Navigation }) {
     }
   };
 
+  const openProfile = (id: string) =>
+    nav.push({ type: "profile", userId: Number(id) });
+
   if (loading) {
     return (
       <Screen>
@@ -148,10 +189,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
 
   const listening = activity.filter((row) => row.kind === "listening");
   const feed = activity.filter((row) => row.kind !== "listening");
-
-  const alreadyFriends =
-    found != null &&
-    friends.some((f) => f.telegram_user_id === found.telegram_user_id);
+  const searching = query.trim().replace(/^@+/, "").length >= 2;
 
   return (
     <Screen>
@@ -159,7 +197,6 @@ export function SocialView({ nav }: { nav: Navigation }) {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void find()}
           placeholder="Find someone by name"
           autoCapitalize="none"
           autoCorrect="off"
@@ -178,30 +215,51 @@ export function SocialView({ nav }: { nav: Navigation }) {
             fontFamily: "inherit",
           }}
         />
-        <ActionButton
-          grow={false}
-          disabled={query.trim().length === 0}
-          onClick={() => void find()}
-        >
-          Find
-        </ActionButton>
       </div>
 
-      {found ? (
+      {searching ? (
         <>
-          <SectionHeader title="Found" spaceAbove={16} />
-          <PersonRow
-            person={found}
-            index={0}
-            onOpen={() =>
-              nav.push({ type: "profile", userId: Number(found.telegram_user_id) })
-            }
-            action={
-              alreadyFriends ? undefined : (
-                <AddFriendButton userId={found.telegram_user_id} onDone={load} />
-              )
-            }
-          />
+          <SectionHeader title="People" spaceAbove={16} />
+          {results.length === 0 ? (
+            searched ? (
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-nav-muted)",
+                  margin: "6px 2px",
+                }}
+              >
+                Nobody by that name.
+              </p>
+            ) : (
+              <Skeleton rows={2} />
+            )
+          ) : (
+            results.map((person, i) => (
+              <PersonRow
+                key={person.telegram_user_id}
+                person={person}
+                index={i}
+                onOpen={() => openProfile(person.telegram_user_id)}
+                action={
+                  person.state === "none" ? (
+                    <AddFriendButton userId={person.telegram_user_id} />
+                  ) : person.state === "pending_out" ? (
+                    <ActionButton grow={false} disabled onClick={() => undefined}>
+                      Pending
+                    </ActionButton>
+                  ) : person.state === "pending_in" ? (
+                    <ActionButton
+                      grow={false}
+                      onClick={() => void acceptFromSearch(person)}
+                    >
+                      Accept
+                    </ActionButton>
+                  ) : undefined
+                }
+              />
+            ))
+          )}
         </>
       ) : null}
 
@@ -213,9 +271,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
               key={person.telegram_user_id}
               person={person}
               index={i}
-              onOpen={() =>
-                nav.push({ type: "profile", userId: Number(person.telegram_user_id) })
-              }
+              onOpen={() => openProfile(person.telegram_user_id)}
               action={
                 <ActionButton grow={false} onClick={() => void accept(person)}>
                   Accept
@@ -236,10 +292,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
                 className="nav-press nav-row-in"
                 onClick={() => {
                   haptic.tap();
-                  nav.push({
-                    type: "profile",
-                    userId: Number(row.person.telegram_user_id),
-                  });
+                  openProfile(row.person.telegram_user_id);
                 }}
                 style={
                   {
@@ -299,11 +352,28 @@ export function SocialView({ nav }: { nav: Navigation }) {
                   nav.push({ type: "playlist", id: item.playlist.id });
                   return;
                 }
-                nav.push({
-                  type: "profile",
-                  userId: Number(item.person.telegram_user_id),
-                });
+                openProfile(item.person.telegram_user_id);
               }}
+            />
+          ))}
+        </>
+      ) : null}
+
+      {suggestions.length > 0 ? (
+        <>
+          <SectionHeader title="People you may know" spaceAbove={22} />
+          {suggestions.map((person, i) => (
+            <PersonRow
+              key={person.telegram_user_id}
+              person={person}
+              index={i}
+              note={
+                person.mutual_count === 1
+                  ? "1 friend in common"
+                  : person.mutual_count + " friends in common"
+              }
+              onOpen={() => openProfile(person.telegram_user_id)}
+              action={<AddFriendButton userId={person.telegram_user_id} />}
             />
           ))}
         </>
@@ -314,7 +384,11 @@ export function SocialView({ nav }: { nav: Navigation }) {
         action="Invite"
         onAction={() => void invite()}
         spaceAbove={
-          incoming.length > 0 || found || listening.length > 0 || feed.length > 0
+          incoming.length > 0 ||
+          searching ||
+          listening.length > 0 ||
+          feed.length > 0 ||
+          suggestions.length > 0
             ? 22
             : 16
         }
@@ -333,9 +407,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
             key={person.telegram_user_id}
             person={person}
             index={i}
-            onOpen={() =>
-              nav.push({ type: "profile", userId: Number(person.telegram_user_id) })
-            }
+            onOpen={() => openProfile(person.telegram_user_id)}
           />
         ))
       )}
@@ -429,17 +501,25 @@ function ActivityRow({
   );
 }
 
-/** One person: 40px face, their name, and whatever the section needs on the end. */
+/**
+ * One person: 40px face, their name, and whatever the section needs on the end.
+ *
+ * The note under the name is for the one thing worth saying about somebody you
+ * have not met — how many friends you have in common — and nothing else goes
+ * there.
+ */
 function PersonRow({
   person,
   index,
   onOpen,
   action,
+  note,
 }: {
   person: Person;
   index: number;
   onOpen: () => void;
   action?: React.ReactNode;
+  note?: string;
 }) {
   return (
     <div
@@ -476,8 +556,26 @@ function PersonRow({
           hasAvatar={person.has_avatar}
           size={40}
         />
-        <span className="nav-clip" style={{ fontSize: 13, fontWeight: 600 }}>
-          {personName(person)}
+        <span style={{ minWidth: 0 }}>
+          <span
+            className="nav-clip"
+            style={{ display: "block", fontSize: 13, fontWeight: 600 }}
+          >
+            {personName(person)}
+          </span>
+          {note ? (
+            <span
+              className="nav-clip"
+              style={{
+                display: "block",
+                fontSize: 11,
+                color: "var(--color-nav-muted)",
+                marginTop: 2,
+              }}
+            >
+              {note}
+            </span>
+          ) : null}
         </span>
       </button>
       {action ?? (

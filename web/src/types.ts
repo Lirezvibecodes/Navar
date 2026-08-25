@@ -163,3 +163,55 @@ export interface ActivityItem {
   track: ActivityTrack | null;
   playlist: ActivityPlaylist | null;
 }
+
+/** Where you stand with somebody. Sent with every search result. */
+export type FriendshipState =
+  | "self"
+  | "friends"
+  | "pending_out"
+  | "pending_in"
+  | "none";
+
+/**
+ * A search result: a person, and the one thing that decides what the row's
+ * button should say. It comes down with the row so the list does not have to
+ * cross-reference a friends list and a pending list to draw itself.
+ */
+export interface PersonResult extends Person {
+  state: FriendshipState;
+}
+
+/** Somebody two hops away, and how many friends you have in common. */
+export interface Suggestion extends Person {
+  mutual_count: number;
+}
+
+/**
+ * A tier earned through endorsements.
+ *
+ * There is no count here and there is not meant to be one. Every tier renders
+ * at the same weight, and `id` is what the client tests against — the first
+ * tier is what everybody starts on and is shown nowhere but your own profile.
+ */
+export interface BadgeTier {
+  id: string;
+  label: string;
+  min: number;
+}
+
+/**
+ * One person's page.
+ *
+ * `playlists` is already narrowed to what the viewer may open, so there is
+ * nothing to filter here. `can_endorse` is the server saying the endorsement
+ * has been earned; the button is absent otherwise rather than present and
+ * refused.
+ */
+export interface UserProfile {
+  person: Person;
+  state: FriendshipState;
+  tier: BadgeTier;
+  endorsed: boolean;
+  can_endorse: boolean;
+  playlists: Playlist[];
+}
