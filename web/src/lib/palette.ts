@@ -304,3 +304,15 @@ export function artGlowCss(palette: Palette | null): string {
   if (!palette) return STATIC_GLOW;
   return `radial-gradient(60% 78% at 50% 46%,${rgba(palette.hi, 0.13)},${rgba(palette.lo, 0.05)} 46%,transparent 72%)`;
 }
+
+/**
+ * The halo the artwork casts on the square immediately behind it. This used to
+ * be a hard-coded lime, sitting directly inside a wash that had already taken
+ * its colour from the cover — so a red sleeve got a red wash and a green rim,
+ * which is exactly the contradiction the palette work was meant to end. With
+ * no palette it is the lime it always was.
+ */
+export function artShadowCss(palette: Palette | null): string {
+  if (!palette) return "0 0 60px rgba(223,252,142,.14)";
+  return `0 0 60px ${rgba(palette.hi, 0.22)}`;
+}

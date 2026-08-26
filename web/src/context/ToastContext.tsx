@@ -13,15 +13,17 @@ import { haptic } from "../telegram";
  * The one place the app tells you something happened.
  *
  * There is a single slot, and a new message replaces whatever is in it — with
- * one exception that matters: an undo snackbar is never replaced by an
- * informational toast. Undo is the app's substitute for confirmation dialogs,
- * so removing a track shows a snackbar instead of asking first; if a passing
- * "Added to Basement" could shove that off the screen, the undo would be gone
- * before the user's hand got there. An informational toast arriving during an
- * undo waits its turn instead.
+ * one exception that matters: a message you might need to act on is never
+ * replaced by an informational one. Undo is the app's substitute for
+ * confirmation dialogs, so removing a track shows a snackbar instead of asking
+ * first; if a passing "Added to Basement" could shove that off the screen, the
+ * undo would be gone before the user's hand got there. A failure has the same
+ * claim on the slot for the same reason — it is the only account anyone gets
+ * of what went wrong. An informational toast arriving during either waits its
+ * turn.
  */
 
-type ToastKind = "info" | "undo";
+type ToastKind = "info" | "error" | "undo";
 
 interface ToastState {
   id: number;
@@ -32,11 +34,32 @@ interface ToastState {
 }
 
 const INFO_MS = 2600;
+const ERROR_MS = 6000;
 const UNDO_MS = 6000;
+
+/** Everything the server can hand back that is not worth showing a person. */
+function readableError(err: unknown, fallback: string): string {
+  const raw =
+    err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const message = raw.trim();
+  // A bare "Failed to fetch", a status line, or an empty string tells the user
+  // nothing that the caller's fallback does not tell them better.
+  if (message.length === 0 || message.length > 160) return fallback;
+  if (/^(failed to fetch|network ?error|load failed)$/i.test(message)) {
+    return fallback;
+  }
+  return message;
+}
 
 interface ToastApi {
   /** A passing confirmation. Replaced freely by the next one. */
   toast: (message: string) => void;
+  /**
+   * Something did not work. Holds the slot for as long as an undo does, keeps
+   * up to three lines of whatever the server said, and falls back to
+   * `fallback` when the thrown value has nothing a person could read.
+   */
+  errorToast: (err: unknown, fallback: string) => void;
   /** A reversible action. Holds the slot until it times out or is used. */
   undoToast: (
     message: string,
@@ -65,7 +88,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const show = useCallback((next: Omit<ToastState, "id">) => {
     setCurrent((existing) => {
       // The exception. Anything else takes the slot immediately.
-      if (existing?.kind === "undo" && next.kind === "info") {
+      if (existing && existing.kind !== "info" && next.kind === "info") {
         pending.current = { ...next, id: nextId.current++ };
         return existing;
       }
@@ -84,7 +107,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       }
       return;
     }
-    const ms = current.kind === "undo" ? UNDO_MS : INFO_MS;
+    const ms =
+      current.kind === "undo"
+        ? UNDO_MS
+        : current.kind === "error"
+          ? ERROR_MS
+          : INFO_MS;
     const timer = window.setTimeout(() => setCurrent(null), ms);
     return () => window.clearTimeout(timer);
   }, [current]);
@@ -92,12 +120,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const api = useMemo<ToastApi>(
     () => ({
       toast: (message) => show({ kind: "info", message }),
+      errorToast: (err, fallback) => {
+        haptic.error();
+        show({ kind: "error", message: readableError(err, fallback) });
+      },
       undoToast: (message, onUndo, actionLabel = "Undo") =>
         show({ kind: "undo", message, actionLabel, onAction: onUndo }),
       setToastLift: setLift,
     }),
     [show]
   );
+
+  const failed = current?.kind === "error";
 
   return (
     <Ctx.Provider value={api}>
@@ -116,7 +150,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             left: 0,
             right: 0,
             height: "var(--tg-viewport-height, 100%)",
-            zIndex: 60,
+            zIndex: "var(--z-toast)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "flex-end",
@@ -125,21 +159,25 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         >
           <div
             className="nav-rise"
-            role="status"
-            aria-live="polite"
+            role={failed ? "alert" : "status"}
+            aria-live={failed ? "assertive" : "polite"}
             style={{
               position: "relative",
-              // Clears the bottom nav, the Now Playing bar and the device inset,
-              // plus whatever the contextual action bar has asked for.
-              margin: `0 14px calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + ${lift}px + 8px)`,
+              // Clears the bottom furniture plus whatever the contextual action
+              // bar has asked for. --nav-bottomnav-h is measured off the live
+              // element, and that element already carries the device inset in
+              // its own padding — adding --tg-safe-bottom here counted the
+              // gesture bar twice and floated the toast clear of the nav.
+              margin: `0 14px calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + ${lift}px + 8px)`,
               pointerEvents: "auto",
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: 10,
               minHeight: 44,
               padding: "0 14px",
-              borderRadius: 22,
+              borderRadius: 18,
               fontSize: 12.5,
+              lineHeight: 1.45,
             }}
           >
             <div
@@ -147,12 +185,31 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               style={{
                 position: "absolute",
                 inset: 0,
-                borderRadius: 22,
+                borderRadius: 18,
                 pointerEvents: "none",
               }}
             />
+            {/* The icon set is a fixed pixel library with no warning glyph in
+                it, and hand-drawing one would leave the app with exactly one
+                icon that came from somewhere else. A red rule down the leading
+                edge says the same thing in the material the toast is already
+                made of. */}
+            {failed ? (
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 8,
+                  bottom: 8,
+                  width: 3,
+                  borderRadius: "0 3px 3px 0",
+                  background: "var(--color-nav-danger)",
+                }}
+              />
+            ) : null}
             <span
-              className="nav-clip"
+              className="nav-clamp-3"
               style={{ position: "relative", flex: 1, padding: "11px 0" }}
             >
               {current.message}
@@ -162,11 +219,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 className="nav-press"
                 style={{
                   position: "relative",
-                  color: "#DFFC8E",
+                  color: "var(--color-nav-action)",
                   fontWeight: 600,
                   fontSize: 12.5,
                   minHeight: 44,
                   paddingLeft: 6,
+                  flex: "none",
                 }}
                 onClick={() => {
                   haptic.tap();

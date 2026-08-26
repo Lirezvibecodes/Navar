@@ -13,12 +13,13 @@ import {
   Portal,
   Screen,
   Skeleton,
+  TextField,
 } from "../components/ui";
 import { CloseIcon, ListIcon, SearchIcon, ShuffleIcon, TrashIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
-import { trackArtist, trackTitle } from "../lib/format";
+import { pluralise, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
 import type { Track } from "../types";
 
@@ -59,7 +60,7 @@ export function CrateView({
   const { tracks, loading, owns, setFavorite, dropTracks, putTrack, playlists } =
     useLibrary();
   const { current, isPlaying, playFrom, setShuffle } = usePlayer();
-  const { toast, undoToast, setToastLift } = useToast();
+  const { errorToast, undoToast, setToastLift } = useToast();
 
   const [tab, setTab] = useState<"all" | "unsorted">(filter);
   const [sort, setSort] = useState<Sort>("recent");
@@ -141,7 +142,7 @@ export function CrateView({
     setSelection(null);
     try {
       const { deleted } = await api.deleteTracks(ids);
-      undoToast(`Removed ${deleted.length} tracks`, () => {
+      undoToast(`Removed ${pluralise(deleted.length, "track")}`, () => {
         void api.restoreTracks(deleted).then(() => {
           // Restored rows come back from the server rather than from the copy
           // held here, because the server owns their playlist membership.
@@ -149,7 +150,7 @@ export function CrateView({
         });
       });
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not remove those");
+      errorToast(err, "Could not remove those");
     }
   };
 
@@ -177,22 +178,13 @@ export function CrateView({
 
         {searching ? (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <input
+            <TextField
               ref={searchRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={setQuery}
               placeholder="Search your crate"
-              className="nav-glass"
-              style={{
-                flex: 1,
-                height: 38,
-                borderRadius: 19,
-                padding: "0 14px",
-                fontSize: 13,
-                color: "#fff",
-                border: 0,
-                outline: "none",
-              }}
+              height={38}
+              autoCorrect={false}
             />
             <GhostButton
               icon={CloseIcon}
@@ -327,7 +319,7 @@ function SortControl({
         flex: "none",
         height: 44,
         fontSize: 11,
-        color: "rgba(255,255,255,.52)",
+        color: "var(--color-nav-muted)",
         paddingLeft: 8,
       }}
     >
@@ -374,7 +366,7 @@ function SelectionBar({
           left: 0,
           right: 0,
           height: "var(--tg-viewport-height, 100%)",
-          zIndex: 40,
+          zIndex: "var(--z-action-bar)",
           display: "flex",
           flexDirection: "column",
           justifyContent: "flex-end",
@@ -386,8 +378,10 @@ function SelectionBar({
           style={{
             // --nav-bottomnav-h is published from the nav's own offsetHeight and
             // already carries the safe inset; adding it again lifts the bar by a
-            // whole home indicator.
-            marginBottom: "var(--nav-bottomnav-h)",
+            // whole home indicator. The player bar is between the two when
+            // something is playing, and is 0 when nothing is.
+            marginBottom:
+              "calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h))",
             padding: "8px 12px 0",
             pointerEvents: "auto",
           }}
@@ -403,14 +397,36 @@ function SelectionBar({
               padding: "0 8px 0 14px",
             }}
           >
+            {/* The way out of selection mode is always the same control in the
+                same place. It used to become the count as soon as anything was
+                ticked, which left the mode with no visible exit at exactly the
+                moment somebody might want one. The count reads in the room
+                that was empty anyway. */}
             <button
               className="nav-press"
               onClick={onCancel}
-              style={{ fontSize: 12.5, fontWeight: 600, minHeight: 44, flex: "none" }}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                minHeight: 44,
+                flex: "none",
+              }}
             >
-              {count === 0 ? "Cancel" : `${count} selected`}
+              Cancel
             </button>
-            <span style={{ flex: 1 }} />
+            <span
+              aria-live="polite"
+              className="nav-clip"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                paddingLeft: 10,
+                fontSize: 12,
+                color: "var(--color-nav-muted)",
+              }}
+            >
+              {count === 0 ? "" : `${count} selected`}
+            </span>
             <GhostButton onClick={onSelectAll} height={38} width={54}>
               All
             </GhostButton>

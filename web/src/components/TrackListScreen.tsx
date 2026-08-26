@@ -37,6 +37,8 @@ export function TrackListScreen({
   playlistName,
   emptyTitle = "Nothing here yet",
   emptyBody,
+  error,
+  onRetry,
   actions,
 }: {
   nav: Navigation;
@@ -55,6 +57,13 @@ export function TrackListScreen({
   playlistName?: string;
   emptyTitle?: string;
   emptyBody?: string;
+  /**
+   * The fetch failed. An empty list and a failed one look identical from here
+   * — both arrive as zero rows — and drawing "Empty playlist. Add some tracks"
+   * over a request that timed out is the app lying about the user's own data.
+   */
+  error?: Error | null;
+  onRetry?: () => void;
   /** Extra header controls — rename, visibility, follow. */
   actions?: ReactNode;
 }) {
@@ -94,7 +103,11 @@ export function TrackListScreen({
               {name}
             </div>
             <div
-              style={{ fontSize: 11.5, color: "rgba(255,255,255,.52)", marginTop: 5 }}
+              style={{
+                fontSize: 12,
+                color: "var(--color-nav-muted)",
+                marginTop: 5,
+              }}
             >
               {subtitle}
             </div>
@@ -126,6 +139,13 @@ export function TrackListScreen({
         <div style={{ marginTop: 14 }}>
           {loading ? (
             <Skeleton />
+          ) : error && tracks.length === 0 ? (
+            <Empty
+              title="These tracks did not load"
+              body="The list is still there. This was the connection, most likely."
+              action={onRetry ? "Try again" : undefined}
+              onAction={onRetry}
+            />
           ) : tracks.length === 0 ? (
             <Empty title={emptyTitle} body={emptyBody} />
           ) : (

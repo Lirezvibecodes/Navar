@@ -25,7 +25,7 @@ export function FriendLibraryView({
   nav: Navigation;
   friendId: number;
 }) {
-  const { toast } = useToast();
+  const { errorToast } = useToast();
   const [person, setPerson] = useState<Person | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,15 +41,15 @@ export function FriendLibraryView({
         setPlaylists(rows);
       })
       .catch((err: unknown) =>
-        toast(err instanceof Error ? err.message : "Could not load that library")
+        errorToast(err, "Could not load that library")
       )
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [friendId, toast]);
+  }, [friendId, errorToast]);
 
-  const handle = person ? personName(person) : "Their library";
+  const handle = person ? personName(person) : "Their Library";
 
   return (
     <Screen>
@@ -70,7 +70,7 @@ export function FriendLibraryView({
           >
             {handle}
           </div>
-          <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.52)", marginTop: 3 }}>
+          <div style={{ fontSize: 11.5, color: "var(--color-nav-muted)", marginTop: 3 }}>
             {pluralise(playlists.length, "shared playlist")}
           </div>
         </div>
@@ -91,7 +91,7 @@ export function FriendLibraryView({
               className="nav-press nav-row-in"
               onClick={() => {
                 haptic.tap();
-                nav.push({ type: "playlist", id: playlist.id });
+                nav.push({ type: "playlist", id: playlist.id, name: playlist.name });
               }}
               style={
                 {
@@ -123,14 +123,14 @@ export function FriendLibraryView({
                   style={{
                     display: "block",
                     fontSize: 11,
-                    color: "rgba(255,255,255,.5)",
+                    color: "var(--color-nav-muted)",
                     marginTop: 2,
                   }}
                 >
                   {pluralise(playlist.track_count ?? 0, "track")}
                 </span>
               </span>
-              <ChevronRightIcon size={15} style={{ color: "rgba(255,255,255,.32)" }} />
+              <ChevronRightIcon size={15} style={{ color: "var(--color-nav-faint)" }} />
             </button>
           ))
         )}

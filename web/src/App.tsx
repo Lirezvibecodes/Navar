@@ -50,16 +50,25 @@ export interface Navigation {
   openPlayer: () => void;
 }
 
+/**
+ * What the top bar says on each screen.
+ *
+ * Two words in here mean two different things and are not interchangeable.
+ * The Crate is every track you have — the flat list everything lands in. Your
+ * Library is what you have made of it: playlists, albums, artists. A screen
+ * that says "library" when it means the crate sends people looking for their
+ * songs in the one place that does not list them.
+ */
 const TITLES: Record<View["type"], string> = {
   home: "Navaar",
-  library: "Library",
+  library: "Your Library",
   crate: "The Crate",
   playlist: "Playlist",
   artist: "Artist",
   album: "Album",
   social: "Social",
   profile: "Profile",
-  friendLibrary: "Library",
+  friendLibrary: "Their Library",
 };
 
 function Shell({ me }: { me: Me }) {
@@ -68,8 +77,10 @@ function Shell({ me }: { me: Me }) {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [searchOnOpen, setSearchOnOpen] = useState(false);
   // Bumped on every navigation so the incoming screen remounts and replays its
-  // entrance; without it React reuses the subtree and nothing animates.
-  const seq = useRef(0);
+  // entrance; without it React reuses the subtree and nothing animates. It is
+  // state rather than a ref because the render reads it as a key, and a ref
+  // read during render is not guaranteed to be the value this render meant.
+  const [seq, setSeq] = useState(0);
 
   const { tracks, loading, error, reload } = useLibrary();
   const { current, restoreLast } = usePlayer();
@@ -77,19 +88,19 @@ function Shell({ me }: { me: Me }) {
   const view = stack[stack.length - 1];
 
   const push = useCallback((next: View) => {
-    seq.current += 1;
+    setSeq((n) => n + 1);
     setDirection("push");
     setStack((s) => [...s, next]);
   }, []);
 
   const pop = useCallback(() => {
-    seq.current += 1;
+    setSeq((n) => n + 1);
     setDirection("pop");
     setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   }, []);
 
   const selectTab = useCallback((tab: RootTab) => {
-    seq.current += 1;
+    setSeq((n) => n + 1);
     setDirection("push");
     setStack([{ type: tab } as View]);
   }, []);
@@ -145,7 +156,7 @@ function Shell({ me }: { me: Me }) {
       case "crate":
         return <CrateView nav={nav} filter={view.filter} autoSearch={searchOnOpen} />;
       case "playlist":
-        return <PlaylistView nav={nav} id={view.id} />;
+        return <PlaylistView nav={nav} id={view.id} name={view.name} />;
       case "artist":
       case "album":
         return <CollectionView nav={nav} kind={view.type} name={view.name} />;
@@ -172,8 +183,12 @@ function Shell({ me }: { me: Me }) {
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        // position, but deliberately no z-index. An element with one is a
+        // stacking context, and every floating layer inside it — the player,
+        // the sheets, the toast — would then be sorted against each other
+        // inside this box rather than against the app. The tokens in
+        // index.css are the whole ordering.
         position: "relative",
-        zIndex: 1,
       }}
     >
       <TopBar
@@ -192,7 +207,7 @@ function Shell({ me }: { me: Me }) {
       />
 
       <div
-        key={seq.current}
+        key={seq}
         className={direction === "push" ? "nav-view-push" : "nav-view-pop"}
         style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
       >
@@ -209,7 +224,7 @@ function Shell({ me }: { me: Me }) {
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 30,
+          zIndex: "var(--z-bottom-bar)",
           pointerEvents: "none",
         }}
       >

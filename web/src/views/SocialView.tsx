@@ -3,7 +3,15 @@ import * as api from "../api";
 import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
-import { ActionButton, Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
+import { PersonTile } from "../components/PersonTile";
+import {
+  ActionButton,
+  Empty,
+  Screen,
+  SectionHeader,
+  Skeleton,
+  TextField,
+} from "../components/ui";
 import { UserCheckIcon, UserPlusIcon } from "../icons";
 import { useToast } from "../context/ToastContext";
 import {
@@ -45,7 +53,7 @@ const ACTIVITY_REFRESH_MS = 30_000;
 const SEARCH_DEBOUNCE_MS = 250;
 
 export function SocialView({ nav }: { nav: Navigation }) {
-  const { toast } = useToast();
+  const { toast, errorToast } = useToast();
   // Seeded from the cache so that opening this tab a second time shows the
   // feed that was there when it closed, rather than a skeleton over the same
   // rows. Whatever is seeded is then revalidated by the load below.
@@ -91,11 +99,11 @@ export function SocialView({ nav }: { nav: Navigation }) {
         );
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not load your friends");
+      errorToast(err, "Could not load your friends");
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [errorToast]);
 
   useEffect(() => {
     void load();
@@ -183,7 +191,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
       haptic.success();
       return true;
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not accept that");
+      errorToast(err, "Could not accept that");
       void load();
       return false;
     }
@@ -206,7 +214,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
       const link = await api.friendInviteLink();
       if (!shareLink(link, "Add me on Navaar")) toast(link);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not make an invite link");
+      errorToast(err, "Could not make an invite link");
     }
   };
 
@@ -228,26 +236,12 @@ export function SocialView({ nav }: { nav: Navigation }) {
   return (
     <Screen>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-        <input
+        <TextField
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Find someone by name"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          className="nav-glass"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            height: 38,
-            borderRadius: 19,
-            padding: "0 14px",
-            fontSize: 13,
-            color: "#fff",
-            border: 0,
-            outline: "none",
-            fontFamily: "inherit",
-          }}
+          onChange={setQuery}
+          placeholder="Find someone by their @name"
+          height={38}
+          autoCorrect={false}
         />
       </div>
 
@@ -280,7 +274,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
                     <AddFriendButton userId={person.telegram_user_id} />
                   ) : person.state === "pending_out" ? (
                     <ActionButton grow={false} disabled onClick={() => undefined}>
-                      Pending
+                      Requested
                     </ActionButton>
                   ) : person.state === "pending_in" ? (
                     <ActionButton
@@ -321,53 +315,13 @@ export function SocialView({ nav }: { nav: Navigation }) {
           <SectionHeader title="Listening now" spaceAbove={22} />
           <div className="nav-shelf" style={{ gap: 12 }}>
             {listening.map((row, i) => (
-              <button
+              <PersonTile
                 key={row.person.telegram_user_id}
-                className="nav-press nav-row-in"
-                onClick={() => {
-                  haptic.tap();
-                  openProfile(row.person.telegram_user_id);
-                }}
-                style={
-                  {
-                    "--i": i,
-                    width: 64,
-                    flex: "none",
-                    textAlign: "center",
-                  } as React.CSSProperties
-                }
-              >
-                <div style={{ display: "flex", justifyContent: "center" }}>
-                  <Avatar
-                    userId={row.person.telegram_user_id}
-                    username={row.person.handle ?? row.person.username}
-                    hasAvatar={row.person.has_avatar}
-                    size={52}
-                    ring
-                  />
-                </div>
-                <span
-                  className="nav-clip"
-                  style={{
-                    display: "block",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    marginTop: 6,
-                  }}
-                >
-                  {personName(row.person)}
-                </span>
-                <span
-                  className="nav-clip"
-                  style={{
-                    display: "block",
-                    fontSize: 10.5,
-                    color: "var(--color-nav-muted)",
-                  }}
-                >
-                  {row.track ? trackTitle(row.track) : ""}
-                </span>
-              </button>
+                person={row.person}
+                line={row.track ? trackTitle(row.track) : undefined}
+                index={i}
+                onOpen={() => openProfile(row.person.telegram_user_id)}
+              />
             ))}
           </div>
         </>
@@ -383,7 +337,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
               index={i}
               onOpen={() => {
                 if (item.kind === "shared" && item.playlist) {
-                  nav.push({ type: "playlist", id: item.playlist.id });
+                  nav.push({ type: "playlist", id: item.playlist.id, name: item.playlist.name });
                   return;
                 }
                 openProfile(item.person.telegram_user_id);
@@ -527,7 +481,7 @@ function ActivityRow({
         size={26}
       />
       <span
-        style={{ fontSize: 10.5, color: "var(--color-nav-faint)", flex: "none" }}
+        style={{ fontSize: 11, color: "var(--color-nav-faint)", flex: "none" }}
       >
         {formatAge(item.at)}
       </span>
@@ -615,7 +569,7 @@ function PersonRow({
       {action ?? (
         <UserCheckIcon
           size={16}
-          style={{ color: "rgba(255,255,255,.3)", flex: "none" }}
+          style={{ color: "var(--color-nav-faint)", flex: "none" }}
         />
       )}
     </div>
@@ -630,13 +584,13 @@ export function AddFriendButton({
   userId: string | number;
   onDone?: () => void;
 }) {
-  const { toast } = useToast();
+  const { errorToast } = useToast();
   const [state, setState] = useState<"idle" | "sent">("idle");
 
   if (state === "sent") {
     return (
       <ActionButton grow={false} disabled onClick={() => undefined}>
-        Pending
+        Requested
       </ActionButton>
     );
   }
@@ -656,7 +610,7 @@ export function AddFriendButton({
             onDone?.();
           })
           .catch((err: unknown) =>
-            toast(err instanceof Error ? err.message : "Could not send that request")
+            errorToast(err, "Could not send that request")
           );
       }}
     >

@@ -8,7 +8,14 @@ export type View =
   | { type: "home" }
   | { type: "library" }
   | { type: "crate"; filter: "all" | "unsorted" }
-  | { type: "playlist"; id: string }
+  /**
+   * `name` is not a convenience. Your own playlists are in the library, so the
+   * header can look theirs up — but a friend's playlist, or one opened from an
+   * activity feed, is not in your library and never will be. Without the name
+   * travelling with the push, every one of those screens was titled
+   * "Playlist". Whatever opened the link knew the name; it passes it on.
+   */
+  | { type: "playlist"; id: string; name?: string }
   | { type: "artist"; name: string }
   | { type: "album"; name: string }
   | { type: "social" }

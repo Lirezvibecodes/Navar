@@ -46,11 +46,11 @@ export function TopBar({
           className="nav-clip"
           style={{
             flex: 1,
-            fontSize: 10.5,
+            fontSize: 11,
             fontWeight: 600,
             letterSpacing: "0.14em",
             textTransform: "uppercase",
-            color: "rgba(255,255,255,.5)",
+            color: "var(--color-nav-muted)",
           }}
         >
           {title}

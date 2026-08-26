@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ChooseName } from "./ChooseName";
 import { ActionButton } from "./ui";
 import { CrateIcon, HeadphonesIcon, SocialIcon, type IconProps } from "../icons";
+import { scrollBehavior } from "../lib/motion";
 import { haptic } from "../telegram";
 import type { Me } from "../types";
 
@@ -117,7 +118,10 @@ export function Welcome({ onDone }: { onDone: () => void }) {
     const track = trackRef.current;
     if (!track) return;
     haptic.press();
-    track.scrollTo({ left: index * track.clientWidth, behavior: "smooth" });
+    track.scrollTo({
+      left: index * track.clientWidth,
+      behavior: scrollBehavior(),
+    });
   };
 
   return (
@@ -259,7 +263,7 @@ function Dots({
             border: 0,
             borderRadius: 3,
             background:
-              i === active ? "var(--color-nav-action)" : "rgba(255,255,255,.25)",
+              i === active ? "var(--color-nav-action)" : "var(--color-nav-ghost)",
             // A width transition, deliberately. It relayouts three 6px boxes
             // once per swipe, and every way of faking it with a transform
             // either changes the gaps or needs a second element sliding behind

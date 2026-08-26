@@ -73,7 +73,7 @@ export function BottomNav({
         padding: "8px 12px 12px",
         paddingBottom: "calc(12px + var(--tg-safe-bottom))",
         position: "relative",
-        zIndex: 30,
+        zIndex: "var(--z-bottom-bar)",
       }}
     >
       {TABS.map(({ id, label, icon: Icon }) => {

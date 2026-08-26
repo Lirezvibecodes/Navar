@@ -144,7 +144,7 @@ export function TrackRow({
               justifyContent: "center",
               color: "#0A0A0A",
               background: selected ? "var(--color-nav-action)" : "transparent",
-              border: selected ? "none" : "1.5px solid rgba(255,255,255,.28)",
+              border: selected ? "none" : "1.5px solid var(--color-nav-faint)",
               transition:
                 "background-color var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease)",
             }}
@@ -194,8 +194,8 @@ export function TrackRow({
               alignItems: "center",
               gap: 5,
               marginTop: 1,
-              fontSize: 11,
-              color: "rgba(255,255,255,.52)",
+              fontSize: 11.5,
+              color: "var(--color-nav-muted)",
               minWidth: 0,
             }}
           >
@@ -218,7 +218,11 @@ export function TrackRow({
       </button>
 
       {selectable ? null : (
-        <>
+        // One group with no gap between the two, so each glyph can carry a 40px
+        // target of its own. At 30px and 26px they were the two smallest hit
+        // areas in the app and they sat 11px apart, which is close enough that
+        // a thumb aiming for the heart opened the menu instead.
+        <div style={{ display: "flex", flex: "none", alignItems: "center" }}>
           {onMenu ? (
             <button
               aria-label="More"
@@ -228,13 +232,13 @@ export function TrackRow({
                 onMenu();
               }}
               style={{
-                width: 30,
+                width: 40,
                 height: 44,
                 flex: "none",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "rgba(255,255,255,.35)",
+                color: "var(--color-nav-faint)",
               }}
             >
               <DotsIcon size={17} />
@@ -253,7 +257,7 @@ export function TrackRow({
                 onToggleFavorite();
               }}
               style={{
-                width: 26,
+                width: 40,
                 height: 44,
                 flex: "none",
                 display: "flex",
@@ -261,13 +265,13 @@ export function TrackRow({
                 justifyContent: "center",
                 color: favorited
                   ? "var(--color-nav-action)"
-                  : "rgba(255,255,255,.22)",
+                  : "var(--color-nav-ghost)",
               }}
             >
-              <HeartIcon size={15} />
+              <HeartIcon size={16} />
             </button>
           ) : null}
-        </>
+        </div>
       )}
     </div>
   );

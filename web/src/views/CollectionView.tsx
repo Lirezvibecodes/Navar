@@ -57,7 +57,7 @@ export function CollectionView({
       sourceKey={`${kind}:${name}`}
       sourceLabel={name}
       emptyTitle="Nothing under that name"
-      emptyBody="The tracks that carried this tag are no longer in your library."
+      emptyBody="The tracks that carried this tag are no longer in your Crate."
     />
   );
 }

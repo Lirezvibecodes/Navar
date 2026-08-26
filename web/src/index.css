@@ -88,6 +88,10 @@
   --color-nav-muted: rgba(255, 255, 255, 0.52);
   --color-nav-faint: rgba(255, 255, 255, 0.32);
   --color-nav-ghost: rgba(255, 255, 255, 0.22);
+  /* The one red in the app: leaving a playlist, removing a track, a request
+     that failed. Two near-identical reds were in circulation (#FF8A8A and
+     #ff8f8f) and nothing distinguished them but the file they were typed in. */
+  --color-nav-danger: #ff8f8f;
 
   --font-display: "Pixelify Sans", monospace;
   --font-sans: "General Sans", ui-sans-serif, system-ui, sans-serif;
@@ -131,6 +135,17 @@
   /* The top bar floats over the scrolling content rather than sitting above
      it, so every scroll container has to reserve the room itself. */
   --nav-topbar-h: 52px;
+
+  /* Every layer that floats over a screen, in one place and in paint order.
+     These were six literals scattered across six components, which is how the
+     Crate's selection bar ended up painting on top of the full player. Nothing
+     may invent a seventh value: if a thing floats, it is one of these. */
+  --z-topbar: 25;
+  --z-bottom-bar: 30;
+  --z-action-bar: 40;
+  --z-player: 60;
+  --z-sheet: 70;
+  --z-toast: 80;
 }
 
 /* ---------------------------------------------------------------------------
@@ -279,10 +294,6 @@ body {
   }
 }
 
-.nav-card {
-  background: linear-gradient(180deg, var(--color-nav-card-top), var(--color-nav-card-bottom));
-}
-
 /* The top bar.
    
    It is an overlay, not a row above the content: the scroll container starts
@@ -299,7 +310,7 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 25;
+  z-index: var(--z-topbar);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -485,6 +496,41 @@ button {
   cursor: pointer;
 }
 
+/* Focus.
+
+   Every control in the app used to clear the UA focus ring and put nothing in
+   its place, which is fine for the thumb it was designed for and leaves a
+   keyboard with no cursor at all — and Telegram Desktop runs this exact Mini
+   App with a real keyboard attached. :focus-visible is the whole answer: the
+   browser only matches it when the user is actually navigating by keyboard, so
+   a tap never sees the ring and a Tab key never loses its place. Outlines
+   follow border-radius, so the ring traces the pill rather than boxing it. */
+:focus-visible {
+  outline: 2px solid var(--color-nav-action);
+  outline-offset: 2px;
+}
+
+/* Text fields are the exception, because a field matches :focus-visible even
+   when it was tapped — that is the spec, and it is right, since the keyboard
+   is about to open either way. A ring floating 2px off a glass pill reads as
+   an error state, so the field takes its focus on the inside edge instead. */
+.nav-field {
+  border: 0;
+  color: var(--color-nav-text);
+  font-family: inherit;
+  transition: box-shadow var(--dur-state) var(--ease);
+}
+.nav-field::placeholder {
+  color: var(--color-nav-faint);
+}
+.nav-field:focus,
+.nav-field:focus-visible {
+  outline: none;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1.5px rgba(223, 252, 142, 0.55);
+}
+
 /* Truncation is the norm here: every row is a fixed height and track titles
    are arbitrary length. */
 .nav-clip {
@@ -501,6 +547,18 @@ button {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Three lines. Only the toast uses it, and only because a server error is a
+   sentence somebody else wrote: one line and an ellipsis turns "That name is
+   already taken" into "That name is alr…", which is worse than no message. */
+.nav-clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
@@ -522,44 +580,21 @@ button {
     opacity: 0;
   }
 }
-@keyframes nav-push-out {
-  to {
-    transform: scale(0.97);
-    opacity: 0;
-  }
-}
 @keyframes nav-pop-in {
   from {
     transform: scale(0.97);
     opacity: 0;
   }
 }
-@keyframes nav-pop-out {
-  to {
-    transform: translate3d(22px, 0, 0);
-    opacity: 0;
-  }
-}
-
 .nav-view-push {
   animation: nav-push-in var(--dur-view) var(--ease) both;
 }
 .nav-view-pop {
   animation: nav-pop-in calc(var(--dur-view) - 60ms) var(--ease) both;
 }
-/* The leaving screen is rendered for exactly as long as its animation runs.
-   pointer-events go first so a fast double tap cannot hit a dead screen. */
-.nav-view-leaving {
-  pointer-events: none;
-}
-.nav-view-leaving.nav-view-push {
-  animation-name: nav-push-out;
-  animation-timing-function: var(--ease-in);
-}
-.nav-view-leaving.nav-view-pop {
-  animation-name: nav-pop-out;
-  animation-timing-function: var(--ease-in);
-}
+/* There is deliberately no leaving-screen animation. Keeping the outgoing view
+   mounted for 300ms means holding two screens' worth of data and two sets of
+   fetches alive to animate something the incoming screen already covers. */
 
 /* --- The focal moment -------------------------------------------------------
 
@@ -859,11 +894,6 @@ button {
   transform: scale(0.7);
 }
 
-/* Selection mode. Rows shift right to make room for the checkbox instead of
-   the checkbox appearing on top of them. */
-.nav-select-shift {
-  transition: transform var(--dur-view) var(--ease);
-}
 
 /* ---------------------------------------------------------------------------
    Who put it here
@@ -967,6 +997,10 @@ button {
   *::after {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
+    /* Without this the staggered list still waits out its delay, so a reduced
+       motion user watches rows appear one at a time with no animation to
+       explain why — the stagger without the motion is just latency. */
+    animation-delay: 0ms !important;
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }

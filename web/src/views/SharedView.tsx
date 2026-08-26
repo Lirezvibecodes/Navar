@@ -95,18 +95,21 @@ function SharedHeader() {
   return (
     <header className="nav-topbar">
       <span
+        // No tracking of its own: .nav-display already sets the pixel face's,
+        // and the same word set two ways in one product is the kind of thing
+        // you notice without being able to say why.
         className="nav-display"
-        style={{ flex: 1, fontSize: 17, letterSpacing: "-0.02em" }}
+        style={{ flex: 1, fontSize: 17 }}
       >
         Navaar
       </span>
       <span
         style={{
-          fontSize: 9.5,
+          fontSize: 11,
           fontWeight: 600,
           letterSpacing: "0.14em",
           textTransform: "uppercase",
-          color: "rgba(255,255,255,.42)",
+          color: "var(--color-nav-muted)",
         }}
       >
         Shared
@@ -218,7 +221,7 @@ function SharedPlaylistBody({
               style={{
                 margin: "6px 0 0",
                 fontSize: 11.5,
-                color: "rgba(255,255,255,.52)",
+                color: "var(--color-nav-muted)",
               }}
             >
               {playlist.owner_name ? `@${playlist.owner_name} · ` : ""}
@@ -353,7 +356,7 @@ function SharedRow({
             display: "block",
             marginTop: 1,
             fontSize: 11,
-            color: "rgba(255,255,255,.52)",
+            color: "var(--color-nav-muted)",
           }}
         >
           {track.artist ?? "Unknown artist"}
@@ -369,7 +372,7 @@ function SharedRow({
           width: 30,
           display: "grid",
           placeItems: "center",
-          color: current ? "var(--color-nav-action)" : "rgba(255,255,255,.3)",
+          color: current ? "var(--color-nav-action)" : "var(--color-nav-faint)",
         }}
       >
         {playing ? <PauseIcon size={15} /> : <PlayIcon size={15} />}
@@ -408,7 +411,7 @@ function SharedFooter({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 30,
+        zIndex: "var(--z-bottom-bar)",
         padding: "0 12px calc(12px + env(safe-area-inset-bottom, 0px))",
         display: "flex",
         flexDirection: "column",
@@ -466,8 +469,8 @@ function SharedFooter({
               className="nav-clip"
               style={{
                 display: "block",
-                fontSize: 10.5,
-                color: "rgba(255,255,255,.52)",
+                fontSize: 11,
+                color: "var(--color-nav-muted)",
               }}
             >
               {current.artist ?? "Unknown artist"}

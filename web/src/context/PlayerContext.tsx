@@ -57,6 +57,17 @@ const STATUS_HEARTBEAT_MS = 4 * 60_000;
 /** How much of a track has to be heard before it counts as played. */
 const PLAY_LOG_SECONDS = 30;
 
+/**
+ * What the audio element is doing, beyond playing or paused.
+ *
+ * The element can fail in ways that look exactly like a pause: a Telegram file
+ * id that has expired, a proxy that 404s, a phone that lost signal halfway
+ * through a stream. Before this existed all three paths ended in
+ * `.catch(() => setIsPlaying(false))` and the app drew a play button, so the
+ * user pressed it again, and again. `failed` is what lets the UI say so.
+ */
+export type PlaybackStatus = "idle" | "loading" | "ready" | "failed";
+
 interface ResumeState {
   trackId: string;
   position: number;
@@ -71,6 +82,8 @@ interface PlayerApi {
   contextLabel: string | null;
 
   isPlaying: boolean;
+  /** Buffering, playable, or broken. See PlaybackStatus. */
+  status: PlaybackStatus;
   position: number;
   duration: number;
   shuffle: boolean;
@@ -95,6 +108,9 @@ interface PlayerApi {
   setShuffle: (on: boolean) => void;
   cycleRepeat: () => void;
   setSleepMinutes: (minutes: number | null) => void;
+
+  /** Fetches the current track again from where it stopped. */
+  retry: () => void;
 
   /** Puts back the last track and position from a previous session. */
   restoreLast: (library: Track[]) => void;
@@ -128,6 +144,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [cursor, setCursor] = useState(-1);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [status, setStatus] = useState<PlaybackStatus>("idle");
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [shuffle, setShuffleState] = useState(false);
@@ -141,6 +158,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   // --- Loading a track ------------------------------------------------------
 
+  /**
+   * play() rejects for three quite different reasons and they must not be
+   * treated alike: the autoplay policy refused (the user only has to press
+   * play), a second load replaced this one mid-flight (nothing is wrong), or
+   * the media itself is unplayable. Only the last one sets an error object on
+   * the element, so that is what decides whether the UI calls it a failure.
+   */
+  const playAudio = useCallback((audio: HTMLAudioElement) => {
+    void audio.play().catch(() => {
+      setIsPlaying(false);
+      if (audio.error) setStatus("failed");
+    });
+  }, []);
+
   const load = useCallback((track: Track | null, autoplay: boolean, at = 0) => {
     setCurrent(track);
     setPosition(at);
@@ -153,8 +184,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeAttribute("src");
       audio.load();
       setIsPlaying(false);
+      setStatus("idle");
       return;
     }
+
+    setStatus("loading");
 
     audio.src = trackStreamUrl(track.id);
     audio.currentTime = 0;
@@ -167,8 +201,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       };
       audio.addEventListener("loadedmetadata", seekOnce);
     }
-    if (autoplay) void audio.play().catch(() => setIsPlaying(false));
-  }, []);
+    if (autoplay) playAudio(audio);
+  }, [playAudio]);
 
   // --- Advancing ------------------------------------------------------------
 
@@ -247,9 +281,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audio = audioRef.current;
     if (!audio || !current) return;
     haptic.tap();
-    if (audio.paused) void audio.play().catch(() => setIsPlaying(false));
+    if (audio.paused) playAudio(audio);
     else audio.pause();
-  }, [current]);
+  }, [current, playAudio]);
 
   const seek = useCallback((seconds: number) => {
     const audio = audioRef.current;
@@ -330,6 +364,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setSleepAt(minutes == null ? null : Date.now() + minutes * 60_000);
   }, []);
 
+  /**
+   * Assigning src again always restarts the resource selection algorithm, even
+   * to the same URL — which is the point, because the usual cause of a failure
+   * here is a Telegram file id the server has since refreshed.
+   */
+  const retry = useCallback(() => {
+    if (!current) return;
+    haptic.tap();
+    load(current, true, position);
+  }, [current, position, load]);
+
   // --- Audio element wiring -------------------------------------------------
 
   useEffect(() => {
@@ -342,10 +387,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    // `playing` is the only event that means sound is actually coming out;
+    // `canplay` means enough has arrived to start. Either clears a spinner.
+    const onReady = () => setStatus("ready");
+    // Both fire when the buffer runs dry mid-stream, which on a phone changing
+    // cells is a routine event and not a failure — it just needs to say so.
+    const onWaiting = () => setStatus("loading");
+    const onError = () => {
+      setStatus("failed");
+      setIsPlaying(false);
+    };
     const onEnded = () => {
       if (repeat === "one") {
         audio.currentTime = 0;
-        void audio.play().catch(() => setIsPlaying(false));
+        playAudio(audio);
         return;
       }
       advance(true);
@@ -355,15 +410,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
+    audio.addEventListener("playing", onReady);
+    audio.addEventListener("canplay", onReady);
+    audio.addEventListener("waiting", onWaiting);
+    audio.addEventListener("stalled", onWaiting);
+    audio.addEventListener("error", onError);
     audio.addEventListener("ended", onEnded);
     return () => {
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("playing", onReady);
+      audio.removeEventListener("canplay", onReady);
+      audio.removeEventListener("waiting", onWaiting);
+      audio.removeEventListener("stalled", onWaiting);
+      audio.removeEventListener("error", onError);
       audio.removeEventListener("ended", onEnded);
     };
-  }, [advance, repeat]);
+  }, [advance, repeat, playAudio]);
 
   // Confirm before closing only while something is actually playing. A stray
   // swipe should not end a song; confirming an exit the user meant is friction.
@@ -572,6 +637,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       contextNext,
       contextLabel: source?.label ?? null,
       isPlaying,
+      status,
       position,
       duration,
       shuffle,
@@ -590,6 +656,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setShuffle,
       cycleRepeat,
       setSleepMinutes,
+      retry,
       restoreLast,
     }),
     [
@@ -598,6 +665,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       contextNext,
       source,
       isPlaying,
+      status,
       position,
       duration,
       shuffle,
@@ -616,6 +684,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setShuffle,
       cycleRepeat,
       setSleepMinutes,
+      retry,
       restoreLast,
     ]
   );

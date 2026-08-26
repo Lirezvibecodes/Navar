@@ -61,7 +61,7 @@ export function ShareSheet({
   playlist: Playlist | undefined;
   onChange: (playlist: Playlist) => void;
 }) {
-  const { toast } = useToast();
+  const { toast, errorToast } = useToast();
   const [busy, setBusy] = useState(false);
   // Replacing the link cannot be undone and breaks whatever is already out
   // there, so the button asks once before it does it.
@@ -82,7 +82,7 @@ export function ShareSheet({
       onChange(await api.updatePlaylist(playlist.id, { visibility }));
       haptic.success();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not change that");
+      errorToast(err, "Could not change that");
     } finally {
       setBusy(false);
     }
@@ -101,7 +101,7 @@ export function ShareSheet({
       haptic.success();
       toast("The old link no longer works");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not make a new link");
+      errorToast(err, "Could not make a new link");
     } finally {
       setBusy(false);
     }
@@ -117,7 +117,14 @@ export function ShareSheet({
 
   return (
     <Sheet open={open} onClose={onClose} title="Who can see this">
-      <div style={{ padding: "0 6px" }}>
+      {/* Four mutually exclusive answers to one question. Without the group
+          role a screen reader reads them as four unrelated buttons and never
+          says how many there are or which one is on. */}
+      <div
+        role="radiogroup"
+        aria-label="Who can see this"
+        style={{ padding: "0 6px" }}
+      >
         {LEVELS.map((level) => (
           <LevelRow
             key={level.value}
@@ -201,7 +208,7 @@ function LevelRow({
           placeItems: "center",
           width: 22,
           height: 20,
-          color: chosen ? "var(--color-nav-action)" : "rgba(255,255,255,.42)",
+          color: chosen ? "var(--color-nav-action)" : "var(--color-nav-faint)",
         }}
       >
         <Icon size={16} />
@@ -222,9 +229,9 @@ function LevelRow({
           style={{
             display: "block",
             marginTop: 2,
-            fontSize: 11,
+            fontSize: 11.5,
             lineHeight: 1.45,
-            color: "rgba(255,255,255,.52)",
+            color: "var(--color-nav-muted)",
           }}
         >
           {level.body}

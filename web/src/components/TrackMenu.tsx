@@ -5,7 +5,14 @@ import { cacheKey, dropCache } from "../lib/cache";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
-import { ActionButton, GhostButton, Sheet, SheetDivider, SheetItem } from "./ui";
+import {
+  ActionButton,
+  GhostButton,
+  Sheet,
+  SheetDivider,
+  SheetItem,
+  TextField,
+} from "./ui";
 import { CollectionArt, Cover } from "./PixelArt";
 import {
   AlbumIcon,
@@ -19,7 +26,7 @@ import {
   TrashIcon,
   UserIcon,
 } from "../icons";
-import { trackArtist, trackTitle } from "../lib/format";
+import { pluralise, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
 
 /**
@@ -30,7 +37,7 @@ import { haptic } from "../telegram";
  * items move between screens has to be read every time instead of aimed at.
  *
  * The two ways a track can leave are the one place this menu works hard.
- * Taking it out of a playlist and deleting it from the library are not two
+ * Taking it out of a playlist and deleting it from the Crate are not two
  * strengths of the same action, so they no longer look like it: they use
  * different verbs, they carry different glyphs, they sit in different groups
  * with a rule between them, and only the one that is actually destructive is
@@ -65,7 +72,7 @@ export function TrackMenu({
   const { owns, tracks, putTrack, dropTracks, playlists, markInPlaylist } =
     useLibrary();
   const { queueNext, queueLast } = usePlayer();
-  const { toast, undoToast } = useToast();
+  const { toast, errorToast, undoToast } = useToast();
 
   const [adding, setAdding] = useState<Track | null>(null);
   const [editing, setEditing] = useState<Track | null>(null);
@@ -82,7 +89,7 @@ export function TrackMenu({
     try {
       await api.deleteTrack(t.id);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not remove that");
+      errorToast(err, "Could not remove that");
       return;
     }
     undoToast(`Removed ${trackTitle(t)}`, () => {
@@ -95,7 +102,7 @@ export function TrackMenu({
 
   /**
    * Keeping somebody else's track. No file moves — the server copies the row —
-   * so this is as quick as it looks, and what lands in the library is a copy of
+   * so this is as quick as it looks, and what lands in your Crate is a copy of
    * your own that survives the other person deleting theirs.
    */
   const saveToLibrary = async (t: Track) => {
@@ -108,13 +115,13 @@ export function TrackMenu({
       const had = tracks.some((row) => row.id === copy.id);
       putTrack(copy);
       haptic.success();
-      toast(had ? "Already in your library" : `Saved ${trackTitle(t)}`);
+      toast(had ? "Already in your Crate" : `Saved ${trackTitle(t)}`);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not save that");
+      errorToast(err, "Could not save that");
     }
   };
 
-  // The one membership change with no library row behind it: the track is
+  // The one membership change with no crate row behind it: the track is
   // still yours and still in the Crate, so nothing in LibraryContext moves and
   // there is no invalidation to inherit. Undoing it goes back through
   // markInPlaylist, which drops the same key again.
@@ -124,7 +131,7 @@ export function TrackMenu({
       await api.removeTracksFromPlaylist(playlistId, [t.id]);
       dropCache(cacheKey.playlistTracks(playlistId), cacheKey.home);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not remove that");
+      errorToast(err, "Could not remove that");
       return;
     }
     undoToast("Removed from playlist", () => {
@@ -166,7 +173,7 @@ export function TrackMenu({
             {owned ? null : (
               <SheetItem
                 icon={LibraryIcon}
-                label="Save to my library"
+                label="Save to my Crate"
                 onClick={() => void saveToLibrary(track)}
               />
             )}
@@ -221,7 +228,7 @@ export function TrackMenu({
                 <SheetDivider />
                 <SheetItem
                   icon={TrashIcon}
-                  label="Delete from library"
+                  label="Delete from my Crate"
                   destructive
                   onClick={() => void removeFromLibrary(track)}
                 />
@@ -265,7 +272,7 @@ export function AddToPlaylistSheet({
   onClose: () => void;
 }) {
   const { putPlaylist, markInPlaylist } = useLibrary();
-  const { toast } = useToast();
+  const { toast, errorToast } = useToast();
   const [creating, setCreating] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -292,7 +299,7 @@ export function AddToPlaylistSheet({
       );
       onClose();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not add those");
+      errorToast(err, "Could not add those");
     } finally {
       setBusy(false);
     }
@@ -308,7 +315,7 @@ export function AddToPlaylistSheet({
       setCreating("");
       await add(playlist);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not make that playlist");
+      errorToast(err, "Could not make that playlist");
       setBusy(false);
     }
   };
@@ -320,21 +327,11 @@ export function AddToPlaylistSheet({
       title={tracks.length === 1 ? trackTitle(tracks[0]) : `${tracks.length} tracks`}
     >
       <div style={{ display: "flex", gap: 8, padding: "0 8px 10px" }}>
-        <input
+        <TextField
           value={creating}
-          onChange={(e) => setCreating(e.target.value)}
+          onChange={setCreating}
           placeholder="New playlist"
-          className="nav-glass"
-          style={{
-            flex: 1,
-            height: 38,
-            borderRadius: 19,
-            padding: "0 14px",
-            fontSize: 13,
-            color: "#fff",
-            outline: "none",
-            border: 0,
-          }}
+          height={38}
         />
         <ActionButton
           grow={false}
@@ -345,7 +342,39 @@ export function AddToPlaylistSheet({
         </ActionButton>
       </div>
 
-      <div style={{ maxHeight: "44vh", overflowY: "auto" }}>
+      {playlists.length === 0 ? (
+        <p
+          style={{
+            margin: 0,
+            padding: "6px 14px 14px",
+            fontSize: 12.5,
+            lineHeight: 1.5,
+            color: "var(--color-nav-muted)",
+          }}
+        >
+          You have no playlists yet. Name one above and this track will be the
+          first thing in it.
+        </p>
+      ) : null}
+
+      {/* The list scrolls, and a scroller with a hard edge looks like a list
+          that ends there. The mask fades the last row out instead, which is the
+          only cue that there is more of it below the sheet. */}
+      <div
+        className="nav-scroll"
+        style={{
+          maxHeight: "44vh",
+          overflowY: "auto",
+          WebkitMaskImage:
+            playlists.length > 5
+              ? "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)"
+              : undefined,
+          maskImage:
+            playlists.length > 5
+              ? "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)"
+              : undefined,
+        }}
+      >
         {playlists.map((playlist) => (
           <button
             key={playlist.id}
@@ -374,10 +403,8 @@ export function AddToPlaylistSheet({
               <span className="nav-clip" style={{ display: "block", fontSize: 13 }}>
                 {playlist.name}
               </span>
-              <span
-                style={{ fontSize: 10.5, color: "rgba(255,255,255,.5)" }}
-              >
-                {playlist.track_count ?? 0} tracks
+              <span style={{ fontSize: 11, color: "var(--color-nav-muted)" }}>
+                {pluralise(playlist.track_count ?? 0, "track")}
               </span>
             </span>
           </button>
@@ -396,7 +423,7 @@ export function EditTrackSheet({
   onClose: () => void;
 }) {
   const { putTrack } = useLibrary();
-  const { toast } = useToast();
+  const { errorToast } = useToast();
   const [draft, setDraft] = useState<api.TrackEdit>({});
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -418,7 +445,7 @@ export function EditTrackSheet({
       putTrack(await api.uploadCover(track.id, file));
       haptic.success();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not set that artwork");
+      errorToast(err, "Could not set that artwork");
     } finally {
       setUploading(false);
       // Cleared so that picking the same file twice still fires a change.
@@ -449,7 +476,7 @@ export function EditTrackSheet({
       setDraft({});
       onClose();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not save that");
+      errorToast(err, "Could not save that");
     } finally {
       setBusy(false);
     }
@@ -491,7 +518,7 @@ export function EditTrackSheet({
                 gap: 6,
               }}
             >
-              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,.52)" }}>
+              <div style={{ fontSize: 11, color: "var(--color-nav-muted)" }}>
                 Artwork
               </div>
               <GhostButton
@@ -519,24 +546,16 @@ export function EditTrackSheet({
 
         {(["title", "artist", "album"] as const).map((field) => (
           <label key={field} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontSize: 10.5, color: "rgba(255,255,255,.52)" }}>
+            <span style={{ fontSize: 11, color: "var(--color-nav-muted)" }}>
               {field[0].toUpperCase() + field.slice(1)}
             </span>
-            <input
+            <TextField
               value={value(field)}
-              onChange={(e) =>
-                setDraft((d) => ({ ...d, [field]: e.target.value || null }))
+              onChange={(next) =>
+                setDraft((d) => ({ ...d, [field]: next || null }))
               }
-              className="nav-glass"
-              style={{
-                height: 40,
-                borderRadius: 12,
-                padding: "0 13px",
-                fontSize: 13.5,
-                color: "#fff",
-                outline: "none",
-                border: 0,
-              }}
+              fontSize={13.5}
+              style={{ flex: "none", width: "100%" }}
             />
           </label>
         ))}

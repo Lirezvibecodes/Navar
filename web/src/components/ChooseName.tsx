@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
-import { ActionButton } from "./ui";
+import { ActionButton, TextField } from "./ui";
 import { CheckIcon, SparklesIcon, TagIcon } from "../icons";
 import { haptic } from "../telegram";
 
@@ -124,38 +124,25 @@ export function ChooseName({
               fontWeight: 600,
               color: wellFormed
                 ? "var(--color-nav-action)"
-                : "rgba(255,255,255,.35)",
+                : "var(--color-nav-faint)",
               transition: "color 160ms ease",
             }}
           >
             @
           </span>
-          <input
+          <TextField
             ref={inputRef}
             value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
+            onChange={(next) => {
+              setValue(next);
               setError(null);
             }}
-            onKeyDown={(e) => e.key === "Enter" && void submit()}
+            onEnter={() => void submit()}
             placeholder="yourname"
             maxLength={21}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            className="nav-glass"
-            style={{
-              flex: 1,
-              minWidth: 0,
-              height: 44,
-              borderRadius: 22,
-              padding: "0 16px",
-              fontSize: 15,
-              color: "#fff",
-              border: 0,
-              outline: "none",
-              fontFamily: "inherit",
-            }}
+            autoCorrect={false}
+            height={44}
+            fontSize={15}
           />
         </div>
 
@@ -169,10 +156,10 @@ export function ChooseName({
             lineHeight: 1.45,
             minHeight: 32,
             color: error
-              ? "#ff8f8f"
+              ? "var(--color-nav-danger)"
               : wellFormed
                 ? "var(--color-nav-action)"
-                : "rgba(255,255,255,.42)",
+                : "var(--color-nav-muted)",
           }}
         >
           {error ??
@@ -217,7 +204,7 @@ function NameTag({ lit }: { lit: boolean }) {
           borderRadius: 20,
           display: "grid",
           placeItems: "center",
-          color: lit ? "var(--color-nav-action)" : "rgba(255,255,255,.5)",
+          color: lit ? "var(--color-nav-action)" : "var(--color-nav-muted)",
           boxShadow: lit
             ? "0 10px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(223,252,142,.35), 0 8px 26px rgba(223,252,142,.18)"
             : undefined,

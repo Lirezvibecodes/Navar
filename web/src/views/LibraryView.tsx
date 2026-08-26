@@ -36,7 +36,7 @@ import type { View } from "../view";
  */
 export function LibraryView({ nav }: { nav: Navigation }) {
   const { tracks, playlists, loading, putPlaylist } = useLibrary();
-  const { toast } = useToast();
+  const { errorToast } = useToast();
   const [tab, setTab] = useState<"all" | "albums" | "artists">("all");
   const [naming, setNaming] = useState(false);
 
@@ -48,9 +48,9 @@ export function LibraryView({ nav }: { nav: Navigation }) {
       const playlist = await api.createPlaylist(name);
       putPlaylist(playlist);
       haptic.success();
-      nav.push({ type: "playlist", id: playlist.id });
+      nav.push({ type: "playlist", id: playlist.id, name: playlist.name });
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not make that playlist");
+      errorToast(err, "Could not make that playlist");
     }
   };
 
@@ -105,7 +105,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
               cover: p.cover_track_id,
               art: api.playlistArtworkUrl(p),
               caption: pluralise(p.track_count ?? 0, "track"),
-              to: { type: "playlist", id: p.id } as View,
+              to: { type: "playlist", id: p.id, name: p.name } as View,
             }))}
             nav={nav}
           />
@@ -231,7 +231,7 @@ function Grid({
             {item.name}
           </span>
           <span
-            style={{ fontSize: 11, color: "rgba(255,255,255,.5)", marginTop: 1 }}
+            style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
           >
             {item.caption}
           </span>
@@ -289,7 +289,7 @@ function Circles({
       <span
         className="nav-clamp-2"
         style={{
-          fontSize: 10.5,
+          fontSize: 11,
           lineHeight: 1.25,
           width: "100%",
           textAlign: "center",

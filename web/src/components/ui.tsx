@@ -24,10 +24,15 @@ import type { IconProps } from "../icons";
  * runs edge to edge and reserves the room they occupy itself — otherwise a
  * list's first and last rows sit behind glass.
  *
- * Four things stack over it: the top bar, and at the bottom the device inset,
- * the nav, and the Now Playing bar once anything is playing. Every height is a
- * custom property written by the component that owns it, so the padding
- * follows a bar appearing without anybody passing a prop down.
+ * Three things stack over it: the top bar, and at the bottom the nav and the
+ * Now Playing bar once anything is playing. Every height is a custom property
+ * written by the component that owns it, so the padding follows a bar
+ * appearing without anybody passing a prop down.
+ *
+ * The device inset is deliberately not in the sum. --nav-bottomnav-h is the
+ * nav's own offsetHeight, and the nav already carries the gesture bar in its
+ * own padding — adding --tg-safe-bottom here counted it twice and left a strip
+ * of dead space under the last row of every list.
  */
 export function Screen({
   children,
@@ -50,20 +55,11 @@ export function Screen({
         padding: "0 14px",
         paddingTop: "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 8px)",
         paddingBottom:
-          "calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + var(--tg-safe-bottom) + 16px)",
+          "calc(var(--nav-bottomnav-h) + var(--nav-nowplaying-h) + 16px)",
       }}
     >
       {children}
     </div>
-  );
-}
-
-/** A screen title in the pixel face. Titles only — never a label, never a row. */
-export function ScreenTitle({ children }: { children: ReactNode }) {
-  return (
-    <h1 className="nav-display" style={{ margin: 0, fontSize: 19, lineHeight: 1.1 }}>
-      {children}
-    </h1>
   );
 }
 
@@ -195,6 +191,8 @@ export function Chip({
   active,
   onClick,
   icon: Icon,
+  className = "",
+  ...rest
 }: {
   label: string;
   count?: number;
@@ -202,10 +200,15 @@ export function Chip({
   onClick: () => void;
   /** A chip that goes somewhere rather than filtering carries its own glyph. */
   icon?: (props: IconProps) => ReactNode;
-}) {
+  className?: string;
+} & Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "onClick" | "className" | "style"
+>) {
   return (
     <button
-      className={`nav-press ${active ? "" : "nav-glass"}`}
+      {...rest}
+      className={`nav-press ${active ? "" : "nav-glass"} ${className}`}
       aria-pressed={active}
       onClick={() => {
         haptic.select();
@@ -237,6 +240,114 @@ export function Chip({
         )}
       </span>
     </button>
+  );
+}
+
+// --- Fields ------------------------------------------------------------------
+
+/**
+ * A single-line text input.
+ *
+ * Five screens spelled this out inline and arrived at four different radii —
+ * 12, 19, 20 and 22 — for what is the same control every time. The radius is
+ * now derived rather than chosen: a single-line field is a pill, because every
+ * other single-line control in the app is one.
+ *
+ * Focus lives in .nav-field. Each of these inputs used to carry a bare
+ * `outline: "none"`, which on a phone looks like nothing and on a keyboard
+ * means the field cannot be found at all.
+ */
+export function TextField({
+  value,
+  onChange,
+  placeholder,
+  height = 40,
+  fontSize = 13,
+  maxLength,
+  onEnter,
+  autoCorrect = true,
+  ref,
+  style,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+  height?: number;
+  fontSize?: number;
+  maxLength?: number;
+  onEnter?: () => void;
+  /** Off for handles and search terms: a phone capitalising a username is
+   *  correcting something that has exactly one right spelling. */
+  autoCorrect?: boolean;
+  ref?: React.Ref<HTMLInputElement>;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <input
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={
+        onEnter
+          ? (e) => {
+              if (e.key === "Enter") onEnter();
+            }
+          : undefined
+      }
+      placeholder={placeholder}
+      maxLength={maxLength}
+      autoCapitalize={autoCorrect ? undefined : "none"}
+      autoCorrect={autoCorrect ? undefined : "off"}
+      spellCheck={autoCorrect ? undefined : false}
+      className="nav-glass nav-field"
+      style={{
+        flex: 1,
+        minWidth: 0,
+        height,
+        borderRadius: height / 2,
+        padding: `0 ${Math.round(height * 0.36)}px`,
+        fontSize,
+        ...style,
+      }}
+    />
+  );
+}
+
+/** The same field, for something long enough to wrap. Not a pill: a rounded
+ *  rectangle is the only shape that survives four lines of text. */
+export function TextArea({
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  rows = 4,
+  ref,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+  maxLength?: number;
+  rows?: number;
+  ref?: React.Ref<HTMLTextAreaElement>;
+}) {
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      rows={rows}
+      className="nav-glass nav-field"
+      style={{
+        width: "100%",
+        borderRadius: 18,
+        padding: "11px 14px",
+        fontSize: 13.5,
+        lineHeight: 1.45,
+        resize: "none",
+      }}
+    />
   );
 }
 
@@ -424,7 +535,7 @@ export function Toggle({
           background: checked
             ? "var(--color-nav-action)"
             : "rgba(255,255,255,.14)",
-          transition: "background .18s ease",
+          transition: "background var(--dur-state) var(--ease)",
         }}
       >
         <span
@@ -436,7 +547,8 @@ export function Toggle({
             height: 20,
             borderRadius: "50%",
             background: checked ? "#0b0d10" : "rgba(255,255,255,.62)",
-            transition: "left .18s cubic-bezier(.2,.8,.3,1), background .18s ease",
+            transition:
+              "left var(--dur-state) var(--ease), background var(--dur-state) var(--ease)",
           }}
         />
       </span>
@@ -474,14 +586,16 @@ export function Empty({
         textAlign: "center",
       }}
     >
-      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{title}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>
+        {title}
+      </span>
       {body ? (
         <span
           style={{
-            fontSize: 11.5,
+            fontSize: 12.5,
             lineHeight: 1.5,
-            color: "rgba(255,255,255,.52)",
-            maxWidth: 260,
+            color: "var(--color-nav-muted)",
+            maxWidth: 268,
           }}
         >
           {body}
@@ -603,6 +717,10 @@ export function Portal({ children }: { children: ReactNode }) {
  * It animates out as well as in, which is why the open state is held here
  * rather than by the caller: unmounting on close would make it disappear.
  */
+/** Matches the exit transitions below — --dur-state (200ms) plus a frame, so
+ *  the sheet unmounts after it has finished leaving rather than during. */
+const SHEET_EXIT_MS = 220;
+
 export function Sheet({
   open,
   onClose,
@@ -623,7 +741,7 @@ export function Sheet({
       return;
     }
     if (!mounted) return;
-    const timer = window.setTimeout(() => setMounted(false), 220);
+    const timer = window.setTimeout(() => setMounted(false), SHEET_EXIT_MS);
     return () => window.clearTimeout(timer);
   }, [open, mounted]);
 
@@ -644,7 +762,7 @@ export function Sheet({
           left: 0,
           right: 0,
           height: "var(--tg-viewport-height, 100%)",
-          zIndex: 70,
+          zIndex: "var(--z-sheet)",
           display: "flex",
           flexDirection: "column",
           justifyContent: "flex-end",
@@ -659,7 +777,7 @@ export function Sheet({
             inset: 0,
             background: "rgba(0,0,0,.55)",
             opacity: closing ? 0 : 1,
-            transition: "opacity 200ms var(--ease)",
+            transition: "opacity var(--dur-state) var(--ease)",
           }}
         />
         <div
@@ -681,7 +799,9 @@ export function Sheet({
             // so nothing here has to dodge them.
             paddingBottom: "calc(var(--tg-safe-bottom) + 14px)",
             transform: closing ? "translateY(100%)" : undefined,
-            transition: closing ? "transform 200ms var(--ease-in)" : undefined,
+            transition: closing
+              ? "transform var(--dur-state) var(--ease-in)"
+              : undefined,
           }}
         >
           <div
@@ -690,7 +810,7 @@ export function Sheet({
               height: 4,
               borderRadius: 2,
               flex: "none",
-              background: "rgba(255,255,255,.22)",
+              background: "var(--color-nav-ghost)",
               margin: "2px auto 10px",
             }}
           />
@@ -699,8 +819,8 @@ export function Sheet({
               className="nav-clip"
               style={{
                 flex: "none",
-                fontSize: 11,
-                color: "rgba(255,255,255,.52)",
+                fontSize: 11.5,
+                color: "var(--color-nav-muted)",
                 padding: "0 14px 8px",
               }}
             >
@@ -770,7 +890,7 @@ export function SheetItem({
         borderRadius: 12,
         fontSize: 13.5,
         textAlign: "left",
-        color: destructive ? "#FF8A8A" : "rgba(255,255,255,.9)",
+        color: destructive ? "var(--color-nav-danger)" : "rgba(255,255,255,.9)",
         opacity: disabled ? 0.35 : 1,
       }}
     >

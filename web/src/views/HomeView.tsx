@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
-import { Avatar } from "../components/Avatar";
 import { Cover, CollectionArt } from "../components/PixelArt";
+import { PersonTile } from "../components/PersonTile";
 import { Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
 import { ArrowRightIcon, PlayIcon } from "../icons";
 import { usePlayer } from "../context/PlayerContext";
@@ -50,13 +50,17 @@ export function HomeView({ nav }: { nav: Navigation }) {
   }, [current, home]);
 
   if (error && !home) {
+    // Inside a Screen, or it paints from the top of the window with the
+    // top bar sitting on it and nothing clearing the bottom furniture.
     return (
-      <Empty
-        title="Nothing loaded"
-        body="Home could not be fetched. It may just be the connection."
-        action="Try again"
-        onAction={refresh}
-      />
+      <Screen>
+        <Empty
+          title="Home did not load"
+          body="Nothing is lost. This was the connection, most likely."
+          action="Try again"
+          onAction={refresh}
+        />
+      </Screen>
     );
   }
 
@@ -108,8 +112,8 @@ export function HomeView({ nav }: { nav: Navigation }) {
                   className="nav-clip"
                   style={{
                     display: "block",
-                    fontSize: 10.5,
-                    color: "rgba(255,255,255,.52)",
+                    fontSize: 11,
+                    color: "var(--color-nav-muted)",
                   }}
                 >
                   {trackArtist(track)}
@@ -134,7 +138,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
                 playlist={playlist}
                 subtitle={pluralise(playlist.track_count ?? 0, "track")}
                 index={i}
-                onOpen={() => nav.push({ type: "playlist", id: playlist.id })}
+                onOpen={() => nav.push({ type: "playlist", id: playlist.id, name: playlist.name })}
               />
             ))}
           </div>
@@ -149,56 +153,18 @@ export function HomeView({ nav }: { nav: Navigation }) {
           <SectionHeader title="Listening now" />
           <div className="nav-shelf" style={{ gap: 12 }}>
             {home.friend_activity.map((row, i) => (
-              <button
+              <PersonTile
                 key={row.person.telegram_user_id}
-                className="nav-press nav-row-in"
-                onClick={() => {
-                  haptic.tap();
+                person={row.person}
+                line={trackTitle(row.track)}
+                index={i}
+                onOpen={() =>
                   nav.push({
                     type: "profile",
                     userId: Number(row.person.telegram_user_id),
-                  });
-                }}
-                style={
-                  {
-                    "--i": i,
-                    width: 64,
-                    flex: "none",
-                    textAlign: "center",
-                  } as React.CSSProperties
+                  })
                 }
-              >
-                <div style={{ display: "flex", justifyContent: "center" }}>
-                  <Avatar
-                    userId={row.person.telegram_user_id}
-                    username={row.person.handle ?? row.person.username}
-                    hasAvatar={row.person.has_avatar}
-                    size={52}
-                    ring
-                  />
-                </div>
-                <span
-                  className="nav-clip"
-                  style={{
-                    display: "block",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    marginTop: 6,
-                  }}
-                >
-                  {personName(row.person)}
-                </span>
-                <span
-                  className="nav-clip"
-                  style={{
-                    display: "block",
-                    fontSize: 10.5,
-                    color: "var(--color-nav-muted)",
-                  }}
-                >
-                  {trackTitle(row.track)}
-                </span>
-              </button>
+              />
             ))}
           </div>
         </>
@@ -214,7 +180,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
                 playlist={playlist}
                 subtitle={personName(playlist.person)}
                 index={i}
-                onOpen={() => nav.push({ type: "playlist", id: playlist.id })}
+                onOpen={() => nav.push({ type: "playlist", id: playlist.id, name: playlist.name })}
               />
             ))}
           </div>
@@ -238,8 +204,8 @@ export function HomeView({ nav }: { nav: Navigation }) {
             borderRadius: 12,
             background: "rgba(223,252,142,.09)",
             border: "1px solid rgba(223,252,142,.32)",
-            color: "#EAF7C9",
-            fontSize: 11.5,
+            color: "var(--color-nav-action-soft)",
+            fontSize: 12,
           }}
         >
           <span className="nav-clip" style={{ flex: 1, textAlign: "left" }}>
@@ -338,7 +304,7 @@ function PlaylistCard({
             display: "block",
             marginTop: 1,
             fontSize: 11,
-            color: "rgba(255,255,255,.52)",
+            color: "var(--color-nav-muted)",
           }}
         >
           {subtitle}
@@ -429,7 +395,7 @@ function FirstRun() {
             margin: "6px 0 0",
             fontSize: 11.5,
             lineHeight: 1.6,
-            color: "rgba(255,255,255,.42)",
+            color: "var(--color-nav-muted)",
             maxWidth: 280,
           }}
         >

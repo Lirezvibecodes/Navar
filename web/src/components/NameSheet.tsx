@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActionButton, Sheet } from "./ui";
+import { ActionButton, Sheet, TextArea, TextField } from "./ui";
 
 /**
  * Asking for one piece of text: a new playlist, a rename, a description.
@@ -59,32 +59,16 @@ export function NameSheet({
     onClose();
   };
 
-  const field: React.CSSProperties = {
-    width: "100%",
-    borderRadius: multiline ? 18 : 20,
-    padding: multiline ? "11px 14px" : "0 14px",
-    fontSize: 13.5,
-    lineHeight: 1.45,
-    color: "#fff",
-    border: 0,
-    outline: "none",
-    resize: "none",
-    fontFamily: "inherit",
-  };
-
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       {multiline ? (
         <div style={{ padding: "0 8px 12px" }}>
-          <textarea
+          <TextArea
             ref={inputRef as React.RefObject<HTMLTextAreaElement>}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={setValue}
             placeholder={placeholder}
             maxLength={maxLength}
-            rows={4}
-            className="nav-glass"
-            style={field}
           />
           <div
             style={{
@@ -95,7 +79,15 @@ export function NameSheet({
             }}
           >
             {maxLength ? (
-              <span style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+              <span
+                style={{
+                  fontSize: 11.5,
+                  color:
+                    value.length === maxLength
+                      ? "var(--color-nav-danger)"
+                      : "var(--color-nav-faint)",
+                }}
+              >
                 {value.length} / {maxLength}
               </span>
             ) : null}
@@ -112,15 +104,14 @@ export function NameSheet({
         </div>
       ) : (
         <div style={{ display: "flex", gap: 8, padding: "0 8px 12px" }}>
-          <input
+          <TextField
             ref={inputRef as React.RefObject<HTMLInputElement>}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            onChange={setValue}
+            onEnter={submit}
             placeholder={placeholder}
             maxLength={maxLength}
-            className="nav-glass"
-            style={{ ...field, flex: 1, height: 40 }}
+            fontSize={13.5}
           />
           <ActionButton
             grow={false}

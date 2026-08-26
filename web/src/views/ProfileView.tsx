@@ -35,7 +35,7 @@ import type { BadgeTier } from "../types";
  */
 export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }) {
   const { me, setMe, tracks, playlists } = useLibrary();
-  const { toast } = useToast();
+  const { toast, errorToast } = useToast();
 
   const isMe = me?.id === userId;
   const [renaming, setRenaming] = useState(false);
@@ -56,7 +56,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       const link = await api.friendInviteLink();
       if (!shareLink(link, "Add me on Navaar")) toast(link);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not make an invite link");
+      errorToast(err, "Could not make an invite link");
     }
   };
 
@@ -68,7 +68,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       haptic.warning();
       nav.pop();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not remove them");
+      errorToast(err, "Could not remove them");
     }
   };
 
@@ -86,7 +86,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       haptic.success();
     } catch (err) {
       setProfile({ ...profile, endorsed: false, can_endorse: true });
-      toast(err instanceof Error ? err.message : "Could not endorse them");
+      errorToast(err, "Could not endorse them");
     }
   };
 
@@ -120,7 +120,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       haptic.success();
     } catch (err) {
       setMe({ ...me, listening_public: !next });
-      toast(err instanceof Error ? err.message : "Could not change that");
+      errorToast(err, "Could not change that");
     }
   };
 
@@ -131,7 +131,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       setMe({ ...me, handle });
       haptic.success();
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not change your name");
+      errorToast(err, "Could not change your name");
     }
   };
 
@@ -169,7 +169,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </button>
         {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
         {isMe ? (
-          <span style={{ fontSize: 11.5, color: "rgba(255,255,255,.52)" }}>
+          <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
             {pluralise(tracks.length, "track")} ·{" "}
             {pluralise(playlists.length, "playlist")}
           </span>
@@ -189,13 +189,13 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   icon={LibraryIcon}
                   onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
                 >
-                  Their library
+                  Their Library
                 </ActionButton>
                 <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
               </>
             ) : profile?.state === "pending_out" ? (
               <ActionButton disabled onClick={() => undefined}>
-                Request sent
+                Requested
               </ActionButton>
             ) : (
               <AddFriendButton userId={userId} />
@@ -246,7 +246,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   className="nav-press nav-row-in"
                   onClick={() => {
                     haptic.tap();
-                    nav.push({ type: "playlist", id: playlist.id });
+                    nav.push({ type: "playlist", id: playlist.id, name: playlist.name });
                   }}
                   style={
                     {
@@ -287,7 +287,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   </span>
                   <ChevronRightIcon
                     size={15}
-                    style={{ color: "rgba(255,255,255,.3)", flex: "none" }}
+                    style={{ color: "var(--color-nav-faint)", flex: "none" }}
                   />
                 </button>
               ))}

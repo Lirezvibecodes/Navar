@@ -12,7 +12,7 @@ import { Avatar } from "../components/Avatar";
 import { Cover } from "../components/PixelArt";
 import { TrackMenu } from "../components/TrackMenu";
 import type { TrackMenuTarget } from "../components/TrackMenu";
-import { RoundButton, Sheet, SheetItem } from "../components/ui";
+import { Chip, RoundButton, Sheet, SheetItem } from "../components/ui";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -41,8 +41,10 @@ import {
   trackUploader,
 } from "../lib/format";
 import { activeLineAt, parseLyrics, type Lyrics } from "../lib/lyrics";
+import { scrollBehavior } from "../lib/motion";
 import {
   artGlowCss,
+  artShadowCss,
   backdropCss,
   paletteFor,
   peekPalette,
@@ -76,12 +78,14 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     contextNext,
     contextLabel,
     isPlaying,
+    status,
     position,
     duration,
     shuffle,
     repeat,
     sleepAt,
     toggle,
+    retry,
     next,
     prev,
     seek,
@@ -96,8 +100,18 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
   const rootRef = useRef<HTMLDivElement | null>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
   // Nothing playing means this screen renders nothing, so there is no root to
-   // bind to until there is; the flag is what brings the listeners back.
+  // bind to until there is; the flag is what brings the listeners back.
   useDragToDismiss(rootRef, onClose, current != null);
+
+  // The player grew out of the bar on the way in and used to vanish on the way
+  // out, which read as a crash rather than a dismissal. A drag already brings
+  // itself down under the finger (see useDragToDismiss) and closes when it
+  // lands, so only the chevron needs this.
+  const [leaving, setLeaving] = useState(false);
+  const dismiss = useCallback(() => {
+    setLeaving(true);
+    window.setTimeout(onClose, PLAYER_OUT_MS);
+  }, [onClose]);
   const [pane, setPane] = useState<Pane>("player");
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);
   const [sleepOpen, setSleepOpen] = useState(false);
@@ -151,6 +165,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
   }, [pane]);
 
   const palette = usePalette(current?.id ?? null, current?.has_cover ?? false);
+  const loading = status === "loading";
+  const failed = status === "failed";
   // Fetched here rather than inside the Lyrics pane, because the strip under
   // the transport needs the same words and neither should send the server
   // looking twice for one track.
@@ -165,7 +181,9 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
   return (
     <div
       ref={rootRef}
-      className={grew ? "nav-player-in" : "nav-rise"}
+      className={
+        leaving ? "nav-player-out" : grew ? "nav-player-in" : "nav-rise"
+      }
       style={{
         position: "fixed",
         top: 0,
@@ -176,7 +194,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         // itself out behind it. --tg-viewport-height follows the visual
         // viewport instead. See applyViewport in telegram.ts.
         height: "var(--tg-viewport-height, 100%)",
-        zIndex: 60,
+        zIndex: "var(--z-player)",
         display: "flex",
         flexDirection: "column",
         background: "#030303",
@@ -206,14 +224,18 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           flex: "none",
         }}
       >
-        <RoundButton icon={ChevronDownIcon} label="Close player" onClick={onClose} />
+        <RoundButton
+          icon={ChevronDownIcon}
+          label="Close player"
+          onClick={dismiss}
+        />
         <span
           className="nav-clip"
           style={{
             flex: 1,
             textAlign: "center",
-            fontSize: 10.5,
-            color: "rgba(255,255,255,.52)",
+            fontSize: 11,
+            color: "var(--color-nav-muted)",
           }}
         >
           {contextLabel ? `Playing from ${contextLabel}` : "Playing"}
@@ -243,7 +265,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               className={grew ? "nav-art-in" : undefined}
               style={{
                 borderRadius: 14,
-                boxShadow: "0 0 60px rgba(223,252,142,.14)",
+                boxShadow: artShadowCss(palette),
               }}
             >
               <Cover
@@ -281,7 +303,41 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                   One track has room to be complete, and "you put this here" is
                   worth reading once even though it would be noise nine times
                   down a list. */}
-              {uploader ? (
+              {/* A failure has to stay on the screen. A toast is gone in two
+                  seconds and the transport looks identical either way, so the
+                  only account of why nothing is happening lives here, under
+                  the title, for as long as it is true. */}
+              {failed ? (
+                <div
+                  role="alert"
+                  style={{
+                    display: "flex",
+                    gap: 7,
+                    marginTop: 7,
+                    minWidth: 0,
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      flex: "none",
+                      width: 3,
+                      alignSelf: "stretch",
+                      borderRadius: 2,
+                      background: "var(--color-nav-danger)",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      lineHeight: 1.4,
+                      color: "var(--color-nav-danger)",
+                    }}
+                  >
+                    This one would not load. Press play to fetch it again.
+                  </span>
+                </div>
+              ) : uploader ? (
                 <div
                   style={{
                     display: "flex",
@@ -289,7 +345,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                     gap: 5,
                     marginTop: 6,
                     fontSize: 11,
-                    color: "rgba(255,255,255,.45)",
+                    color: "var(--color-nav-muted)",
                     minWidth: 0,
                   }}
                 >
@@ -319,7 +375,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                   placeItems: "center",
                   color: favorited
                     ? "var(--color-nav-action)"
-                    : "rgba(255,255,255,.5)",
+                    : "var(--color-nav-muted)",
                 }}
               >
                 <HeartIcon size={21} />
@@ -347,10 +403,13 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
             <TransportButton icon={PrevIcon} label="Previous" size={52} bright onClick={prev} />
             <button
               className="nav-press"
-              aria-label={isPlaying ? "Pause" : "Play"}
+              aria-label={
+                failed ? "Try again" : isPlaying ? "Pause" : "Play"
+              }
               onClick={() => {
                 haptic.press();
-                toggle();
+                if (failed) retry();
+                else toggle();
               }}
               style={{
                 width: 70,
@@ -367,14 +426,32 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                 <PlayIcon
                   size={26}
                   className="nav-glyph"
-                  data-hidden={isPlaying}
+                  data-hidden={(isPlaying && !failed) || loading}
                   style={{ gridArea: "1 / 1", marginLeft: 3 }}
                 />
                 <PauseIcon
                   size={26}
                   className="nav-glyph"
-                  data-hidden={!isPlaying}
+                  data-hidden={!isPlaying || failed || loading}
                   style={{ gridArea: "1 / 1" }}
+                />
+                {/* Not an icon — the pixel library has no spinner and this is
+                    a ring, not a glyph. It replaces the transport symbol
+                    rather than sitting beside it, because a button that shows
+                    both a play triangle and a spinner is asking to be
+                    pressed twice. */}
+                <span
+                  aria-hidden="true"
+                  className={`nav-glyph ${loading ? "nav-spin" : ""}`}
+                  data-hidden={!loading}
+                  style={{
+                    gridArea: "1 / 1",
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    border: "3px solid rgba(10,10,10,.24)",
+                    borderTopColor: "#0A0A0A",
+                  }}
                 />
               </span>
             </button>
@@ -409,7 +486,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                 minHeight: 44,
                 padding: "0 14px",
                 fontSize: 11,
-                color: sleepAt ? "var(--color-nav-action)" : "rgba(255,255,255,.45)",
+                color: sleepAt ? "var(--color-nav-action)" : "var(--color-nav-muted)",
               }}
             >
               <MoonIcon size={13} />
@@ -559,6 +636,9 @@ function Backdrop({ palette }: { palette: Palette | null }) {
   );
 }
 
+/** Matches .nav-player-out — --dur-focal (460ms) less the 140ms it trims. */
+const PLAYER_OUT_MS = 320;
+
 // --- Dismissal ---------------------------------------------------------------
 
 /** Past this much of the screen, letting go finishes the dismissal. */
@@ -593,7 +673,9 @@ function useDragToDismiss(
   // The callback lands in a ref so the listeners are attached once for the
   // life of the screen rather than re-bound whenever the parent re-renders.
   const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
 
   useEffect(() => {
     const root = rootRef.current;
@@ -864,8 +946,8 @@ function Scrubber({
         style={{
           display: "flex",
           justifyContent: "space-between",
-          fontSize: 10.5,
-          color: "rgba(255,255,255,.45)",
+          fontSize: 11,
+          color: "var(--color-nav-muted)",
           marginTop: -12,
         }}
       >
@@ -901,10 +983,14 @@ function Segments({
   // to appear only when the row already had lyrics, which meant the one thing
   // that could put lyrics on a row — opening this pane and letting the server
   // go and look — was reachable only on tracks that did not need it.
-  const options: { key: Pane; label: string }[] = [
+  // The same control the Crate and the Library filter with, so "which of these
+  // three am I looking at" reads the same here as it does there. It used to be
+  // a lower, dimmer, differently-rounded pill that answered the question in a
+  // fourth way.
+  const options: { key: Pane; label: string; count?: number }[] = [
     { key: "player", label: "Player" },
     { key: "lyrics", label: "Lyrics" },
-    { key: "queue", label: `Up next · ${queueCount}` },
+    { key: "queue", label: "Up next", count: queueCount },
   ];
 
   return (
@@ -917,33 +1003,17 @@ function Segments({
         flex: "none",
       }}
     >
-      {options.map((option) => {
-        const active = pane === option.key;
-        return (
-          <button
-            key={option.key}
-            className={`nav-press ${pulse && option.key === "queue" ? "nav-pulse" : ""}`}
-            onAnimationEnd={() => setPulse(false)}
-            data-segment={option.key}
-            aria-pressed={active}
-            onClick={() => {
-              haptic.select();
-              onSelect(option.key);
-            }}
-            style={{
-              height: 30,
-              padding: "0 14px",
-              borderRadius: 15,
-              fontSize: 11.5,
-              fontWeight: 600,
-              background: active ? "rgba(255,255,255,.1)" : "transparent",
-              color: active ? "#fff" : "rgba(255,255,255,.45)",
-            }}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+      {options.map((option) => (
+        <Chip
+          key={option.key}
+          label={option.label}
+          count={option.count}
+          active={pane === option.key}
+          onClick={() => onSelect(option.key)}
+          className={pulse && option.key === "queue" ? "nav-pulse" : ""}
+          onAnimationEnd={() => setPulse(false)}
+        />
+      ))}
     </div>
   );
 }
@@ -1087,17 +1157,20 @@ function LyricsPane({
   );
 
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    activeRef.current?.scrollIntoView({
+      block: "center",
+      behavior: scrollBehavior(),
+    });
   }, [active]);
 
   return (
     <div className="nav-scroll" style={{ flex: 1, minHeight: 0, padding: "10px 22px" }}>
       {state === "loading" ? (
-        <p style={{ fontSize: 12.5, color: "rgba(255,255,255,.4)" }}>
+        <p style={{ fontSize: 12.5, color: "var(--color-nav-muted)" }}>
           Looking for lyrics&hellip;
         </p>
       ) : state === "none" || !lyrics ? (
-        <p style={{ fontSize: 12.5, color: "rgba(255,255,255,.4)", lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12.5, color: "var(--color-nav-muted)", lineHeight: 1.6 }}>
           No lyrics found for this one.
         </p>
       ) : (
@@ -1123,7 +1196,7 @@ function LyricsPane({
                     ? "rgba(255,255,255,.8)"
                     : on
                       ? "#fff"
-                      : "rgba(255,255,255,.28)",
+                      : "var(--color-nav-ghost)",
                   transition: "color var(--dur-state) var(--ease)",
                   cursor: timed ? "pointer" : undefined,
                 }}
@@ -1148,6 +1221,10 @@ function LyricsPane({
  * because a drag with no alternative is a control nobody with a tremor, a
  * screen reader or a mouse can reach.
  */
+/** How much of "next from here" the pane draws. The queue itself is not
+ *  capped — this is only how far down the list it is worth painting rows. */
+const QUEUE_PREVIEW = 40;
+
 function QueuePane({
   current,
   upNext,
@@ -1242,13 +1319,27 @@ function QueuePane({
       {contextNext.length > 0 ? (
         <>
           <QueueHeading label={`Next from: ${contextLabel ?? "here"}`} />
-          {contextNext.slice(0, 40).map((track, i) => (
+          {contextNext.slice(0, QUEUE_PREVIEW).map((track, i) => (
             <QueueRow
               key={`${track.id}-ctx-${i}`}
               track={track}
               onMenu={() => onMenu(track)}
             />
           ))}
+          {/* The list is a preview, not the queue. Without this line a playlist
+              of two hundred looked like it stopped at forty. */}
+          {contextNext.length > QUEUE_PREVIEW ? (
+            <p
+              style={{
+                margin: "12px 0 0",
+                textAlign: "center",
+                fontSize: 11.5,
+                color: "var(--color-nav-faint)",
+              }}
+            >
+              and {contextNext.length - QUEUE_PREVIEW} more after these
+            </p>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -1275,7 +1366,11 @@ function QueueHeading({
     >
       <span
         className="nav-clip"
-        style={{ fontSize: 10.5, color: "rgba(255,255,255,.42)", letterSpacing: ".04em" }}
+        style={{
+          fontSize: 11,
+          color: "var(--color-nav-muted)",
+          letterSpacing: ".04em",
+        }}
       >
         {label}
       </span>
@@ -1341,7 +1436,7 @@ function QueueRow({
             height: 44,
             display: "grid",
             placeItems: "center",
-            color: "rgba(255,255,255,.22)",
+            color: "var(--color-nav-ghost)",
             touchAction: "none",
             flex: "none",
           }}
@@ -1365,13 +1460,13 @@ function QueueRow({
         </div>
         <div
           className="nav-clip"
-          style={{ fontSize: 10.5, color: "rgba(255,255,255,.5)", marginTop: 1 }}
+          style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
         >
           {trackArtist(track)}
         </div>
       </div>
 
-      <span style={{ fontSize: 10.5, color: "rgba(255,255,255,.32)", flex: "none" }}>
+      <span style={{ fontSize: 11, color: "var(--color-nav-faint)", flex: "none" }}>
         {formatDuration(track.duration_seconds)}
       </span>
 
@@ -1384,7 +1479,7 @@ function QueueRow({
           height: 44,
           display: "grid",
           placeItems: "center",
-          color: "rgba(255,255,255,.45)",
+          color: "var(--color-nav-muted)",
           flex: "none",
         }}
       >

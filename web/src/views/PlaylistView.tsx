@@ -18,7 +18,7 @@ import {
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, ttl, useCached } from "../lib/cache";
-import { pluralise } from "../lib/format";
+import { pluralise, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
 import type { PlaylistVisibility, Track } from "../types";
 
@@ -43,9 +43,18 @@ const VISIBILITY_LABEL: Record<PlaylistVisibility, string> = {
   public: "Anyone with the link",
 };
 
-export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
+export function PlaylistView({
+  nav,
+  id,
+  name: pushedName,
+}: {
+  nav: Navigation;
+  id: string;
+  /** The name whatever opened this knew. See View in view.ts. */
+  name?: string;
+}) {
   const { playlists, putPlaylist, dropPlaylist } = useLibrary();
-  const { toast, undoToast } = useToast();
+  const { toast, errorToast, undoToast } = useToast();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -55,7 +64,15 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   const [describing, setDescribing] = useState(false);
   const [sharing, setSharing] = useState(false);
 
+  // listPlaylists returns your own playlists and nothing else, so finding it
+  // here IS the ownership test. A friend's shared playlist, or one reached
+  // from an activity feed, is simply not in this array — and it used to be
+  // handed the full owner's menu anyway: rename, change cover, delete. Every
+  // one of those would have failed at the server, after the user had already
+  // decided to do it.
   const playlist = playlists.find((p) => p.id === id);
+  const owned = playlist != null;
+  const title = playlist?.name ?? pushedName ?? "Playlist";
 
   // The order lives on the server, so the rows are fetched rather than
   // filtered — but they are also the same rows every time this playlist is
@@ -64,6 +81,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
     data: rows,
     loading,
     error,
+    refresh,
   } = useCached(
     cacheKey.playlistTracks(id),
     () => api.listPlaylistTracks(id),
@@ -71,9 +89,12 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
   );
   const tracks = rows ?? [];
 
+  // Only worth a toast when there are still rows on screen from a previous
+  // visit; with nothing to show, the screen itself says so and says it for as
+  // long as it is true, which a toast cannot.
   useEffect(() => {
-    if (error) toast(error.message);
-  }, [error, toast]);
+    if (error && tracks.length > 0) errorToast(error, "Could not refresh this playlist");
+  }, [error, tracks.length, errorToast]);
 
   const rename = async (name: string) => {
     if (!playlist) return;
@@ -83,7 +104,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
       putPlaylist(await api.updatePlaylist(id, { name }));
     } catch (err) {
       putPlaylist(before);
-      toast(err instanceof Error ? err.message : "Could not rename that");
+      errorToast(err, "Could not rename that");
     }
   };
 
@@ -98,7 +119,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
       putPlaylist(await api.updatePlaylist(id, { description }));
     } catch (err) {
       putPlaylist(before);
-      toast(err instanceof Error ? err.message : "Could not save that");
+      errorToast(err, "Could not save that");
     }
   };
 
@@ -115,7 +136,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
       putPlaylist(await api.setPlaylistCover(id, trackId));
     } catch (err) {
       putPlaylist(before);
-      toast(err instanceof Error ? err.message : "Could not change the cover");
+      errorToast(err, "Could not change the cover");
     }
   };
 
@@ -135,7 +156,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
       haptic.success();
       setPicking(false);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not set that picture");
+      errorToast(err, "Could not set that picture");
     } finally {
       setUploading(false);
       // Cleared so that picking the same file twice still fires a change.
@@ -149,7 +170,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
     try {
       putPlaylist(await api.clearPlaylistArtwork(id));
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not remove that picture");
+      errorToast(err, "Could not remove that picture");
     } finally {
       setUploading(false);
     }
@@ -165,7 +186,7 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
       await api.deletePlaylist(id);
     } catch (err) {
       putPlaylist(before);
-      toast(err instanceof Error ? err.message : "Could not delete that");
+      errorToast(err, "Could not delete that");
       return;
     }
     // Deleting a playlist never touches the tracks in it, which is what makes
@@ -192,14 +213,14 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
         nav={nav}
         art={
           <CollectionArt
-            name={playlist?.name ?? "Playlist"}
+            name={title}
             coverTrackId={playlist?.cover_track_id ?? tracks[0]?.id}
             src={playlist ? api.playlistArtworkUrl(playlist) : null}
             size={96}
             radius={16}
           />
         }
-        name={playlist?.name ?? "Playlist"}
+        name={title}
         subtitle={pluralise(playlist?.track_count ?? tracks.length, "track")}
         note={
           playlist?.description ? (
@@ -220,22 +241,30 @@ export function PlaylistView({ nav, id }: { nav: Navigation; id: string }) {
         tracks={tracks}
         loading={loading}
         sourceKey={`playlist:${id}`}
-        sourceLabel={playlist?.name ?? "Playlist"}
-        playlistId={id}
-        playlistName={playlist?.name}
-        emptyTitle="Empty playlist"
-        emptyBody="Open The Crate, select some tracks and add them here."
+        sourceLabel={title}
+        playlistId={owned ? id : undefined}
+        playlistName={owned ? playlist.name : undefined}
+        emptyTitle="Nothing in here yet"
+        emptyBody={
+          owned
+            ? "Open The Crate, pick some tracks and add them here."
+            : "Whoever made this has not put anything in it."
+        }
+        error={error}
+        onRetry={refresh}
         actions={
-          <GhostButton
-            icon={DotsIcon}
-            label="Playlist options"
-            width={44}
-            onClick={() => setMenuOpen(true)}
-          />
+          owned ? (
+            <GhostButton
+              icon={DotsIcon}
+              label="Playlist options"
+              width={44}
+              onClick={() => setMenuOpen(true)}
+            />
+          ) : null
         }
       />
 
-      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title={playlist?.name}>
+      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title={title}>
         <SheetItem
           icon={EditIcon}
           label="Rename"
@@ -395,6 +424,10 @@ function CoverPicker({
         <button
           key={track.id}
           className="nav-press"
+          // Everything inside this button is decorative — a cover image and,
+          // when it is the chosen one, a tick. Without this the whole grid
+          // announced itself as a row of unnamed buttons.
+          aria-label={`Use the artwork from ${trackTitle(track)}`}
           aria-pressed={chosen === track.id}
           onClick={() => onPick(track.id)}
           style={{ position: "relative", display: "block" }}

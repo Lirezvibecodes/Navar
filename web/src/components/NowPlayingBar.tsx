@@ -20,7 +20,8 @@ import { haptic } from "../telegram";
  * where the player's hero square grows from.
  */
 export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
-  const { current, isPlaying, position, duration, toggle, next, prev } = usePlayer();
+  const { current, isPlaying, status, position, duration, toggle, next, prev, retry } =
+    usePlayer();
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Measured rather than assumed: the pill is a fixed 58px today, but the
@@ -48,12 +49,29 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
 
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
   const sweep = `${(progress * 100).toFixed(1)}%`;
+  const loading = status === "loading";
+  const failed = status === "failed";
+
+  // While the file is still arriving the ring has nothing true to report, so it
+  // gives up the play head and turns into a quarter-arc that spins instead. A
+  // failure freezes it red: the ring is the only part of this bar big enough to
+  // carry a state change at arm's length.
+  const ring = failed
+    ? "conic-gradient(var(--color-nav-danger) 0 100%, rgba(255,255,255,.13) 0)"
+    : loading
+      ? "conic-gradient(var(--color-nav-action) 0 25%, rgba(255,255,255,.13) 0)"
+      : `conic-gradient(var(--color-nav-action) 0 ${sweep}, rgba(255,255,255,.13) 0)`;
 
   return (
     <div
       ref={wrapRef}
       className="nav-bar-in"
-      style={{ flex: "none", padding: "8px 12px 0", position: "relative", zIndex: 30 }}
+      style={{
+        flex: "none",
+        padding: "8px 12px 0",
+        position: "relative",
+        zIndex: "var(--z-bottom-bar)",
+      }}
     >
       <div
         className="nav-bar-glass"
@@ -104,12 +122,14 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
               className="nav-clip"
               style={{
                 display: "block",
-                fontSize: 10.5,
-                color: "rgba(255,255,255,.52)",
+                fontSize: 11,
+                color: failed
+                  ? "var(--color-nav-danger)"
+                  : "var(--color-nav-muted)",
                 marginTop: 1,
               }}
             >
-              {trackArtist(current)}
+              {failed ? "Couldn't play this" : trackArtist(current)}
             </span>
           </span>
         </button>
@@ -134,32 +154,47 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
         </button>
 
         <button
-          aria-label={isPlaying ? "Pause" : "Play"}
+          aria-label={failed ? "Try again" : isPlaying ? "Pause" : "Play"}
           className="nav-press"
           onClick={() => {
             haptic.tap();
-            toggle();
+            if (failed) retry();
+            else toggle();
           }}
           style={{
+            position: "relative",
             width: 44,
             height: 44,
             flex: "none",
             borderRadius: "50%",
             display: "grid",
             placeItems: "center",
-            // The ring is the scrubber. Lime up to the play head, dim after.
-            background: `conic-gradient(var(--color-nav-action) 0 ${sweep}, rgba(255,255,255,.13) 0)`,
           }}
         >
+          {/* The ring is the scrubber: lime up to the play head, dim after.
+              It spins on its own layer so the glyph inside stays upright. */}
+          <span
+            aria-hidden="true"
+            className={loading ? "nav-spin" : undefined}
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: "50%",
+              background: ring,
+            }}
+          />
           <span
             style={{
+              position: "relative",
               width: 36,
               height: 36,
               borderRadius: "50%",
               background: "rgba(10,10,10,.72)",
               display: "grid",
               placeItems: "center",
-              color: "var(--color-nav-action)",
+              color: failed
+                ? "var(--color-nav-danger)"
+                : "var(--color-nav-action)",
             }}
           >
             {/* Stacked and cross-faded so the button never blinks empty. */}
@@ -168,13 +203,13 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
                 size={14}
                 className="nav-glyph"
                 style={{ gridArea: "1 / 1" }}
-                data-hidden={isPlaying}
+                data-hidden={isPlaying && !failed}
               />
               <PauseIcon
                 size={14}
                 className="nav-glyph"
                 style={{ gridArea: "1 / 1" }}
-                data-hidden={!isPlaying}
+                data-hidden={!isPlaying || failed}
               />
             </span>
           </span>
