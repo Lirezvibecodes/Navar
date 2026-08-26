@@ -45,6 +45,29 @@ export function pluralise(count: number, one: string, many = `${one}s`): string 
 }
 
 /**
+ * Who put this track into Navaar, if there is anybody the viewer may be told
+ * about. Null covers both halves of that: a listing that does not resolve the
+ * name at all, and one that resolved it to nobody because naming them would
+ * introduce a stranger.
+ *
+ * `you` is what the two places that show this disagree about rather than what
+ * they compute differently — a library of your own uploads would say your name
+ * on every row, so the row hides it and the player, which has one track and
+ * room to be complete, says it.
+ */
+export function trackUploader(
+  track: { uploader_id?: string | null; uploader_username?: string | null },
+  meId: string | number | null | undefined
+): { id: string; name: string; you: boolean } | null {
+  if (!track.uploader_id || !track.uploader_username) return null;
+  return {
+    id: track.uploader_id,
+    name: track.uploader_username,
+    you: meId != null && String(track.uploader_id) === String(meId),
+  };
+}
+
+/**
  * What to call somebody on screen.
  *
  * The Navaar handle first, because it is the name they chose and the only one

@@ -133,6 +133,28 @@ function canSeePerson(viewer: string, other: string): string {
   )`;
 }
 
+/**
+ * The uploader, by name, for a listing that has `tracks` aliased as `t`.
+ *
+ * `origin_adder_id` is only ever set on a copy, so the original upload has to
+ * fall back to its owner — the person who forwarded the file is the person who
+ * put it here, and a NULL there means "nobody has copied this yet", not
+ * "nobody added it". Gated by the same `canSeePerson` the credit line uses: a
+ * name that would introduce a stranger comes back blank, and the row simply
+ * has no uploader as far as the client is concerned.
+ *
+ * Splices, like `canSeePerson`, because the viewer's placeholder differs
+ * between the queries that need this.
+ */
+const UPLOADER_ID_T = `COALESCE(t.origin_adder_id, t.owner_telegram_id)`;
+const UPLOADER_JOIN_T = `LEFT JOIN users up ON up.telegram_user_id = ${UPLOADER_ID_T}`;
+
+function uploaderColumns(viewer: string): string {
+  const visible = canSeePerson(viewer, UPLOADER_ID_T);
+  return `CASE WHEN ${visible} THEN ${UPLOADER_ID_T} END AS uploader_id,
+     CASE WHEN ${visible} THEN COALESCE(up.handle, up.username) END AS uploader_username`;
+}
+
 /** How long a soft-deleted track stays restorable before it is swept. */
 const UNDO_WINDOW_DAYS = 30;
 
@@ -215,10 +237,12 @@ export async function listTracks(
     `SELECT ${TRACK_COLUMNS_T},
        CASE WHEN ${visible} THEN ts.origin_id END AS credit_user_id,
        CASE WHEN ${visible} THEN COALESCE(ou.handle, ou.username) END AS credit_username,
+       ${uploaderColumns("$1")},
        EXISTS (SELECT 1 FROM playlist_tracks pt WHERE pt.track_id = t.id) AS in_playlist
      FROM tracks t
      LEFT JOIN track_saves ts ON ts.saved_track_id = t.id AND ts.saver_id = $1
      LEFT JOIN users ou ON ou.telegram_user_id = ts.origin_id
+     ${UPLOADER_JOIN_T}
      WHERE t.owner_telegram_id = $1 AND ${LIVE_T}
        AND ($2 = 'all' OR NOT EXISTS (
          SELECT 1 FROM playlist_tracks pt WHERE pt.track_id = t.id
@@ -989,10 +1013,12 @@ export async function listPlaylistTracksForListener(
   requesterTelegramId: number
 ): Promise<Track[]> {
   const { rows } = await getPool().query<Track>(
-    `SELECT ${TRACK_COLUMNS_T}
+    `SELECT ${TRACK_COLUMNS_T},
+       ${uploaderColumns("$2")}
      FROM playlist_tracks pt
      JOIN tracks t ON t.id = pt.track_id
      JOIN playlists p ON p.id = pt.playlist_id
+     ${UPLOADER_JOIN_T}
      WHERE pt.playlist_id = $1 AND ${LIVE_T} AND ${playlistVisibleTo("$2")}
      ORDER BY pt.position ASC`,
     [playlistId, requesterTelegramId]
@@ -1313,7 +1339,10 @@ export async function listTracksByTag(
   value: string
 ): Promise<Track[]> {
   const { rows } = await getPool().query<Track>(
-    `SELECT ${TRACK_COLUMNS_T} FROM tracks t
+    `SELECT ${TRACK_COLUMNS_T},
+       ${uploaderColumns("$1")}
+     FROM tracks t
+     ${UPLOADER_JOIN_T}
      WHERE t.owner_telegram_id = $1 AND ${LIVE_T} AND t.${column} = $2
      ORDER BY t.created_at ASC`,
     [ownerTelegramId, value]
@@ -2765,7 +2794,8 @@ export interface HomePayload {
  */
 async function homeShelf(telegramUserId: number): Promise<Track[]> {
   const { rows } = await getPool().query<Track>(
-    `SELECT ${TRACK_COLUMNS_T}
+    `SELECT ${TRACK_COLUMNS_T},
+       ${uploaderColumns("$1")}
      FROM tracks t
      LEFT JOIN (
        SELECT track_id, MAX(played_at) AS last_at
@@ -2773,6 +2803,7 @@ async function homeShelf(telegramUserId: number): Promise<Track[]> {
        WHERE telegram_user_id = $1
        GROUP BY track_id
      ) recent ON recent.track_id = t.id
+     ${UPLOADER_JOIN_T}
      WHERE ${LIVE_T}
        AND (recent.last_at IS NOT NULL OR t.owner_telegram_id = $1)
        AND ${trackVisibleTo("$1", "t")}

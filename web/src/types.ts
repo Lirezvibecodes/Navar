@@ -14,7 +14,7 @@ export interface Track {
   telegram_file_id: string;
   mime_type: string | null;
   has_cover: boolean;
-  /** Who first brought this track into Navaar. No UI yet — see the roadmap. */
+  /** Who first brought this track into Navaar. The id only; see uploader_* for the name. */
   origin_adder_id: string | null;
   /** When the owner hearted it. Only meaningful on tracks you own. */
   favorited_at: string | null;
@@ -24,6 +24,13 @@ export interface Track {
   /** Who you got this track from; blank unless you know them. Library only. */
   credit_user_id?: string | null;
   credit_username?: string | null;
+  /**
+   * Who put the track into Navaar in the first place — you, for anything you
+   * forwarded yourself. Blank when naming them would introduce a stranger, so
+   * treat the absence as "nobody to name" rather than "nobody added it".
+   */
+  uploader_id?: string | null;
+  uploader_username?: string | null;
   /** Whether it sits in any playlist — the All/Unsorted split, precomputed. */
   in_playlist?: boolean;
 }

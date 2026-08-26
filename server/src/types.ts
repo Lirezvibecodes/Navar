@@ -25,6 +25,15 @@ export interface Track {
   credit_user_id?: string | null;
   credit_username?: string | null;
   /**
+   * Who put this track into Navaar in the first place, resolved by the
+   * listings. `origin_adder_id` is the same person by a different name — an id
+   * with nobody attached to it — so these two carry the name the id could not,
+   * under the same visibility rule as the credit line: a stranger stays
+   * anonymous no matter how many hands the file passed through.
+   */
+  uploader_id?: string | null;
+  uploader_username?: string | null;
+  /**
    * Whether the track sits in any playlist. Carried on the library listing so
    * the Crate's All/Unsorted chips are a filter over rows already in hand
    * rather than a second request.

@@ -3,8 +3,9 @@ import type { Track } from "../types";
 import { Cover } from "./PixelArt";
 import { Avatar } from "./Avatar";
 import { CheckIcon, DotsIcon, HeartIcon } from "../icons";
-import { formatDuration, trackArtist, trackTitle } from "../lib/format";
+import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/format";
 import { haptic } from "../telegram";
+import { useLibrary } from "../context/LibraryContext";
 import { useLongPress } from "./ui";
 
 /**
@@ -75,6 +76,7 @@ export function TrackRow({
   onMenu,
   onToggleFavorite,
 }: TrackRowProps) {
+  const { me } = useLibrary();
   const press = useLongPress(() => onEnterSelection?.());
 
   // The heart pops only while it is being filled — never on a rerender that
@@ -82,7 +84,13 @@ export function TrackRow({
   const [popping, setPopping] = useState(false);
 
   const meta = secondary ?? trackArtist(track);
-  const credit = track.credit_user_id && track.credit_username;
+  // Who put it here, when that is somebody other than you. A library is mostly
+  // your own uploads, and a row that says your own name nine times in a screen
+  // is nine rows of nothing — the tag is worth its width exactly when the
+  // answer is somebody else. The face is the credit avatar this line already
+  // carried; all that is new is that it now says whose it is.
+  const uploader = trackUploader(track, me?.id);
+  const tag = uploader && !uploader.you ? uploader : null;
 
   return (
     <div
@@ -191,12 +199,11 @@ export function TrackRow({
               minWidth: 0,
             }}
           >
-            {credit ? (
-              <Avatar
-                userId={track.credit_user_id!}
-                username={track.credit_username}
-                size={14}
-              />
+            {tag ? (
+              <span className="nav-uploader-tag" title={`Added by @${tag.name}`}>
+                <Avatar userId={tag.id} username={tag.name} size={14} />
+                <span className="nav-clip">@{tag.name}</span>
+              </span>
             ) : null}
             <span className="nav-clip">
               <Highlighted text={meta} query={query} />
