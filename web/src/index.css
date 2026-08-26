@@ -220,19 +220,25 @@ body {
    surface still reads as a surface rather than as a smear.
    --------------------------------------------------------------------------- */
 
+/* The material, measured off the reference sheet rather than guessed: the body
+   runs #1a1a1a at the top to about #212121 at the bottom, and the rim is
+   brightest along the bottom edge (#525252) against a much darker top (#2a2a2a)
+   and mid sides (#363636). It is a dark pane lit from below, not a white film
+   lit from above, and getting the direction wrong is what made every glass
+   surface in the app read as a different substance from the one in the
+   reference. The alphas below land on those greys over the app's near-black. */
 .nav-glass {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.075));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.11));
   backdrop-filter: blur(28px) saturate(190%);
   -webkit-backdrop-filter: blur(28px) saturate(190%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
-    0 10px 30px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.155);
+  border-bottom-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
 }
 @supports not (backdrop-filter: blur(1px)) {
   .nav-glass {
-    background: linear-gradient(180deg, rgba(46, 48, 52, 0.94), rgba(24, 25, 28, 0.94));
+    background: linear-gradient(180deg, rgba(26, 26, 26, 0.94), rgba(38, 38, 38, 0.94));
   }
 }
 
@@ -240,35 +246,36 @@ body {
    sit over artwork rather than over the background wash, and a light glass
    pill on top of a bright cover turns into a smear. */
 .nav-bar-glass {
-  background: linear-gradient(180deg, rgba(32, 34, 36, 0.9), rgba(13, 14, 15, 0.86));
+  background: linear-gradient(180deg, rgba(20, 21, 22, 0.9), rgba(33, 34, 36, 0.88));
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 14px 34px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-top-color: rgba(255, 255, 255, 0.12);
+  border-bottom-color: rgba(255, 255, 255, 0.26);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
 }
 @supports not (backdrop-filter: blur(1px)) {
   .nav-bar-glass {
-    background: linear-gradient(180deg, rgba(32, 34, 36, 0.985), rgba(13, 14, 15, 0.985));
+    background: linear-gradient(180deg, rgba(20, 21, 22, 0.985), rgba(33, 34, 36, 0.985));
   }
 }
 
-/* The player's queue/lyrics sheet: deeper blur, light only from above, and a
-   shadow that falls upward because the sheet sits on top of the screen. */
+/* The player's queue/lyrics sheet. The same dark body as the rest of the
+   material, but this one keeps its highlight on the top edge: that edge is
+   where the sheet meets the screen it slid out of, and it is the only line
+   saying the sheet is a separate thing on top. Its shadow falls upward for the
+   same reason. */
 .nav-sheet {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.04));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.035));
   backdrop-filter: blur(34px) saturate(190%);
   -webkit-backdrop-filter: blur(34px) saturate(190%);
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    0 -16px 44px rgba(0, 0, 0, 0.55);
+  border-top: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 -16px 44px rgba(0, 0, 0, 0.55);
   border-radius: 22px 22px 0 0;
 }
 @supports not (backdrop-filter: blur(1px)) {
   .nav-sheet {
-    background: linear-gradient(180deg, rgba(42, 44, 48, 0.96), rgba(20, 21, 24, 0.96));
+    background: linear-gradient(180deg, rgba(34, 34, 36, 0.96), rgba(22, 22, 24, 0.96));
   }
 }
 
@@ -856,6 +863,94 @@ button {
    the checkbox appearing on top of them. */
 .nav-select-shift {
   transition: transform var(--dur-view) var(--ease);
+}
+
+/* ---------------------------------------------------------------------------
+   Who put it here
+
+   The credit face a row already carried, now with the name beside it. It has a
+   hard ceiling because it is the least important thing on the line: a person
+   with a long handle gives up their own name before the song gives up its
+   artist.
+   --------------------------------------------------------------------------- */
+
+.nav-uploader-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  /* Shrinks eight times as readily as the artist beside it, so a narrow phone
+     takes the space out of the handle and not out of the song. Its floor is
+     the face plus an ellipsis — the nameless credit avatar this line carried
+     before, so the worst case is where we started. */
+  flex: 0 8 auto;
+  /* The floor that makes that shrink factor mean anything. Left at `auto` the
+     minimum is the tag's own min-content — face plus the whole capped handle —
+     and a flex item cannot shrink past its minimum, so the factor above would
+     never come into play. 40px is the face, its gap, and enough of a handle to
+     be a handle; it is under the natural width of even the shortest username
+     Telegram issues, so it is a floor and never a padding. */
+  min-width: 40px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* The ceiling belongs on the name, not on the tag around it. A max-width on
+   the flex item itself is a max-size violation the moment a handle is longer
+   than the cap, and a violated item is frozen at its cap — which would hand
+   the whole squeeze back to the artist, the exact opposite of the rule above. */
+.nav-uploader-tag .nav-clip {
+  max-width: 10ch;
+}
+
+/* ---------------------------------------------------------------------------
+   The lyric strip under the transport
+
+   A three-line window over the words, with the line being sung held in the
+   middle of it. The lines move; the window does not — which is why the whole
+   column is translated by whole line-heights rather than each line animating
+   into a new place, and why the height is fixed in a variable both this file
+   and the component read.
+   --------------------------------------------------------------------------- */
+
+.nav-lyric-strip {
+  --lyric-line: 22px;
+  position: relative;
+  height: calc(var(--lyric-line) * 3);
+  overflow: hidden;
+  width: 100%;
+  text-align: center;
+  /* Feathered rather than cut: a line that is on its way out should leave,
+     not be sliced off by an edge the reader can see. */
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 34%, #000 66%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 34%, #000 66%, transparent);
+}
+
+.nav-lyric-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  transition: transform var(--dur-focal) var(--ease);
+  will-change: transform;
+}
+
+.nav-lyric-line {
+  height: var(--lyric-line);
+  line-height: var(--lyric-line);
+  padding: 0 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.34);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    color var(--dur-state) var(--ease),
+    opacity var(--dur-state) var(--ease);
+}
+
+.nav-lyric-line[data-on="true"] {
+  color: #fff;
+  font-weight: 600;
 }
 
 /* ---------------------------------------------------------------------------

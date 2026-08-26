@@ -438,9 +438,14 @@ function SharedFooter({
               left: 0,
               bottom: 0,
               height: 2,
-              width: `${Math.round(progress * 100)}%`,
+              // Scaled rather than widened: a width that changes relays out the
+              // row under it on every tick of a bar that ticks four times a
+              // second.
+              width: "100%",
+              transformOrigin: "left center",
+              transform: `scaleX(${progress})`,
               background: "var(--color-nav-action)",
-              transition: "width 240ms linear",
+              transition: "transform 240ms linear",
             }}
           />
           <CollectionArt

@@ -260,6 +260,10 @@ function Dots({
             borderRadius: 3,
             background:
               i === active ? "var(--color-nav-action)" : "rgba(255,255,255,.25)",
+            // A width transition, deliberately. It relayouts three 6px boxes
+            // once per swipe, and every way of faking it with a transform
+            // either changes the gaps or needs a second element sliding behind
+            // the dots — more machinery than the thing it animates.
             transition: "width var(--dur-state) var(--ease)",
           }}
         />
