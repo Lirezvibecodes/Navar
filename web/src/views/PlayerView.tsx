@@ -8,6 +8,7 @@ import {
 } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
+import { Avatar } from "../components/Avatar";
 import { Cover } from "../components/PixelArt";
 import { TrackMenu } from "../components/TrackMenu";
 import type { TrackMenuTarget } from "../components/TrackMenu";
@@ -32,7 +33,13 @@ import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
 import { applyFocalGrow, focalRiseVars } from "../lib/focal";
-import { formatDuration, formatRemaining, trackArtist, trackTitle } from "../lib/format";
+import {
+  formatDuration,
+  formatRemaining,
+  trackArtist,
+  trackTitle,
+  trackUploader,
+} from "../lib/format";
 import { activeLineAt, parseLyrics, type Lyrics } from "../lib/lyrics";
 import {
   artGlowCss,
@@ -61,7 +68,7 @@ type Pane = "player" | "lyrics" | "queue";
  * It leaves the same way it came: dragged down. See `useDragToDismiss`.
  */
 export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => void }) {
-  const { owns, setFavorite } = useLibrary();
+  const { me, owns, setFavorite } = useLibrary();
   const { toast } = useToast();
   const {
     current,
@@ -113,9 +120,17 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     setGrew(applyFocalGrow(artRef.current));
   }, []);
 
-  // Everything below the artwork is fixed furniture; the artwork is what gives
-  // way on a short screen. Transport and scrubber never scale — they are the
-  // controls, and a smaller play button on a smaller phone is backwards.
+  // Everything below the artwork is furniture; the artwork is what gives way on
+  // a short screen. Transport and scrubber never scale — they are the controls,
+  // and a smaller play button on a smaller phone is backwards.
+  //
+  // The furniture is measured rather than assumed, because it is no longer a
+  // fixed height: the lyric strip appears when the words arrive and is not
+  // there at all on a track nobody has any for. Observing the real box is what
+  // lets the art settle into whatever room is actually left, instead of a
+  // constant that would be wrong in one of those two cases whichever value it
+  // held.
+  const furnitureRef = useRef<HTMLDivElement | null>(null);
   const [artSize, setArtSize] = useState(196);
   useEffect(() => {
     const el = rootRef.current;
@@ -123,22 +138,29 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     const measure = () => {
       const height = el.clientHeight;
       const width = el.clientWidth;
-      // 320 of furniture below the art, 96 above it.
-      const spare = Math.max(120, height - 320);
+      // 96 above the art; below it, whatever the furniture currently is.
+      const below = furnitureRef.current?.offsetHeight ?? 224;
+      const spare = Math.max(120, height - below - 96);
       setArtSize(Math.round(Math.min(320, Math.min(width - 56, spare))));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
+    if (furnitureRef.current) observer.observe(furnitureRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [pane]);
 
   const palette = usePalette(current?.id ?? null, current?.has_cover ?? false);
+  // Fetched here rather than inside the Lyrics pane, because the strip under
+  // the transport needs the same words and neither should send the server
+  // looking twice for one track.
+  const words = useLyrics(current?.id ?? null);
 
   if (!current) return null;
 
   const owned = owns(current);
   const favorited = current.favorited_at != null;
+  const uploader = trackUploader(current, me?.id);
 
   return (
     <div
@@ -233,6 +255,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
             </div>
           </div>
 
+          <div ref={furnitureRef}>
           <div
             style={{
               display: "flex",
@@ -254,6 +277,28 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               >
                 {trackArtist(current)}
               </div>
+              {/* The row hides this when the answer is you; here it does not.
+                  One track has room to be complete, and "you put this here" is
+                  worth reading once even though it would be noise nine times
+                  down a list. */}
+              {uploader ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    marginTop: 6,
+                    fontSize: 11,
+                    color: "rgba(255,255,255,.45)",
+                    minWidth: 0,
+                  }}
+                >
+                  <Avatar userId={uploader.id} username={uploader.name} size={16} />
+                  <span className="nav-clip">
+                    Added by {uploader.you ? "you" : `@${uploader.name}`}
+                  </span>
+                </div>
+              ) : null}
             </div>
             {owned ? (
               <button
@@ -344,6 +389,15 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
             />
           </div>
 
+          <LyricStrip
+            words={words}
+            position={position}
+            onOpen={() => {
+              haptic.tap();
+              setPane("lyrics");
+            }}
+          />
+
           <div style={{ display: "flex", justifyContent: "center", paddingBottom: 6 }}>
             <button
               className="nav-press"
@@ -362,9 +416,10 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               {sleepAt ? `Stops in ${formatDuration((sleepAt - now) / 1000)}` : "Sleep timer"}
             </button>
           </div>
+          </div>
         </div>
       ) : pane === "lyrics" ? (
-        <LyricsPane track={current} position={position} onSeek={seek} />
+        <LyricsPane words={words} position={position} onSeek={seek} />
       ) : (
         <QueuePane
           current={current}
@@ -904,35 +959,126 @@ function Segments({
  * after them, including that person on their next play, gets the stored
  * answer. A track LRCLIB does not have is asked about exactly once, ever.
  */
-function LyricsPane({
-  track,
-  position,
-  onSeek,
-}: {
-  track: Track;
-  position: number;
-  onSeek: (seconds: number) => void;
-}) {
-  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "none">("loading");
-  const activeRef = useRef<HTMLParagraphElement | null>(null);
+interface Words {
+  state: "loading" | "ready" | "none";
+  lyrics: Lyrics | null;
+}
+
+/**
+ * One lookup per track, shared by the strip under the transport and the pane
+ * behind it.
+ *
+ * Opening the player is now what sends the server to look, where it used to be
+ * opening the Lyrics pane — the strip cannot show words nobody has asked for.
+ * The server stores both answers, including "LRCLIB has never heard of this",
+ * so a track is still only ever looked up once no matter how many times it is
+ * played.
+ */
+function useLyrics(trackId: string | null): Words {
+  const [words, setWords] = useState<Words>({ state: "loading", lyrics: null });
 
   useEffect(() => {
+    if (!trackId) return;
     let live = true;
-    setState("loading");
+    setWords({ state: "loading", lyrics: null });
     api
-      .getLyrics(track.id)
+      .getLyrics(trackId)
       .then((raw) => {
         if (!live) return;
-        const parsed = parseLyrics(raw);
-        setLyrics(parsed);
-        setState(parsed ? "ready" : "none");
+        const lyrics = parseLyrics(raw);
+        setWords({ state: lyrics ? "ready" : "none", lyrics });
       })
-      .catch(() => live && setState("none"));
+      .catch(() => live && setWords({ state: "none", lyrics: null }));
     return () => {
       live = false;
     };
-  }, [track.id]);
+  }, [trackId]);
+
+  return words;
+}
+
+/** Which line is being sung, or the first one when nobody timed the file. */
+function activeIn(lyrics: Lyrics | null, position: number): number {
+  if (!lyrics) return -1;
+  if (lyrics.kind !== "timed") return 0;
+  return activeLineAt(lyrics.lines, position);
+}
+
+/**
+ * The words, under the transport, three lines at a time.
+ *
+ * A window that does not move over a column that does: the line being sung is
+ * held in the middle band and the verse slides past it. That is the whole
+ * illusion, and it is why the column is translated by whole line-heights
+ * rather than each line animating to a new place — lines that move
+ * individually arrive at slightly different times and read as a list
+ * reshuffling rather than as a song going by.
+ *
+ * It renders nothing at all when there is nothing to render. A strip that sat
+ * there empty would be a promise the track cannot keep, and the Lyrics segment
+ * is still there for anyone who wants to check.
+ */
+function LyricStrip({
+  words,
+  position,
+  onOpen,
+}: {
+  words: Words;
+  position: number;
+  onOpen: () => void;
+}) {
+  const { state, lyrics } = words;
+  const active = useMemo(() => activeIn(lyrics, position), [lyrics, position]);
+
+  if (state !== "ready" || !lyrics || lyrics.lines.length === 0) return null;
+
+  return (
+    <button
+      className="nav-press"
+      aria-label="Open lyrics"
+      onClick={onOpen}
+      style={{
+        display: "block",
+        width: "100%",
+        padding: "2px 18px 6px",
+        textAlign: "center",
+      }}
+    >
+      <span className="nav-lyric-strip" style={{ display: "block" }}>
+        <span
+          className="nav-lyric-track"
+          style={{
+            display: "block",
+            transform: `translateY(calc(${1 - Math.max(0, active)} * var(--lyric-line)))`,
+          }}
+        >
+          {lyrics.lines.map((line, i) => (
+            <span
+              key={i}
+              className="nav-lyric-line"
+              data-on={i === active}
+              style={{ display: "block" }}
+            >
+              {line.text || " "}
+            </span>
+          ))}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function LyricsPane({
+  words,
+  position,
+  onSeek,
+}: {
+  words: Words;
+  position: number;
+  onSeek: (seconds: number) => void;
+}) {
+  const { state, lyrics } = words;
+  const activeRef = useRef<HTMLParagraphElement | null>(null);
 
   const active = useMemo(
     () =>
