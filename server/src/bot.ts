@@ -17,12 +17,15 @@ import {
   postCoverPhoto,
 } from "./channels";
 import {
+  ACCENT_PRESETS,
   countTracksWithCoverBytes,
   ensureUser,
+  getProfileStats,
   getUserLanguage,
   listTracksMissingCover,
   listTracksWithCoverBytes,
   offloadTrackCover,
+  setAccentColor,
   setUserLanguage,
   updateTrackCover,
   type Lang,
@@ -234,6 +237,128 @@ export function createBot(): Telegraf | null {
         ])
       : undefined;
   }
+
+  /** Quick access, for whenever the welcome message has long since scrolled away. */
+  function quickAccessKeyboard(lang: Lang) {
+    const rows = [];
+    if (config.miniAppUrl) {
+      rows.push([Markup.button.webApp(t(lang, "btn_open_navaar"), config.miniAppUrl)]);
+    }
+    rows.push([
+      Markup.button.callback(t(lang, "btn_profile"), "open_profile"),
+      Markup.button.callback(t(lang, "btn_settings"), "open_settings"),
+    ]);
+    return Markup.inlineKeyboard(rows);
+  }
+
+  async function replyApp(ctx: { from?: { id: number }; reply: (text: string, extra?: any) => Promise<unknown> }) {
+    const lang = await getUserLanguage(ctx.from!.id);
+    await ctx.reply(t(lang, "app_body"), quickAccessKeyboard(lang));
+  }
+
+  async function replyProfile(ctx: { from?: { id: number }; reply: (text: string, extra?: any) => Promise<unknown> }) {
+    const userId = ctx.from!.id;
+    const [lang, stats] = await Promise.all([getUserLanguage(userId), getProfileStats(userId)]);
+    await ctx.reply(
+      t(lang, "profile_body", {
+        tracks: stats.trackCount,
+        artists: stats.artistCount,
+        playlists: stats.playlistCount,
+        listened: formatListened(stats.totalListenedSeconds, lang),
+      }),
+      quickAccessKeyboard(lang)
+    );
+  }
+
+  async function replySettings(ctx: { from?: { id: number }; reply: (text: string, extra?: any) => Promise<unknown> }) {
+    const lang = await getUserLanguage(ctx.from!.id);
+    await ctx.reply(t(lang, "settings_body"), settingsKeyboard(lang));
+  }
+
+  function settingsKeyboard(lang: Lang) {
+    const rows = [];
+    rows.push([
+      Markup.button.callback(t(lang, "btn_language"), "settings_language"),
+      Markup.button.callback(t(lang, "btn_app_color"), "settings_accent"),
+    ]);
+    if (config.miniAppUrl) {
+      rows.push([
+        Markup.button.webApp(t(lang, "btn_profile_picture"), config.miniAppUrl),
+        Markup.button.webApp(t(lang, "btn_name"), config.miniAppUrl),
+      ]);
+    }
+    return Markup.inlineKeyboard(rows);
+  }
+
+  /** `total_listened_seconds` as something a person reads, not a raw count. */
+  function formatListened(totalSeconds: number, lang: Lang): string {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    if (lang === "fa") {
+      return hours > 0 ? `${hours} ساعت و ${minutes} دقیقه` : `${minutes} دقیقه`;
+    }
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+
+  bot.command("app", (ctx) => {
+    if (!isPrivate(ctx)) return;
+    return replyApp(ctx);
+  });
+  bot.command("profile", (ctx) => {
+    if (!isPrivate(ctx)) return;
+    return replyProfile(ctx);
+  });
+  bot.command("settings", (ctx) => {
+    if (!isPrivate(ctx)) return;
+    return replySettings(ctx);
+  });
+
+  bot.action("open_profile", async (ctx) => {
+    await ctx.answerCbQuery();
+    await replyProfile(ctx);
+  });
+  bot.action("open_settings", async (ctx) => {
+    await ctx.answerCbQuery();
+    await replySettings(ctx);
+  });
+
+  bot.action("settings_language", async (ctx) => {
+    const lang = await getUserLanguage(ctx.from.id);
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      t(lang, "language_picker_prompt"),
+      Markup.inlineKeyboard([
+        Markup.button.callback("🇬🇧 English", "lang_en"),
+        Markup.button.callback("🇮🇷 فارسی", "lang_fa"),
+      ])
+    );
+  });
+
+  bot.action("settings_accent", async (ctx) => {
+    const lang = await getUserLanguage(ctx.from.id);
+    await ctx.answerCbQuery();
+    const presets = [...ACCENT_PRESETS];
+    const rows = [];
+    for (let i = 0; i < presets.length; i += 4) {
+      rows.push(
+        presets
+          .slice(i, i + 4)
+          .map((name) => Markup.button.callback(name, `accent_${name}`))
+      );
+    }
+    await ctx.reply(t(lang, "accent_picker_prompt"), Markup.inlineKeyboard(rows));
+  });
+
+  bot.action(
+    new RegExp(`^accent_(${[...ACCENT_PRESETS].join("|")})$`),
+    async (ctx) => {
+      const color = ctx.match[1];
+      const lang = await getUserLanguage(ctx.from.id);
+      await setAccentColor(ctx.from.id, color);
+      await ctx.answerCbQuery();
+      await ctx.reply(t(lang, "accent_set", { color }));
+    }
+  );
 
   // Covers are captured at ingest, so this only matters for tracks added
   // before that existed — or ones whose artwork couldn't be read at the time.

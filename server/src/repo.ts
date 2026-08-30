@@ -1445,6 +1445,22 @@ export async function setCustomAvatar(
   );
 }
 
+/**
+ * The 8 pastel presets the picker offers, keyed by name rather than by hex —
+ * the hex values live in the client's ThemeContext, and this is the one list
+ * both the HTTP route and the bot validate a chosen name against.
+ */
+export const ACCENT_PRESETS = new Set([
+  "lime",
+  "peach",
+  "blush",
+  "lilac",
+  "mint",
+  "sand",
+  "gold",
+  "aqua",
+]);
+
 export async function setAccentColor(
   telegramUserId: number,
   accentColor: string

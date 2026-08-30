@@ -108,6 +108,38 @@ const catalog = {
     en: "Something went wrong saving that file. Please try again.",
     fa: "مشکلی در ذخیره‌ی این فایل پیش آمد. لطفاً دوباره امتحان کن.",
   },
+
+  btn_profile: { en: "My Profile", fa: "پروفایل من" },
+  btn_settings: { en: "Settings", fa: "تنظیمات" },
+  btn_language: { en: "Language", fa: "زبان" },
+  btn_app_color: { en: "App Color", fa: "رنگ اپ" },
+  btn_profile_picture: { en: "Profile Picture", fa: "عکس پروفایل" },
+  btn_name: { en: "Name", fa: "نام" },
+
+  app_body: {
+    en: "Everything's one tap away.",
+    fa: "همه‌چیز فقط یک لمس فاصله داره.",
+  },
+
+  profile_body: {
+    en: "{tracks} tracks · {artists} artists · {playlists} playlists\n{listened} listened",
+    fa: "{tracks} ترک · {artists} خواننده · {playlists} پلی‌لیست\n{listened} گوش داده‌ای",
+  },
+
+  settings_body: {
+    en: "Adjust how Navaar looks and talks to you.",
+    fa: "ظاهر و زبان ناوار را از اینجا تنظیم کن.",
+  },
+
+  accent_picker_prompt: {
+    en: "Pick a color:",
+    fa: "یک رنگ انتخاب کن:",
+  },
+
+  accent_set: {
+    en: "App color set to {color}.",
+    fa: "رنگ اپ روی {color} تنظیم شد.",
+  },
 } satisfies Record<string, Entry>;
 
 type Key = keyof typeof catalog;
