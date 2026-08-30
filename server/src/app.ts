@@ -80,7 +80,7 @@ export function createApp(bot: Telegraf | null): Express {
   // would otherwise be swallowed by the app shell instead of rendering here.
   app.use("/s/track", trackShareRouter());
 
-  // The HTTPS URL a rendered story card is fetched back from — see storyShare.ts.
+  // The HTTPS URL a rendered story card is fetched back from — see storyShareRouter in trackShare.ts.
   app.use("/s/story", storyShareRouter());
 
   // Vite content-hashes everything it emits into /assets, so a file at a given
