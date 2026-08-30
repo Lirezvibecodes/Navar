@@ -33,6 +33,7 @@ import {
 import { t } from "./i18n";
 import { refreshAvatar } from "./avatars";
 import { handleFriendInvite, registerFriendActions } from "./bot-friends";
+import { handlePlaylistShare, handleTrackShare, registerShareActions } from "./bot-share";
 import {
   beginBatch,
   endBatchByCommand,
@@ -130,6 +131,7 @@ export function createBot(): Telegraf | null {
 
   registerFriendActions(bot);
   registerIngestActions(bot);
+  registerShareActions(bot);
 
   // Everything forwarded until the batch is closed goes to one destination.
   // The reply these send becomes the batch's status message: from here on the
@@ -182,6 +184,21 @@ export function createBot(): Telegraf | null {
     if (friendMatch) {
       await handleFriendInvite(bot, ctx.from, Number(friendMatch[1]), (text) =>
         ctx.reply(text, miniAppKeyboard)
+      );
+      return;
+    }
+
+    // A shared track or playlist, same deal: whoever tapped this link came for
+    // the thing being shared, not the welcome.
+    const trackMatch = /^track_([0-9a-fA-F-]{36})$/.exec(ctx.startPayload ?? "");
+    if (trackMatch) {
+      await handleTrackShare(ctx.from.id, trackMatch[1], (text, extra) => ctx.reply(text, extra));
+      return;
+    }
+    const playlistMatch = /^playlist_([0-9a-fA-F-]{36})$/.exec(ctx.startPayload ?? "");
+    if (playlistMatch) {
+      await handlePlaylistShare(ctx.from.id, playlistMatch[1], (text, extra) =>
+        ctx.reply(text, extra)
       );
       return;
     }

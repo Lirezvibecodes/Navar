@@ -140,6 +140,34 @@ const catalog = {
     en: "App color set to {color}.",
     fa: "رنگ اپ روی {color} تنظیم شد.",
   },
+
+  btn_add_to_library: { en: "Add to Library", fa: "افزودن به کتابخانه" },
+  btn_follow_playlist: { en: "Follow Playlist", fa: "دنبال کردن پلی‌لیست" },
+
+  share_track_card: {
+    en: "{title}\n\nAdd it to your library?",
+    fa: "{title}\n\nبه کتابخانه‌ات اضافه شود؟",
+  },
+
+  share_track_unavailable: {
+    en: "That track isn't available to you.",
+    fa: "این ترک برایت در دسترس نیست.",
+  },
+
+  share_playlist_card: {
+    en: "{name} — {count} tracks\n\nFollow this playlist?",
+    fa: "{name} — {count} ترک\n\nاین پلی‌لیست را دنبال کنی؟",
+  },
+
+  share_playlist_unavailable: {
+    en: "That playlist isn't available to you.",
+    fa: "این پلی‌لیست برایت در دسترس نیست.",
+  },
+
+  share_playlist_followed: {
+    en: "Following that playlist now.",
+    fa: "این پلی‌لیست را دنبال می‌کنی.",
+  },
 } satisfies Record<string, Entry>;
 
 type Key = keyof typeof catalog;
