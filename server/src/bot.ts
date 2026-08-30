@@ -162,7 +162,7 @@ export function createBot(): Telegraf | null {
     // /start is the one moment the bot is certain to hear from this person, so
     // it is where the user row and their profile photo are brought up to date.
     // Neither is allowed to delay the reply or fail it.
-    await ensureUser(ctx.from.id, ctx.from.username);
+    await ensureUser(ctx.from.id, ctx.from.username, ctx.from.language_code);
     void refreshAvatar(bot, ctx.from.id);
 
     // A friend deep link arrives as /start with a payload. It answers on its

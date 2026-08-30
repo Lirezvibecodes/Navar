@@ -9,6 +9,8 @@ import type {
   Track,
 } from "./types";
 
+export type Lang = "en" | "fa";
+
 /**
  * Upsert the account and hand back the handle it holds, if any.
  *
@@ -21,29 +23,74 @@ import type {
  * a subquery on a primary key — rather than becoming a settings endpoint the
  * app would have to call before it could draw a switch. Absent means off:
  * somebody who has never touched it has no listen_status row at all.
+ *
+ * `telegramLanguageCode` seeds `language` the first time this row is ever
+ * touched, and only then — `COALESCE(users.language, ...)` leaves an existing
+ * choice alone, whether that choice came from a previous seed or from the
+ * bot's own picker. Passing nothing seeds English, which is always safe to
+ * seed since it is also the picker's own fallback.
  */
 export async function ensureUser(
   telegramUserId: number,
-  username: string | undefined
-): Promise<{ handle: string | null; listeningPublic: boolean }> {
+  username: string | undefined,
+  telegramLanguageCode?: string
+): Promise<{
+  handle: string | null;
+  listeningPublic: boolean;
+  accentColor: string;
+  language: Lang | null;
+}> {
+  const seedLanguage: Lang = telegramLanguageCode?.toLowerCase().startsWith("fa")
+    ? "fa"
+    : "en";
   const { rows } = await getPool().query<{
     handle: string | null;
     listening_public: boolean;
+    accent_color: string;
+    language: Lang | null;
   }>(
-    `INSERT INTO users (telegram_user_id, username)
-     VALUES ($1, $2)
+    `INSERT INTO users (telegram_user_id, username, language)
+     VALUES ($1, $2, $3)
      ON CONFLICT (telegram_user_id)
-     DO UPDATE SET username = EXCLUDED.username
-     RETURNING handle,
+     DO UPDATE SET username = EXCLUDED.username,
+       language = COALESCE(users.language, EXCLUDED.language)
+     RETURNING handle, accent_color, language,
        COALESCE((SELECT ls.is_public FROM listen_status ls
                  WHERE ls.telegram_user_id = users.telegram_user_id), false)
          AS listening_public`,
-    [telegramUserId, username ?? null]
+    [telegramUserId, username ?? null, seedLanguage]
   );
   return {
     handle: rows[0]?.handle ?? null,
     listeningPublic: rows[0]?.listening_public ?? false,
+    accentColor: rows[0]?.accent_color ?? "lime",
+    language: rows[0]?.language ?? null,
   };
+}
+
+/** The language a chosen picker tap sets, overriding whatever was seeded. */
+export async function setUserLanguage(
+  telegramUserId: number,
+  language: Lang
+): Promise<void> {
+  await getPool().query(
+    `UPDATE users SET language = $2 WHERE telegram_user_id = $1`,
+    [telegramUserId, language]
+  );
+}
+
+/**
+ * The language to reply in, for the call sites that already know the user
+ * exists and just need the column — an ingest status edit, say — without
+ * paying for `ensureUser`'s upsert. Falls back to English for a row that
+ * somehow has no language yet, the same fallback the picker itself uses.
+ */
+export async function getUserLanguage(telegramUserId: number): Promise<Lang> {
+  const { rows } = await getPool().query<{ language: Lang | null }>(
+    `SELECT language FROM users WHERE telegram_user_id = $1`,
+    [telegramUserId]
+  );
+  return rows[0]?.language ?? "en";
 }
 
 export interface NewTrack {
@@ -266,6 +313,25 @@ export async function getTrack(
     `SELECT ${TRACK_COLUMNS} FROM tracks
      WHERE id = $1 AND owner_telegram_id = $2 AND ${LIVE}`,
     [id, ownerTelegramId]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Whether this exact file is already in the owner's library — a real
+ * re-forward of the same Telegram file, not just a track that happens to
+ * share a title and artist. Keyed on Telegram's own file identity, which is
+ * the only signal that reliably tells "the same upload again" apart from "a
+ * different rip of the same song".
+ */
+export async function findTrackByFileId(
+  ownerTelegramId: number,
+  telegramFileId: string
+): Promise<Track | null> {
+  const { rows } = await getPool().query<Track>(
+    `SELECT ${TRACK_COLUMNS} FROM tracks
+     WHERE owner_telegram_id = $1 AND telegram_file_id = $2 AND ${LIVE}`,
+    [ownerTelegramId, telegramFileId]
   );
   return rows[0] ?? null;
 }
@@ -1043,6 +1109,78 @@ export async function playlistVisibleToRequester(
 }
 
 /**
+ * Save somebody else's playlist to your own library, without copying it.
+ *
+ * The row is only inserted once the playlist has already passed the same
+ * visibility check every other read of it goes through — a follow can never
+ * outlive the sharing that made it possible, and going private later leaves
+ * the row in place but unreadable, same as any other visibility change.
+ * Following your own playlist is a no-op rather than an error: it changes
+ * nothing a client would need to react to.
+ */
+export async function followPlaylist(
+  followerTelegramId: number,
+  playlistId: string
+): Promise<boolean> {
+  const playlist = await playlistVisibleToRequester(playlistId, followerTelegramId);
+  if (!playlist || String(playlist.owner_telegram_id) === String(followerTelegramId)) {
+    return false;
+  }
+  await getPool().query(
+    `INSERT INTO playlist_follows (follower_telegram_id, playlist_id)
+     VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [followerTelegramId, playlistId]
+  );
+  return true;
+}
+
+export async function unfollowPlaylist(
+  followerTelegramId: number,
+  playlistId: string
+): Promise<void> {
+  await getPool().query(
+    `DELETE FROM playlist_follows WHERE follower_telegram_id = $1 AND playlist_id = $2`,
+    [followerTelegramId, playlistId]
+  );
+}
+
+/**
+ * The playlists this person has followed, in the same shape Home already
+ * hands back a friend's playlist in — whose it is, no share slug. Visibility
+ * is re-checked on every read rather than trusted from follow time, so a
+ * playlist that went private since being followed quietly drops out of this
+ * list instead of 404ing when opened.
+ */
+export async function listFollowedPlaylists(
+  followerTelegramId: number
+): Promise<FriendPlaylist[]> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `SELECT ${personColumns("u", "person")},
+       p.id, p.name, p.updated_at,
+       (p.cover_file_id IS NOT NULL) AS has_cover,
+       ${PLAYLIST_COVER},
+       ${PLAYLIST_TRACK_COUNT}
+     FROM playlist_follows pf
+     JOIN playlists p ON p.id = pf.playlist_id
+     JOIN users u ON u.telegram_user_id = p.owner_telegram_id
+     WHERE pf.follower_telegram_id = $1
+       AND ${playlistVisibleTo("$1")}
+     ORDER BY pf.created_at DESC`,
+    [followerTelegramId]
+  );
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    name: row.name as string,
+    has_cover: Boolean(row.has_cover),
+    cover_track_id: (row.cover_track_id as string | null) ?? null,
+    updated_at: new Date(row.updated_at as string | Date).toISOString(),
+    track_count: Number(row.track_count ?? 0),
+    person: personFrom(row, "person")!,
+  }));
+}
+
+/**
  * A fresh share credential.
  *
  * Twelve random bytes as base64url — sixteen characters, no padding, nothing
@@ -1272,13 +1410,40 @@ export async function getUserAvatarFileId(telegramUserId: number): Promise<strin
   return rows[0]?.avatar_file_id ?? null;
 }
 
+/**
+ * Refreshes the Telegram-sourced avatar. Guarded against a custom upload: once
+ * somebody has set their own picture, the periodic /start refresh must not
+ * quietly replace it with whatever their Telegram profile photo is this week.
+ */
 export async function setUserAvatarFileId(
   telegramUserId: number,
   fileId: string | null
 ): Promise<void> {
   await getPool().query(
-    `UPDATE users SET avatar_file_id = $2 WHERE telegram_user_id = $1`,
+    `UPDATE users SET avatar_file_id = $2
+     WHERE telegram_user_id = $1 AND avatar_source != 'custom'`,
     [telegramUserId, fileId]
+  );
+}
+
+/** Sets a picture the user chose themselves, marking it so the Telegram-photo refresh leaves it alone. */
+export async function setCustomAvatar(
+  telegramUserId: number,
+  fileId: string
+): Promise<void> {
+  await getPool().query(
+    `UPDATE users SET avatar_file_id = $2, avatar_source = 'custom' WHERE telegram_user_id = $1`,
+    [telegramUserId, fileId]
+  );
+}
+
+export async function setAccentColor(
+  telegramUserId: number,
+  accentColor: string
+): Promise<void> {
+  await getPool().query(
+    `UPDATE users SET accent_color = $2 WHERE telegram_user_id = $1`,
+    [telegramUserId, accentColor]
   );
 }
 
@@ -1296,40 +1461,90 @@ export interface DerivedCollection {
 }
 
 /**
- * Albums and artists are not tables. They are a GROUP BY over the tags on the
+ * Albums and artists are not tables. They are computed from the tags on the
  * caller's own tracks, so editing a tag reshapes the view with no migration and
  * no rows to keep in step.
  *
  * Tracks with the tag missing are skipped rather than collected into an
  * "Unknown" bucket: an untagged track belongs in The Crate, where the user can
  * see and fix it, not hidden inside a fake album.
+ *
+ * An album needs more than one track to be worth a shelf of its own — a
+ * single-track "album" is indistinguishable from a single that happened to
+ * carry an album tag, and cluttered the Albums view with one-offs.
  */
-async function listDerived(
-  ownerTelegramId: number,
-  column: "album" | "artist"
-): Promise<DerivedCollection[]> {
+export async function listAlbums(ownerTelegramId: number): Promise<DerivedCollection[]> {
   const { rows } = await getPool().query<DerivedCollection>(
-    `SELECT t.${column} AS name,
+    `SELECT t.album AS name,
        COUNT(*)::int AS track_count,
        (ARRAY_AGG(t.id ORDER BY t.created_at DESC)
          FILTER (WHERE ${HAS_COVER_T}))[1] AS cover_track_id,
-       ${column === "album" ? "MIN(t.artist)" : "NULL::text"} AS artist
+       MIN(t.artist) AS artist
      FROM tracks t
      WHERE t.owner_telegram_id = $1 AND ${LIVE_T}
-       AND t.${column} IS NOT NULL AND t.${column} <> ''
-     GROUP BY t.${column}
-     ORDER BY t.${column} ASC`,
+       AND t.album IS NOT NULL AND t.album <> ''
+     GROUP BY t.album
+     HAVING COUNT(*) > 1
+     ORDER BY t.album ASC`,
     [ownerTelegramId]
   );
   return rows;
 }
 
-export function listAlbums(ownerTelegramId: number): Promise<DerivedCollection[]> {
-  return listDerived(ownerTelegramId, "album");
+/**
+ * The delimiters a multi-artist tag is written with: "Kid A, Thom Yorke",
+ * "Kid A feat. Thom Yorke", "Kid A ft Thom Yorke", "Kid A with Thom Yorke".
+ * A track tagged this way belongs on every one of those artists' pages, not
+ * on a single combined artist named after the whole string — so splitting
+ * happens wherever an artist tag is read, and the raw tag itself is never
+ * rewritten.
+ */
+const ARTIST_SPLIT = /\s*,\s*|\s+feat\.?\s+|\s+ft\.?\s+|\s+with\s+/gi;
+
+export function splitArtists(raw: string): string[] {
+  return raw
+    .split(ARTIST_SPLIT)
+    .map((name) => name.trim())
+    .filter(Boolean);
 }
 
-export function listArtists(ownerTelegramId: number): Promise<DerivedCollection[]> {
-  return listDerived(ownerTelegramId, "artist");
+interface ArtistTagRow {
+  id: string;
+  artist: string;
+  has_cover: boolean;
+}
+
+export async function listArtists(ownerTelegramId: number): Promise<DerivedCollection[]> {
+  const { rows } = await getPool().query<ArtistTagRow>(
+    `SELECT t.id, t.artist, ${HAS_COVER_T} AS has_cover
+     FROM tracks t
+     WHERE t.owner_telegram_id = $1 AND ${LIVE_T}
+       AND t.artist IS NOT NULL AND t.artist <> ''
+     ORDER BY t.created_at DESC`,
+    [ownerTelegramId]
+  );
+
+  // Rows arrive most-recent first, so the first covered track seen for a
+  // name is the one listDerived's ARRAY_AGG/FILTER used to pick.
+  const byName = new Map<string, { track_count: number; cover_track_id: string | null }>();
+  for (const row of rows) {
+    for (const name of splitArtists(row.artist)) {
+      const entry = byName.get(name);
+      if (entry) {
+        entry.track_count += 1;
+        if (entry.cover_track_id === null && row.has_cover) entry.cover_track_id = row.id;
+      } else {
+        byName.set(name, { track_count: 1, cover_track_id: row.has_cover ? row.id : null });
+      }
+    }
+  }
+
+  return Array.from(byName, ([name, v]) => ({
+    name,
+    track_count: v.track_count,
+    cover_track_id: v.cover_track_id,
+    artist: null,
+  })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** The tracks tagged with one album or artist, in the caller's own library. */
@@ -1338,16 +1553,32 @@ export async function listTracksByTag(
   column: "album" | "artist",
   value: string
 ): Promise<Track[]> {
+  if (column === "album") {
+    const { rows } = await getPool().query<Track>(
+      `SELECT ${TRACK_COLUMNS_T},
+         ${uploaderColumns("$1")}
+       FROM tracks t
+       ${UPLOADER_JOIN_T}
+       WHERE t.owner_telegram_id = $1 AND ${LIVE_T} AND t.album = $2
+       ORDER BY t.created_at ASC`,
+      [ownerTelegramId, value]
+    );
+    return rows;
+  }
+
+  // An artist tag is split at read time (see splitArtists above), so a track
+  // credited to more than one artist must be matched against every name it
+  // carries rather than the whole string.
   const { rows } = await getPool().query<Track>(
     `SELECT ${TRACK_COLUMNS_T},
        ${uploaderColumns("$1")}
      FROM tracks t
      ${UPLOADER_JOIN_T}
-     WHERE t.owner_telegram_id = $1 AND ${LIVE_T} AND t.${column} = $2
+     WHERE t.owner_telegram_id = $1 AND ${LIVE_T} AND t.artist IS NOT NULL
      ORDER BY t.created_at ASC`,
-    [ownerTelegramId, value]
+    [ownerTelegramId]
   );
-  return rows;
+  return rows.filter((row) => splitArtists(row.artist ?? "").includes(value));
 }
 
 /**
@@ -2322,6 +2553,13 @@ export async function listFriendsListening(
  * The track is visibility-checked for the same reason the status is: a play is
  * the input to your own history, and a history should not be able to hold a
  * row out of a library you cannot open.
+ *
+ * `users.total_listened_seconds` is incremented in the same statement, off the
+ * `inserted` CTE, so it only ever moves when a play row actually lands — the
+ * pruned rows that came before it are never double-counted, and a play that
+ * fails the visibility check adds nothing. It exists because `plays` itself
+ * is pruned a few lines up: a lifetime total can't be summed from a table that
+ * throws its own history away.
  */
 export async function recordPlay(
   telegramUserId: number,
@@ -2331,11 +2569,19 @@ export async function recordPlay(
     `WITH pruned AS (
        DELETE FROM plays
        WHERE played_at < now() - interval '${PLAY_RETENTION_DAYS} days'
+     ),
+     inserted AS (
+       INSERT INTO plays (telegram_user_id, track_id)
+       SELECT $1, t.id
+       FROM tracks t
+       WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
+       RETURNING track_id
      )
-     INSERT INTO plays (telegram_user_id, track_id)
-     SELECT $1, t.id
-     FROM tracks t
-     WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}`,
+     UPDATE users u
+     SET total_listened_seconds = u.total_listened_seconds + COALESCE(t.duration_seconds, 0)
+     FROM inserted i
+     JOIN tracks t ON t.id = i.track_id
+     WHERE u.telegram_user_id = $1`,
     [telegramUserId, trackId]
   );
   return (rowCount ?? 0) > 0;
@@ -2577,6 +2823,100 @@ export async function searchPeople(
     [viewerTelegramId, prefix]
   );
   return rows;
+}
+
+/**
+ * The owner's own tracks, for Telegram's native "Share via…" inline mode
+ * (`@BotUsername query`, typed in any chat). An empty query hands back the
+ * most recently added tracks instead of nothing, so sharing works before the
+ * sender has typed a single letter — the common case, since most inline
+ * shares are "the thing I just added", not a search.
+ */
+export async function searchOwnTracks(
+  ownerTelegramId: number,
+  query: string,
+  limit = SEARCH_LIMIT
+): Promise<Track[]> {
+  const trimmed = query.trim();
+  if (trimmed.length === 0) {
+    const { rows } = await getPool().query<Track>(
+      `SELECT ${TRACK_COLUMNS} FROM tracks
+       WHERE owner_telegram_id = $1 AND ${LIVE}
+       ORDER BY created_at DESC
+       LIMIT ${limit}`,
+      [ownerTelegramId]
+    );
+    return rows;
+  }
+  const needle = "%" + trimmed.replace(/[\\%_]/g, "\\$&") + "%";
+  const { rows } = await getPool().query<Track>(
+    `SELECT ${TRACK_COLUMNS} FROM tracks
+     WHERE owner_telegram_id = $1 AND ${LIVE}
+       AND (title ILIKE $2 OR artist ILIKE $2)
+     ORDER BY created_at DESC
+     LIMIT ${limit}`,
+    [ownerTelegramId, needle]
+  );
+  return rows;
+}
+
+/** The playlist-shaped twin of {@link searchOwnTracks}, same empty-query rule. */
+export async function searchOwnPlaylists(
+  ownerTelegramId: number,
+  query: string,
+  limit = SEARCH_LIMIT
+): Promise<Playlist[]> {
+  const trimmed = query.trim();
+  const needle = trimmed.length > 0 ? "%" + trimmed.replace(/[\\%_]/g, "\\$&") + "%" : "%";
+  const { rows } = await getPool().query<Playlist>(
+    `SELECT ${PLAYLIST_COLUMNS},
+       ${PLAYLIST_TRACK_COUNT},
+       ${PLAYLIST_COVER}
+     FROM playlists p
+     WHERE p.owner_telegram_id = $1 AND p.name ILIKE $2
+     ORDER BY p.updated_at DESC
+     LIMIT ${limit}`,
+    [ownerTelegramId, needle]
+  );
+  return rows;
+}
+
+/**
+ * Counts for `/profile`: how much is in the library, and how long it's been
+ * listened to. `total_listened_seconds` rides along from `users` rather than
+ * being summed from `plays`, which is retention-pruned and can't answer a
+ * lifetime question on its own — see {@link recordPlay}.
+ */
+export interface ProfileStats {
+  trackCount: number;
+  artistCount: number;
+  playlistCount: number;
+  totalListenedSeconds: number;
+}
+
+export async function getProfileStats(telegramUserId: number): Promise<ProfileStats> {
+  const { rows } = await getPool().query<{
+    track_count: string;
+    artist_count: string;
+    playlist_count: string;
+    total_listened_seconds: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM tracks
+          WHERE owner_telegram_id = $1 AND ${LIVE}) AS track_count,
+       (SELECT COUNT(DISTINCT artist) FROM tracks
+          WHERE owner_telegram_id = $1 AND ${LIVE} AND artist IS NOT NULL) AS artist_count,
+       (SELECT COUNT(*) FROM playlists WHERE owner_telegram_id = $1) AS playlist_count,
+       (SELECT total_listened_seconds FROM users WHERE telegram_user_id = $1) AS total_listened_seconds`,
+    [telegramUserId]
+  );
+  const row = rows[0];
+  return {
+    trackCount: Number(row?.track_count ?? 0),
+    artistCount: Number(row?.artist_count ?? 0),
+    playlistCount: Number(row?.playlist_count ?? 0),
+    totalListenedSeconds: Number(row?.total_listened_seconds ?? 0),
+  };
 }
 
 /**

@@ -66,7 +66,7 @@ export async function handleBotMembershipChange(
   bot: Telegraf,
   update: {
     chat: { id: number; type: string; title?: string };
-    from: { id: number; username?: string };
+    from: { id: number; username?: string; language_code?: string };
     old_chat_member: { status: string };
     new_chat_member: { status: string };
   }
@@ -81,7 +81,7 @@ export async function handleBotMembershipChange(
   // The crate belongs to whoever added the bot: a playlist row needs an owner,
   // and a group is not one. Everyone else reaches it through group_members.
   const adderId = update.from.id;
-  await ensureUser(adderId, update.from.username);
+  await ensureUser(adderId, update.from.username, update.from.language_code);
   await touchGroupMember(update.chat.id, adderId);
 
   const { created } = await ensureGroupPlaylist(
@@ -126,23 +126,23 @@ function isPresent(status: string): boolean {
  */
 export function noteGroupPresence(ctx: {
   chat?: { id: number; type: string };
-  from?: { id: number; username?: string; is_bot?: boolean };
+  from?: { id: number; username?: string; is_bot?: boolean; language_code?: string };
 }): void {
   const chat = ctx.chat;
   const from = ctx.from;
   if (!chat || !isGroupChat(chat) || !from || from.is_bot) return;
 
-  void rememberMember(chat.id, from.id, from.username);
+  void rememberMember(chat.id, from.id, from.username, from.language_code);
 }
 
 /** Someone joined the chat, so they can see its crate from now on. */
 export function noteGroupJoins(
   chatId: number,
-  members: { id: number; username?: string; is_bot?: boolean }[]
+  members: { id: number; username?: string; is_bot?: boolean; language_code?: string }[]
 ): void {
   for (const member of members) {
     if (member.is_bot) continue;
-    void rememberMember(chatId, member.id, member.username);
+    void rememberMember(chatId, member.id, member.username, member.language_code);
   }
 }
 
@@ -156,11 +156,12 @@ export function noteGroupDeparture(chatId: number, userId: number): void {
 async function rememberMember(
   chatId: number,
   userId: number,
-  username: string | undefined
+  username: string | undefined,
+  languageCode: string | undefined
 ): Promise<void> {
   try {
     // The membership row references users, so the user row has to exist first.
-    await ensureUser(userId, username);
+    await ensureUser(userId, username, languageCode);
     await touchGroupMember(chatId, userId);
   } catch (err) {
     console.error("[groups] could not record group membership:", err);

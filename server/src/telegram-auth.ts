@@ -5,6 +5,7 @@ export interface TelegramInitDataUser {
   username?: string;
   first_name?: string;
   last_name?: string;
+  language_code?: string;
 }
 
 export interface ValidatedInitData {

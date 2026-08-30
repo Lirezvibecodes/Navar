@@ -21,9 +21,10 @@ export function authRouter(): Router {
       return;
     }
 
-    const { handle, listeningPublic } = await ensureUser(
+    const { handle, listeningPublic, accentColor } = await ensureUser(
       validated.user.id,
-      validated.user.username
+      validated.user.username,
+      validated.user.language_code
     );
     const token = signSession(validated.user.id, validated.user.username);
     // The identity comes back alongside the token because the client needs it
@@ -44,6 +45,9 @@ export function authRouter(): Router {
         // never said otherwise, and carried here so the switch on the profile
         // screen renders in the right position without a request of its own.
         listening_public: listeningPublic,
+        // One of the 8 presets from Section 9's picker; "lime" for anybody
+        // who has never opened it, matching the app's own default theme.
+        accent_color: accentColor,
       },
     });
   }));
