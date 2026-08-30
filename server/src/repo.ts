@@ -1898,6 +1898,10 @@ export interface IngestSession {
   status_edited_at: string | null;
   awaiting_name: boolean;
   name_prompt_message_id: number | null;
+  /** Title (or artist, or filename) of the most recently added track. */
+  last_track_label: string | null;
+  /** Running count of tracks added per primary artist, for the closing summary. */
+  artist_tally: Record<string, number>;
 }
 
 /** How long a session may sit untouched before the bot closes it out. */
@@ -1928,7 +1932,9 @@ export async function startIngestSession(
        updated_at = now(),
        status_edited_at = NULL,
        awaiting_name = false,
-       name_prompt_message_id = NULL
+       name_prompt_message_id = NULL,
+       last_track_label = NULL,
+       artist_tally = '{}'::jsonb
      RETURNING *`,
     [telegramUserId, mode, playlistId]
   );
@@ -2077,12 +2083,28 @@ export async function createTrackInSession(
         );
       }
 
+      // Only the first credited artist is tallied — a collab counting against
+      // every name on the tag would make the tally sum past added_count, and
+      // the closing summary's "N more" arithmetic depends on it not.
+      const primaryArtist = input.artist ? splitArtists(input.artist)[0] ?? null : null;
+      const label = input.title ?? input.artist ?? "Untitled";
+
       const { rows: updated } = await client.query<IngestSession>(
         `UPDATE ingest_sessions
-         SET added_count = added_count + 1, updated_at = now()
+         SET added_count = added_count + 1,
+             updated_at = now(),
+             last_track_label = $2,
+             artist_tally = CASE WHEN $3::text IS NOT NULL
+               THEN jsonb_set(
+                 artist_tally,
+                 ARRAY[$3]::text[],
+                 to_jsonb(COALESCE((artist_tally->>$3)::int, 0) + 1)
+               )
+               ELSE artist_tally
+             END
          WHERE telegram_user_id = $1
          RETURNING *`,
-        [input.ownerTelegramId]
+        [input.ownerTelegramId, label, primaryArtist]
       );
       return { track, session: updated[0] ?? session };
     }

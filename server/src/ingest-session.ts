@@ -45,6 +45,13 @@ const PLACEHOLDER_PLAYLIST_NAME = "New playlist";
 const HINT_THRESHOLD = 5;
 const HINT_WINDOW_MINUTES = 5;
 
+/** Below this, the status line is one sentence — a "currently" detail is noise. */
+const FEW_TRACKS_THRESHOLD = 2;
+/** Above this, a batch is long enough to earn a progress bar. */
+const LARGE_BATCH_THRESHOLD = 10;
+/** Width of the progress bar, in blocks. */
+const PROGRESS_BAR_WIDTH = 10;
+
 /** The slice of a Telegraf context this module needs, so it can be handed a stub. */
 interface Replyable {
   chat?: { id: number };
@@ -335,12 +342,30 @@ function batchLabel(session: IngestSession): string {
   return "Playlist";
 }
 
+/**
+ * A block of {@link PROGRESS_BAR_WIDTH} characters that fills and wraps every
+ * ten tracks — there is no fixed batch size to measure progress against, so
+ * this reads as "still going" rather than "almost done".
+ */
+function progressBar(count: number): string {
+  const filled = count % PROGRESS_BAR_WIDTH || PROGRESS_BAR_WIDTH;
+  return "▓".repeat(filled) + "░".repeat(PROGRESS_BAR_WIDTH - filled);
+}
+
 function statusText(session: IngestSession): string {
   const lines = [
     session.added_count === 0
       ? `${batchLabel(session)} — forward the files.`
       : `${batchLabel(session)} — ${session.added_count} added.`,
   ];
+
+  if (session.added_count >= LARGE_BATCH_THRESHOLD) {
+    lines.push(progressBar(session.added_count));
+  }
+
+  if (session.added_count >= FEW_TRACKS_THRESHOLD && session.last_track_label) {
+    lines.push(`Currently: ${session.last_track_label}`);
+  }
 
   if (session.failed_names.length > 0) {
     lines.push(`${session.failed_names.length} didn't make it.`);
@@ -365,6 +390,25 @@ function statusKeyboard(session: IngestSession) {
   return Markup.inlineKeyboard(buttons);
 }
 
+/**
+ * "5 by Ivy, 4 by Cass, 3 more" — the top two artists by count, with whatever
+ * is left (tracks by anyone else, plus tracks with no artist at all) folded
+ * into a remainder so the numbers always add back up to `addedCount`. Null
+ * when there is nothing worth grouping: one artist is just the batch itself.
+ */
+function artistSummary(tally: Record<string, number>, addedCount: number): string | null {
+  const entries = Object.entries(tally).sort(([, a], [, b]) => b - a);
+  if (entries.length < 2) return null;
+
+  const top = entries.slice(0, 2);
+  const shown = top.reduce((sum, [, count]) => sum + count, 0);
+  const rest = addedCount - shown;
+
+  const parts = top.map(([name, count]) => `${count} by ${name}`);
+  if (rest > 0) parts.push(`${rest} more`);
+  return parts.join(", ");
+}
+
 function summaryText(session: IngestSession, reason: "user" | "expired"): string {
   const failed = session.failed_names;
   const sent = session.added_count + failed.length;
@@ -386,10 +430,17 @@ function summaryText(session: IngestSession, reason: "user" | "expired"): string
         : "tagged"
       : "in the playlist";
 
+  const grouping =
+    session.added_count >= FEW_TRACKS_THRESHOLD
+      ? artistSummary(session.artist_tally, session.added_count)
+      : null;
+
   lines.push(
     failed.length === 0
-      ? `${session.added_count} ${session.added_count === 1 ? "track" : "tracks"} ${where}.`
-      : `You sent ${sent}. ${session.added_count} ${where}, ${failed.length} didn't make it:`
+      ? grouping
+        ? `${session.added_count} tracks ${where} — ${grouping}.`
+        : `${session.added_count} ${session.added_count === 1 ? "track" : "tracks"} ${where}.`
+      : `You sent ${sent}. ${session.added_count} ${where}${grouping ? ` (${grouping})` : ""}, ${failed.length} didn't make it:`
   );
 
   if (failed.length > 0) {
