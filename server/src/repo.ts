@@ -39,6 +39,7 @@ export async function ensureUser(
   listeningPublic: boolean;
   accentColor: string;
   language: Lang | null;
+  languageConfirmed: boolean;
 }> {
   const seedLanguage: Lang = telegramLanguageCode?.toLowerCase().startsWith("fa")
     ? "fa"
@@ -48,13 +49,14 @@ export async function ensureUser(
     listening_public: boolean;
     accent_color: string;
     language: Lang | null;
+    language_confirmed: boolean;
   }>(
     `INSERT INTO users (telegram_user_id, username, language)
      VALUES ($1, $2, $3)
      ON CONFLICT (telegram_user_id)
      DO UPDATE SET username = EXCLUDED.username,
        language = COALESCE(users.language, EXCLUDED.language)
-     RETURNING handle, accent_color, language,
+     RETURNING handle, accent_color, language, language_confirmed,
        COALESCE((SELECT ls.is_public FROM listen_status ls
                  WHERE ls.telegram_user_id = users.telegram_user_id), false)
          AS listening_public`,
@@ -65,16 +67,22 @@ export async function ensureUser(
     listeningPublic: rows[0]?.listening_public ?? false,
     accentColor: rows[0]?.accent_color ?? "lime",
     language: rows[0]?.language ?? null,
+    languageConfirmed: rows[0]?.language_confirmed ?? false,
   };
 }
 
-/** The language a chosen picker tap sets, overriding whatever was seeded. */
+/**
+ * The language an explicit picker tap sets, overriding whatever was seeded —
+ * and the one thing that marks the choice as made, so /start's picker gate
+ * never shows again for this person.
+ */
 export async function setUserLanguage(
   telegramUserId: number,
   language: Lang
 ): Promise<void> {
   await getPool().query(
-    `UPDATE users SET language = $2 WHERE telegram_user_id = $1`,
+    `UPDATE users SET language = $2, language_confirmed = true
+     WHERE telegram_user_id = $1`,
     [telegramUserId, language]
   );
 }

@@ -1,4 +1,4 @@
-import { Telegraf } from "telegraf";
+import { Markup, Telegraf } from "telegraf";
 import { message } from "telegraf/filters";
 import { config } from "./config";
 import {
@@ -18,11 +18,15 @@ import {
 import {
   countTracksWithCoverBytes,
   ensureUser,
+  getUserLanguage,
   listTracksMissingCover,
   listTracksWithCoverBytes,
   offloadTrackCover,
+  setUserLanguage,
   updateTrackCover,
+  type Lang,
 } from "./repo";
+import { t } from "./i18n";
 import { refreshAvatar } from "./avatars";
 import { handleFriendInvite, registerFriendActions } from "./bot-friends";
 import {
@@ -162,12 +166,14 @@ export function createBot(): Telegraf | null {
     // /start is the one moment the bot is certain to hear from this person, so
     // it is where the user row and their profile photo are brought up to date.
     // Neither is allowed to delay the reply or fail it.
-    await ensureUser(ctx.from.id, ctx.from.username, ctx.from.language_code);
+    const user = await ensureUser(ctx.from.id, ctx.from.username, ctx.from.language_code);
     void refreshAvatar(bot, ctx.from.id);
+    const lang: Lang = user.language ?? "en";
 
     // A friend deep link arrives as /start with a payload. It answers on its
     // own terms — someone tapping a friend's link came to add a friend, not to
-    // read the welcome.
+    // read the welcome, and it should never be blocked by the language picker
+    // below: the seeded language is good enough to get through it.
     const friendMatch = /^friend_(\d+)$/.exec(ctx.startPayload ?? "");
     if (friendMatch) {
       await handleFriendInvite(bot, ctx.from, Number(friendMatch[1]), (text) =>
@@ -176,22 +182,48 @@ export function createBot(): Telegraf | null {
       return;
     }
 
+    // A plain /start is the one moment worth pausing on to ask. `language` is
+    // never null by the time this runs — ensureUser always seeds a guess —
+    // so `languageConfirmed` is what actually distinguishes "guessed" from
+    // "chosen", and the picker shows exactly once, until /settings reopens it.
+    if (!ctx.startPayload && !user.languageConfirmed) {
+      await ctx.reply(
+        t(lang, "language_picker_prompt"),
+        Markup.inlineKeyboard([
+          Markup.button.callback("🇬🇧 English", "lang_en"),
+          Markup.button.callback("🇮🇷 فارسی", "lang_fa"),
+        ])
+      );
+      return;
+    }
+
     // The welcome has one job: get a first track in. Everything else the bot
     // can do is discovered later, when the user is already holding a library.
-    await ctx.reply(
-      "This is Navaar — your music, kept in Telegram.\n\n" +
-        "Forward me any audio file and it lands in your library. Nothing is uploaded " +
-        "anywhere else: the file stays in Telegram and Navaar keeps the tags, the " +
-        "artwork, and where you left off.\n\n" +
-        "Sending a whole album? Send /album first and I'll keep them together.\n\n" +
-        "Send a track to start, then open the app.\n\n" +
-        "/playlist — turn the next batch you send into a playlist\n" +
-        "/album — tag the next batch as one album\n" +
-        "/done — finish the batch you're sending\n" +
-        "/covers — fill in artwork for tracks that are missing it",
-      miniAppKeyboard
-    );
+    await ctx.reply(t(lang, "start_welcome"), startKeyboard(lang));
   });
+
+  bot.action(/^lang_(en|fa)$/, async (ctx) => {
+    const lang = ctx.match[1] as Lang;
+    await setUserLanguage(ctx.from.id, lang);
+    await ctx.answerCbQuery();
+    await ctx.reply(t(lang, "start_welcome"), startKeyboard(lang));
+  });
+
+  bot.action("add_music_hint", async (ctx) => {
+    const lang = await getUserLanguage(ctx.from.id);
+    await ctx.answerCbQuery();
+    await ctx.reply(t(lang, "add_music_hint"));
+  });
+
+  /** The welcome's own buttons: open the app, or learn how adding music works. */
+  function startKeyboard(lang: Lang) {
+    const rows = [];
+    if (config.miniAppUrl) {
+      rows.push([Markup.button.webApp(t(lang, "btn_open_navaar"), config.miniAppUrl)]);
+    }
+    rows.push([Markup.button.callback(t(lang, "btn_add_music"), "add_music_hint")]);
+    return Markup.inlineKeyboard(rows);
+  }
 
   // Covers are captured at ingest, so this only matters for tracks added
   // before that existed — or ones whose artwork couldn't be read at the time.
