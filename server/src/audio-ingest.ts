@@ -3,6 +3,7 @@ import {
   createTrackInGroupCrate,
   createTrackInSession,
   ensureUser,
+  findTrackByFileId,
   purgeExpiredTracks,
 } from "./repo";
 import type { IngestSession, NewTrack } from "./repo";
@@ -46,28 +47,48 @@ export interface IncomingAudio {
 export class AudioTooLargeError extends Error {}
 
 /**
+ * Thrown when the file being ingested is already in this owner's library — a
+ * genuine re-forward of the same Telegram file, identified by file_id rather
+ * than by title/artist, since a retagged or re-encoded copy of the same song
+ * is a different file and deliberately not flagged. Carries the row that was
+ * already there, so the caller can point at it instead of running a second
+ * lookup.
+ */
+export class DuplicateTrackError extends Error {
+  constructor(public readonly existing: Track) {
+    super("This file is already in the library.");
+  }
+}
+
+/**
  * Everything that happens to a file before it is written down, which is the
- * same wherever the file was posted: the size check, and the one pass over its
- * tag header.
+ * same wherever the file was posted: the duplicate check, the size check, and
+ * the one pass over its tag header.
  *
  * The audio itself is never downloaded or copied anywhere — only the header is
  * read, to lift out the album art and what the file says about itself.
  * Streaming later re-resolves the file_id through the Bot API on demand.
  *
- * Only one thing here is allowed to fail an ingest, and that is the file being
- * bigger than the Bot API will ever hand over. Everything else about Telegram
- * is treated as weather: the row we are about to write stores a file_id, not
- * bytes, and every reader of that file_id resolves it again when it needs it.
- * A getFile that is rate-limited or briefly unavailable at this moment says
- * nothing about whether the track can be played in a minute's time, so it must
- * not be the reason a forwarded track is refused.
+ * Only one thing here is allowed to fail an ingest outright, and that is the
+ * file being bigger than the Bot API will ever hand over (a duplicate isn't a
+ * failure either — it's reported back, not thrown past). Everything else
+ * about Telegram is treated as weather: the row we are about to write stores
+ * a file_id, not bytes, and every reader of that file_id resolves it again
+ * when it needs it. A getFile that is rate-limited or briefly unavailable at
+ * this moment says nothing about whether the track can be played in a
+ * minute's time, so it must not be the reason a forwarded track is refused.
  */
 async function prepareTrack(
   ownerTelegramId: number,
   username: string | undefined,
   audio: IncomingAudio
-): Promise<NewTrack> {
+): Promise<{ input: NewTrack; incompleteMetadata: boolean }> {
   await ensureUser(ownerTelegramId, username);
+
+  // Caught before the size check or a tag read, so noticing a re-forward
+  // costs nothing beyond the one lookup it takes to know.
+  const existing = await findTrackByFileId(ownerTelegramId, audio.fileId);
+  if (existing) throw new DuplicateTrackError(existing);
 
   if (audio.fileSize && audio.fileSize > MAX_FILE_SIZE_BYTES) {
     throw new AudioTooLargeError(
@@ -102,6 +123,13 @@ async function prepareTrack(
   const title = audio.title ?? tags.title ?? fallbackTitle ?? null;
   const artist = audio.performer ?? tags.artist ?? null;
 
+  // "Incomplete" means neither field the rest of the UI is built around came
+  // through — Telegram's own metadata and the file's embedded tags both came
+  // up empty. A title with no artist (or the reverse) still has something to
+  // show, so only the double-miss is flagged; the track is written down
+  // either way, since a missing tag is never a reason to refuse a file.
+  const incompleteMetadata = !title && !artist;
+
   // The artwork goes to the cover channel and only its file_id is written
   // down, so a library's worth of covers costs the database a few hundred
   // bytes rather than a few hundred megabytes. A channel that is unset or
@@ -121,19 +149,22 @@ async function prepareTrack(
     : null;
 
   return {
-    id,
-    ownerTelegramId,
-    title,
-    artist,
-    album: tags.album,
-    durationSeconds: audio.durationSeconds ?? null,
-    telegramFileId: audio.fileId,
-    mimeType: audio.mimeType ?? null,
-    coverImage: coverFileId ? null : tags.cover?.image ?? null,
-    coverMimeType: coverFileId ? null : tags.cover?.mimeType ?? null,
-    coverFileId,
-    // A fresh ingest is the origin by definition; the save path overrides this.
-    originAdderId: ownerTelegramId,
+    input: {
+      id,
+      ownerTelegramId,
+      title,
+      artist,
+      album: tags.album,
+      durationSeconds: audio.durationSeconds ?? null,
+      telegramFileId: audio.fileId,
+      mimeType: audio.mimeType ?? null,
+      coverImage: coverFileId ? null : tags.cover?.image ?? null,
+      coverMimeType: coverFileId ? null : tags.cover?.mimeType ?? null,
+      coverFileId,
+      // A fresh ingest is the origin by definition; the save path overrides this.
+      originAdderId: ownerTelegramId,
+    },
+    incompleteMetadata,
   };
 }
 
@@ -148,10 +179,14 @@ export async function ingestAudioMessage(
   ownerTelegramId: number,
   username: string | undefined,
   audio: IncomingAudio
-): Promise<{ track: Track; session: IngestSession | null }> {
-  return createTrackInSession(
-    await prepareTrack(ownerTelegramId, username, audio)
+): Promise<{ track: Track; session: IngestSession | null; incompleteMetadata: boolean }> {
+  const { input, incompleteMetadata } = await prepareTrack(
+    ownerTelegramId,
+    username,
+    audio
   );
+  const result = await createTrackInSession(input);
+  return { ...result, incompleteMetadata };
 }
 
 /**
@@ -168,9 +203,12 @@ export async function ingestGroupAudioMessage(
   username: string | undefined,
   audio: IncomingAudio,
   cratePlaylistId: string
-): Promise<{ track: Track; position: number | null }> {
-  return createTrackInGroupCrate(
-    await prepareTrack(senderTelegramId, username, audio),
-    cratePlaylistId
+): Promise<{ track: Track; position: number | null; incompleteMetadata: boolean }> {
+  const { input, incompleteMetadata } = await prepareTrack(
+    senderTelegramId,
+    username,
+    audio
   );
+  const result = await createTrackInGroupCrate(input, cratePlaylistId);
+  return { ...result, incompleteMetadata };
 }

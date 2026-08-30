@@ -73,6 +73,41 @@ const catalog = {
       "هر فایل صوتی را همین‌جا فوروارد یا ارسال کن تا مستقیم وارد کتابخانه‌ات " +
       "شود — نیازی به تایپ‌کردن نیست.",
   },
+
+  track_added: {
+    en: 'Added "{title}" to your library.',
+    fa: "«{title}» به کتابخانه‌ات اضافه شد.",
+  },
+
+  // The file is still written down either way — this only says so plainly,
+  // since a missing tag is the file's fault, not a reason to withhold it.
+  track_added_incomplete: {
+    en:
+      'Added "{title}" — but I couldn\'t find a title or artist for it. ' +
+      "You can fill those in from the app.",
+    fa:
+      "«{title}» اضافه شد — اما عنوان یا خواننده‌ای برایش پیدا نکردم. " +
+      "می‌تونی از اپ تکمیلش کنی.",
+  },
+
+  track_duplicate: {
+    en: '"{title}" is already in your library.',
+    fa: "«{title}» از قبل در کتابخانه‌ات هست.",
+  },
+
+  error_too_large: {
+    en:
+      "That file is over Telegram's 20MB Bot API download limit, so I " +
+      "can't fetch it.",
+    fa:
+      "این فایل از محدودیت ۲۰ مگابایتی دانلود Bot API تلگرام بزرگ‌تر است، " +
+      "پس نمی‌توانم آن را دریافت کنم.",
+  },
+
+  error_generic: {
+    en: "Something went wrong saving that file. Please try again.",
+    fa: "مشکلی در ذخیره‌ی این فایل پیش آمد. لطفاً دوباره امتحان کن.",
+  },
 } satisfies Record<string, Entry>;
 
 type Key = keyof typeof catalog;

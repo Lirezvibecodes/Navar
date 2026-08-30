@@ -5,6 +5,7 @@ import {
   ingestAudioMessage,
   ingestGroupAudioMessage,
   AudioTooLargeError,
+  DuplicateTrackError,
   IncomingAudio,
 } from "./audio-ingest";
 import { resolveCoverArt } from "./cover-art";
@@ -225,6 +226,15 @@ export function createBot(): Telegraf | null {
     return Markup.inlineKeyboard(rows);
   }
 
+  /** What every add-music reply — added, incomplete, or duplicate — offers next. */
+  function trackAddedKeyboard(lang: Lang) {
+    return config.miniAppUrl
+      ? Markup.inlineKeyboard([
+          Markup.button.webApp(t(lang, "btn_open_navaar"), config.miniAppUrl),
+        ])
+      : undefined;
+  }
+
   // Covers are captured at ingest, so this only matters for tracks added
   // before that existed — or ones whose artwork couldn't be read at the time.
   bot.command("covers", async (ctx) => {
@@ -339,9 +349,10 @@ export function createBot(): Telegraf | null {
     maybeSweepIdleSessions(botInstance);
 
     const label = audio.title ?? audio.fileName ?? "track";
+    const lang = await getUserLanguage(userId);
 
     try {
-      const { track, session } = await ingestAudioMessage(
+      const { track, session, incompleteMetadata } = await ingestAudioMessage(
         userId,
         ctx.from?.username,
         audio
@@ -362,11 +373,32 @@ export function createBot(): Telegraf | null {
         return;
       }
 
-      await ctx.reply(`Added "${label}" to your library.`, miniAppKeyboard);
+      await ctx.reply(
+        t(lang, incompleteMetadata ? "track_added_incomplete" : "track_added", {
+          title: label,
+        }),
+        trackAddedKeyboard(lang)
+      );
       // Somebody forwarding a stack of files by hand is doing what /playlist
       // is for, and has no way to know it exists.
       await maybeOfferBatchHint(userId, (text) => ctx.reply(text));
     } catch (err) {
+      if (err instanceof DuplicateTrackError) {
+        const session = await recordIngestFailureIfBatching(
+          userId,
+          `${label} (already added)`
+        );
+        if (session) {
+          refreshStatus(botInstance, session);
+          return;
+        }
+        await ctx.reply(
+          t(lang, "track_duplicate", { title: label }),
+          trackAddedKeyboard(lang)
+        );
+        return;
+      }
+
       const tooLarge = err instanceof AudioTooLargeError;
       if (!tooLarge) console.error("[bot] failed to ingest audio:", err);
 
@@ -378,11 +410,7 @@ export function createBot(): Telegraf | null {
         return;
       }
 
-      await ctx.reply(
-        tooLarge
-          ? "That file is over Telegram's 20MB Bot API download limit, so I can't fetch it."
-          : "Something went wrong saving that file. Please try again."
-      );
+      await ctx.reply(t(lang, tooLarge ? "error_too_large" : "error_generic"));
     }
   }
 
@@ -432,6 +460,10 @@ export function createBot(): Telegraf | null {
         await announceCrateOpened(botInstance, chat);
       }
     } catch (err) {
+      // Already in the crate is not a failure — same silence as any other
+      // successfully-filed track.
+      if (err instanceof DuplicateTrackError) return;
+
       const tooLarge = err instanceof AudioTooLargeError;
       if (!tooLarge) console.error("[bot] failed to ingest group audio:", err);
 
