@@ -146,6 +146,31 @@
   --z-player: 60;
   --z-sheet: 70;
   --z-toast: 80;
+
+  /* The glass, in one place.
+
+     These are measured off .nav-glass — the Crate's selection bar — which is
+     the material the whole app is now cut from. Every other glass surface used
+     to carry its own copy of this recipe, and they drifted: different blur
+     radii, different rim alphas, and the player's sheet lit from *above*, which
+     is the exact inversion of the pane it slides out of. The selection bar and
+     the Now Playing bar are both 58px tall and sit twelve pixels apart, so the
+     mismatch was visible in a single glance.
+
+     The light comes from below. That is the whole of it: the top rim is dim,
+     the bottom rim is bright, and the sheen runs from nearly nothing at the top
+     to twice that at the bottom. Anything that flips those has stopped being
+     this material. */
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.11));
+  --glass-blur: blur(28px) saturate(190%);
+  --glass-rim: rgba(255, 255, 255, 0.2);
+  --glass-rim-top: rgba(255, 255, 255, 0.155);
+  --glass-rim-bottom: rgba(255, 255, 255, 0.3);
+  --glass-lift: 0 10px 30px rgba(0, 0, 0, 0.55);
+  /* For surfaces that float over artwork rather than over the background wash. */
+  --glass-lift-high: 0 14px 34px rgba(0, 0, 0, 0.6);
+  /* What a surface falls back to where backdrop-filter does not exist. */
+  --glass-floor: linear-gradient(180deg, rgba(26, 26, 26, 0.94), rgba(38, 38, 38, 0.94));
 }
 
 /* ---------------------------------------------------------------------------
@@ -241,61 +266,90 @@ body {
    and mid sides (#363636). It is a dark pane lit from below, not a white film
    lit from above, and getting the direction wrong is what made every glass
    surface in the app read as a different substance from the one in the
-   reference. The alphas below land on those greys over the app's near-black. */
+   reference. The alphas land on those greys over the app's near-black; they now
+   live in :root as --glass-*, and everything below is derived from them. */
 .nav-glass {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.11));
-  backdrop-filter: blur(28px) saturate(190%);
-  -webkit-backdrop-filter: blur(28px) saturate(190%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-top-color: rgba(255, 255, 255, 0.155);
-  border-bottom-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  background: var(--glass-sheen);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-rim);
+  border-top-color: var(--glass-rim-top);
+  border-bottom-color: var(--glass-rim-bottom);
+  box-shadow: var(--glass-lift);
 }
 @supports not (backdrop-filter: blur(1px)) {
   .nav-glass {
-    background: linear-gradient(180deg, rgba(26, 26, 26, 0.94), rgba(38, 38, 38, 0.94));
+    background: var(--glass-floor);
   }
 }
 
-/* The floating bars at the bottom. Darker and less lit than .nav-glass: they
-   sit over artwork rather than over the background wash, and a light glass
-   pill on top of a bright cover turns into a smear. */
+/* The floating bars at the bottom. The same sheen and the same rim as
+   .nav-glass — they are the same substance, and the Now Playing bar sits twelve
+   pixels from the selection bar, so anything else reads as a mistake. What is
+   different is what is *under* the sheen: these float over album art rather
+   than over the background wash, and a light pane on top of a bright cover
+   turns into a smear. So an opaque dark floor goes beneath, and the sheen sits
+   on it exactly as it sits on the wash elsewhere. */
 .nav-bar-glass {
-  background: linear-gradient(180deg, rgba(20, 21, 22, 0.9), rgba(33, 34, 36, 0.88));
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-top-color: rgba(255, 255, 255, 0.12);
-  border-bottom-color: rgba(255, 255, 255, 0.26);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
+  background: var(--glass-sheen),
+    linear-gradient(180deg, rgba(20, 21, 22, 0.9), rgba(33, 34, 36, 0.88));
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-rim);
+  border-top-color: var(--glass-rim-top);
+  border-bottom-color: var(--glass-rim-bottom);
+  box-shadow: var(--glass-lift-high);
 }
 @supports not (backdrop-filter: blur(1px)) {
   .nav-bar-glass {
-    background: linear-gradient(180deg, rgba(20, 21, 22, 0.985), rgba(33, 34, 36, 0.985));
+    background: var(--glass-sheen),
+      linear-gradient(180deg, rgba(20, 21, 22, 0.985), rgba(33, 34, 36, 0.985));
   }
 }
 
-/* The player's queue/lyrics sheet. The same dark body as the rest of the
-   material, but this one keeps its highlight on the top edge: that edge is
-   where the sheet meets the screen it slid out of, and it is the only line
-   saying the sheet is a separate thing on top. Its shadow falls upward for the
-   same reason. */
+/* The player's queue/lyrics sheet. Lit from below like everything else: it used
+   to carry its highlight on the top edge, which made the one surface that
+   covers the most screen the one that looked like a different substance. The
+   top edge is still the only rim it has — that edge is where the sheet meets
+   the screen it slid out of — but it now takes the dim value the rest of the
+   material gives its top edge. The shadow still falls upward, because the sheet
+   genuinely is above the thing behind it. */
 .nav-sheet {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.035));
-  backdrop-filter: blur(34px) saturate(190%);
-  -webkit-backdrop-filter: blur(34px) saturate(190%);
-  border-top: 1px solid rgba(255, 255, 255, 0.22);
+  background: var(--glass-sheen);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-top: 1px solid var(--glass-rim-top);
   box-shadow: 0 -16px 44px rgba(0, 0, 0, 0.55);
   border-radius: 22px 22px 0 0;
 }
 @supports not (backdrop-filter: blur(1px)) {
   .nav-sheet {
-    background: linear-gradient(180deg, rgba(34, 34, 36, 0.96), rgba(22, 22, 24, 0.96));
+    background: var(--glass-floor);
   }
 }
 
+/* The hello's face.
+
+   A full-bleed band of the app's two accents with the same film grain that
+   sits over the whole screen, carrying the pixel wordmark. It exists because
+   Welcome and ChooseName were the same box with different words in it, and the
+   first screen anybody sees introduced the app by name in a colour the app
+   never uses again.
+
+   The grain matters more than it sounds: a clean two-stop gradient across a
+   phone-width band shows banding on most of the AMOLED panels this runs on,
+   and the noise that is already over every other screen breaks it up. */
+.nav-hero-band {
+  position: relative;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E")
+      repeat,
+    linear-gradient(150deg, #dffc8e, #89aeff);
+  border-radius: 0 0 26px 26px;
+}
+
 /* The top bar.
-   
+
    It is an overlay, not a row above the content: the scroll container starts
    at the top of the screen and runs underneath it. Without that, a list that
    scrolls up simply stops existing at the bar's lower edge — a hard cut with
@@ -328,8 +382,8 @@ body {
   height: calc(100% + 26px);
   pointer-events: none;
   background: linear-gradient(180deg, rgba(3, 3, 3, 0.78), rgba(3, 3, 3, 0));
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
   mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 100%);
 }
@@ -352,6 +406,21 @@ body {
   font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* Numbers, in the pixel face. A timecode, a track count, a selection tally —
+   the small runs of digits the app is full of. The face is what the display
+   face is good at: it was drawn on a grid and digits are the glyphs a grid
+   flatters. Words are not, which is why this is never put on a whole phrase —
+   wrap the number, leave the sentence alone.
+
+   Tabular figures because these mostly sit in columns or count up live, and
+   proportional digits make a running timecode shuffle sideways on every tick. */
+.nav-numeral {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: 0.01em;
 }
 
 /* ---------------------------------------------------------------------------
@@ -527,7 +596,7 @@ button {
 .nav-field:focus-visible {
   outline: none;
   box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.55),
+    var(--glass-lift),
     inset 0 0 0 1.5px rgba(223, 252, 142, 0.55);
 }
 
@@ -688,10 +757,14 @@ button {
   flex: none;
   height: 52px;
   padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-rim);
+  border-top-color: var(--glass-rim-top);
+  border-bottom-color: var(--glass-rim-bottom);
   border-radius: 26px;
   color: #fff;
-  background: rgba(23, 23, 23, 0.94);
+  /* The sheen over an opaque floor — same construction as .nav-bar-glass, minus
+     the blur, for the reason in the note above. */
+  background: var(--glass-sheen), rgba(23, 23, 23, 0.94);
   transition:
     background-color var(--dur-tab) var(--ease),
     border-color var(--dur-tab) var(--ease),
@@ -700,11 +773,8 @@ button {
     opacity var(--dur-tap) var(--ease-in);
 }
 .nav-tab[aria-current="page"] {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.22);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 10px 30px rgba(0, 0, 0, 0.5);
+  background: var(--glass-sheen), rgba(255, 255, 255, 0.16);
+  box-shadow: var(--glass-lift);
 }
 
 /* The lime disc. It is a child rather than the button's own background so it
@@ -967,8 +1037,11 @@ button {
   height: var(--lyric-line);
   line-height: var(--lyric-line);
   padding: 0 4px;
-  font-size: 12.5px;
-  font-weight: 500;
+  /* Follows the pane, small: same weight, same tight tracking, so the
+     three-line window and the full screen read as one thing. */
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: rgba(255, 255, 255, 0.34);
   white-space: nowrap;
   overflow: hidden;
@@ -980,7 +1053,106 @@ button {
 
 .nav-lyric-line[data-on="true"] {
   color: #fff;
-  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   The lyrics pane
+
+   The full screen behind the Lyrics chip. It is the strip's idea at size: the
+   sung line is held a little above the middle and the song moves past it.
+
+   One thing it deliberately does not do is fill a line word by word. LRCLIB
+   gives line-level timings and nothing finer, so a per-word sweep would be an
+   animation inventing information the file does not contain.
+   --------------------------------------------------------------------------- */
+
+.nav-lyric-pane {
+  /* Same feather as the strip, weighted to the top: the reader is heading
+     down the page, so what is coming should arrive softly and what is gone
+     can leave sharply. */
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 12%, #000 92%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 12%, #000 92%, transparent);
+}
+
+.nav-lyric-big {
+  margin: 0 0 14px;
+  padding: 2px 0;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+  text-align: left;
+  /* Grows to the right off its own left edge, so the line does not drift
+     sideways as it becomes the one being sung. */
+  transform-origin: left center;
+  transition:
+    color var(--dur-state) var(--ease),
+    filter var(--dur-state) var(--ease),
+    transform var(--dur-focal) var(--ease);
+}
+
+/* Sung lines are dimmed harder than unsung ones. That asymmetry is the whole
+   reason the screen reads as a position in a song rather than a list. */
+.nav-lyric-big[data-state="past"] {
+  color: rgba(255, 255, 255, 0.22);
+}
+
+.nav-lyric-big[data-state="coming"] {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.nav-lyric-big[data-state="on"] {
+  color: #fff;
+  transform: scale(1.04);
+}
+
+/* An untimed paste has no line being sung, so it gets one flat colour and no
+   promise that anything is tracking the audio. */
+.nav-lyric-big[data-state="plain"] {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.nav-lyric-big[data-far="true"] {
+  filter: blur(1.5px);
+}
+
+/* The instrumental. Three squares, the same blocks and the same cadence as
+   the boot loader in index.html — the keyframes are redeclared here because
+   that markup is torn down the moment the app mounts. */
+.nav-lyric-gap {
+  display: flex;
+  gap: 5px;
+  margin: 2px 0 18px;
+}
+
+.nav-lyric-gap i {
+  width: 9px;
+  height: 9px;
+  background: var(--color-nav-action);
+  opacity: 0.16;
+}
+
+.nav-lyric-gap[data-on="true"] i {
+  animation: nav-lyric-block 1.6s ease-in-out infinite;
+}
+
+.nav-lyric-gap[data-on="true"] i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.nav-lyric-gap[data-on="true"] i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes nav-lyric-block {
+  0%,
+  70%,
+  100% {
+    opacity: 0.16;
+  }
+  30% {
+    opacity: 1;
+  }
 }
 
 /* ---------------------------------------------------------------------------

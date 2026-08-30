@@ -3,10 +3,10 @@ import * as api from "../api";
 import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
-import { Empty, Screen, Skeleton } from "../components/ui";
+import { Counted, Empty, Screen, Skeleton } from "../components/ui";
 import { ChevronRightIcon } from "../icons";
 import { useToast } from "../context/ToastContext";
-import { personName, pluralise } from "../lib/format";
+import { personName } from "../lib/format";
 import { haptic } from "../telegram";
 import type { Person, Playlist } from "../types";
 
@@ -71,7 +71,7 @@ export function FriendLibraryView({
             {handle}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--color-nav-muted)", marginTop: 3 }}>
-            {pluralise(playlists.length, "shared playlist")}
+            <Counted count={playlists.length} one="shared playlist" />
           </div>
         </div>
       </div>
@@ -127,7 +127,7 @@ export function FriendLibraryView({
                     marginTop: 2,
                   }}
                 >
-                  {pluralise(playlist.track_count ?? 0, "track")}
+                  <Counted count={playlist.track_count ?? 0} one="track" />
                 </span>
               </span>
               <ChevronRightIcon size={15} style={{ color: "var(--color-nav-faint)" }} />

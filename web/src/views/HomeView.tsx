@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
+import { Deck } from "../components/Deck";
 import { Cover, CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
-import { Empty, Screen, SectionHeader, Skeleton } from "../components/ui";
+import { Counted, Screen, SectionHeader, Skeleton, Empty } from "../components/ui";
 import { ArrowRightIcon, PlayIcon } from "../icons";
 import { usePlayer } from "../context/PlayerContext";
-import { personName, pluralise, trackArtist, trackTitle } from "../lib/format";
+import { personName, trackArtist, trackTitle } from "../lib/format";
 import { cached, cacheKey, ttl, useCached } from "../lib/cache";
 import { haptic } from "../telegram";
 
@@ -28,7 +29,13 @@ import { haptic } from "../telegram";
  * onto a screen that keeps all of it, so a row scrolling off the end of Home
  * never takes anything with it.
  */
-export function HomeView({ nav }: { nav: Navigation }) {
+export function HomeView({
+  nav,
+  onOpenPlayer,
+}: {
+  nav: Navigation;
+  onOpenPlayer: () => void;
+}) {
   const { current, playFrom } = usePlayer();
 
   // Held across the remount every navigation performs, so coming back to Home
@@ -78,13 +85,32 @@ export function HomeView({ nav }: { nav: Navigation }) {
   // hidden by saying it.
   if (!home.continue_listening && !home.playlists) return <FirstRun />;
 
+  // The deck takes the head of the shelf, and the shelf gives it up. Showing
+  // the same track twice, six pixels apart, at two different sizes, reads as a
+  // bug rather than as emphasis.
+  const decked = shelf[0] ?? null;
+  const rest = shelf.slice(1);
+
   return (
     <Screen>
-      {shelf.length > 0 ? (
+      {decked ? (
+        <div style={{ marginTop: 6 }}>
+          <Deck
+            track={decked}
+            live={current?.id === decked.id}
+            onPlay={() =>
+              playFrom({ label: "Recent", key: "home:recent", tracks: shelf }, decked)
+            }
+            onOpen={onOpenPlayer}
+          />
+        </div>
+      ) : null}
+
+      {rest.length > 0 ? (
         <>
-          <SectionHeader title="Continue listening" spaceAbove={6} />
+          <SectionHeader title="Continue listening" />
           <div className="nav-shelf" style={{ gap: 10 }}>
-            {shelf.map((track, i) => (
+            {rest.map((track, i) => (
               <button
                 key={track.id}
                 className="nav-press nav-row-in"
@@ -136,7 +162,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
               <PlaylistCard
                 key={playlist.id}
                 playlist={playlist}
-                subtitle={pluralise(playlist.track_count ?? 0, "track")}
+                subtitle={<Counted count={playlist.track_count ?? 0} one="track" />}
                 index={i}
                 onOpen={() => nav.push({ type: "playlist", id: playlist.id, name: playlist.name })}
               />
@@ -209,7 +235,8 @@ export function HomeView({ nav }: { nav: Navigation }) {
           }}
         >
           <span className="nav-clip" style={{ flex: 1, textAlign: "left" }}>
-            {pluralise(home.unsorted, "track")} haven&rsquo;t found a home yet
+            <Counted count={home.unsorted} one="track" /> haven&rsquo;t found a home
+            yet
           </span>
           <ArrowRightIcon size={13} style={{ color: "var(--color-nav-action)" }} />
         </button>
@@ -254,7 +281,7 @@ function PlaylistCard({
     updated_at: string;
     cover_track_id?: string | null;
   };
-  subtitle: string;
+  subtitle: React.ReactNode;
   index: number;
   onOpen: () => void;
 }) {
@@ -357,6 +384,13 @@ function PlaylistCard({
 function FirstRun() {
   return (
     <Screen>
+      {/* The same object the steady-state screen opens on, with nothing in it.
+          A first run that shows a different shape teaches you a layout you then
+          never see again. */}
+      <div style={{ marginTop: 6 }}>
+        <Deck track={null} live={false} onPlay={() => {}} onOpen={() => {}} />
+      </div>
+
       <div
         className="nav-rise"
         style={{
@@ -364,19 +398,11 @@ function FirstRun() {
           flexDirection: "column",
           alignItems: "center",
           gap: 10,
-          padding: "48px 16px 0",
+          padding: "30px 16px 0",
           textAlign: "center",
         }}
       >
-        <div
-          style={{
-            width: 96,
-            height: 96,
-            borderRadius: 18,
-            background: "linear-gradient(150deg,#DFFC8E,#89AEFF)",
-          }}
-        />
-        <h2 className="nav-display" style={{ margin: "14px 0 0", fontSize: 20 }}>
+        <h2 className="nav-display" style={{ margin: 0, fontSize: 20 }}>
           Your first track
         </h2>
         <p

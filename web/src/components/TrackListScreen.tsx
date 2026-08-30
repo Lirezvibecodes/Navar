@@ -5,7 +5,7 @@ import { TrackRow } from "./TrackRow";
 import { TrackMenu } from "./TrackMenu";
 import type { TrackMenuTarget } from "./TrackMenu";
 import { ActionButton, Empty, GhostButton, Screen, Skeleton } from "./ui";
-import { ShuffleIcon } from "../icons";
+import { PlayIcon, ShuffleIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import type { Track } from "../types";
@@ -44,7 +44,7 @@ export function TrackListScreen({
   nav: Navigation;
   art: ReactNode;
   name: string;
-  subtitle: string;
+  subtitle: ReactNode;
   /** A line under the header — a playlist owner's description. */
   note?: ReactNode;
   tracks: Track[];
@@ -117,7 +117,11 @@ export function TrackListScreen({
         {note}
 
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          {/* The hero action of the screen, so it wears the disc. The
+              Shuffle beside it stays a ghost - there is one primary here. */}
           <ActionButton
+            variant="disc"
+            icon={PlayIcon}
             disabled={tracks.length === 0}
             onClick={() => playFrom(source)}
           >

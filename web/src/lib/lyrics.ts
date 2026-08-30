@@ -80,3 +80,20 @@ export function activeLineAt(lines: LyricLine[], position: number): number {
   }
   return found;
 }
+
+/**
+ * How many seconds of silence come before line `i` — the distance from the
+ * previous line's timestamp to this one's, and from zero for the first line,
+ * which is the intro.
+ *
+ * The pane uses it to find the instrumental breaks: line-level timings are all
+ * LRCLIB gives us, but a gap between two of them is a real, derivable fact
+ * about the song, and it is the difference between a screen that has stopped
+ * and a screen that is waiting.
+ */
+export function gapBefore(lines: LyricLine[], i: number): number {
+  const at = lines[i]?.at;
+  if (at == null) return 0;
+  const before = i === 0 ? 0 : (lines[i - 1]?.at ?? 0);
+  return at - before;
+}

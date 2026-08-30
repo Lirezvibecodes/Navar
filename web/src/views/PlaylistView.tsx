@@ -5,7 +5,14 @@ import { CollectionArt, Cover } from "../components/PixelArt";
 import { NameSheet } from "../components/NameSheet";
 import { ShareSheet } from "../components/ShareSheet";
 import { TrackListScreen } from "../components/TrackListScreen";
-import { Empty, GhostButton, Sheet, SheetDivider, SheetItem } from "../components/ui";
+import {
+  Counted,
+  Empty,
+  GhostButton,
+  Sheet,
+  SheetDivider,
+  SheetItem,
+} from "../components/ui";
 import {
   CheckIcon,
   DotsIcon,
@@ -18,7 +25,7 @@ import {
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, ttl, useCached } from "../lib/cache";
-import { pluralise, trackTitle } from "../lib/format";
+import { trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
 import type { PlaylistVisibility, Track } from "../types";
 
@@ -221,7 +228,9 @@ export function PlaylistView({
           />
         }
         name={title}
-        subtitle={pluralise(playlist?.track_count ?? tracks.length, "track")}
+        subtitle={
+          <Counted count={playlist?.track_count ?? tracks.length} one="track" />
+        }
         note={
           playlist?.description ? (
             <p

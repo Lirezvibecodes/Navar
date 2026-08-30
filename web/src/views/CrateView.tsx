@@ -10,6 +10,7 @@ import {
   ChipRow,
   Empty,
   GhostButton,
+  Num,
   Portal,
   Screen,
   Skeleton,
@@ -22,14 +23,17 @@ import { useToast } from "../context/ToastContext";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
 import type { Track } from "../types";
+import type { CrateFilter } from "../view";
 
 /**
  * The Crate — everything you own, in one list.
  *
  * It is not a playlist and there is no row for it in the database. It is the
- * library itself, and the `All` / `Unsorted` split is a filter over the same
- * rows: Unsorted is the tracks that are in no playlist yet, which is the pile
- * the app is quietly asking you to deal with.
+ * library itself, and the three chips are filters over the same rows.
+ * Unsorted is the tracks that are in no playlist yet, which is the pile the app
+ * is quietly asking you to deal with. Favourites is the other end of it: the
+ * heart has always been on every row and in the player, and this is the first
+ * screen that reads it back.
  *
  * Search is local. Every track you own is already in memory, so filtering as
  * you type costs nothing and works while the server is asleep; a search that
@@ -54,7 +58,7 @@ export function CrateView({
   autoSearch = false,
 }: {
   nav: Navigation;
-  filter: "all" | "unsorted";
+  filter: CrateFilter;
   autoSearch?: boolean;
 }) {
   const { tracks, loading, owns, setFavorite, dropTracks, putTrack, playlists } =
@@ -62,7 +66,7 @@ export function CrateView({
   const { current, isPlaying, playFrom, setShuffle } = usePlayer();
   const { errorToast, undoToast, setToastLift } = useToast();
 
-  const [tab, setTab] = useState<"all" | "unsorted">(filter);
+  const [tab, setTab] = useState<CrateFilter>(filter);
   const [sort, setSort] = useState<Sort>("recent");
   const [searching, setSearching] = useState(autoSearch);
   const [query, setQuery] = useState("");
@@ -87,9 +91,21 @@ export function CrateView({
     [tracks]
   );
 
+  const favoritesCount = useMemo(
+    () => tracks.filter((t) => t.favorited_at != null).length,
+    [tracks]
+  );
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = tab === "unsorted" ? tracks.filter((t) => !t.in_playlist) : tracks;
+    // Filtered here rather than fetched: LibraryContext already holds every
+    // track you own, and a favourite is a column on one of them.
+    let list =
+      tab === "unsorted"
+        ? tracks.filter((t) => !t.in_playlist)
+        : tab === "favorites"
+          ? tracks.filter((t) => t.favorited_at != null)
+          : tracks;
     if (q) {
       list = list.filter(
         (t) =>
@@ -115,7 +131,12 @@ export function CrateView({
 
   const source = useMemo(
     () => ({
-      label: tab === "unsorted" ? "Unsorted" : "The Crate",
+      label:
+        tab === "unsorted"
+          ? "Unsorted"
+          : tab === "favorites"
+            ? "Favourites"
+            : "The Crate",
       key: `crate:${tab}:${sort}:${query}`,
       tracks: rows,
     }),
@@ -170,6 +191,12 @@ export function CrateView({
               count={unsortedCount}
               active={tab === "unsorted"}
               onClick={() => setTab("unsorted")}
+            />
+            <Chip
+              label="Favourites"
+              count={favoritesCount}
+              active={tab === "favorites"}
+              onClick={() => setTab("favorites")}
             />
           </ChipRow>
           <span style={{ flex: 1 }} />
@@ -234,13 +261,21 @@ export function CrateView({
             <Skeleton />
           ) : rows.length === 0 ? (
             <Empty
-              title={query ? "Nothing matched" : "Nothing here yet"}
+              title={
+                query
+                  ? "Nothing matched"
+                  : tab === "favorites"
+                    ? "No favourites yet"
+                    : "Nothing here yet"
+              }
               body={
                 query
                   ? "Try part of a title, an artist or an album."
                   : tab === "unsorted"
                     ? "Every track you own is in a playlist. Nothing left to file."
-                    : "Forward any audio file to the bot and it lands here, tagged and playable."
+                    : tab === "favorites"
+                      ? "Tap the heart on any track and it turns up here."
+                      : "Forward any audio file to the bot and it lands here, tagged and playable."
               }
             />
           ) : (
@@ -425,7 +460,7 @@ function SelectionBar({
                 color: "var(--color-nav-muted)",
               }}
             >
-              {count === 0 ? "" : `${count} selected`}
+              {count === 0 ? "" : <><Num>{count}</Num> selected</>}
             </span>
             <GhostButton onClick={onSelectAll} height={38} width={54}>
               All

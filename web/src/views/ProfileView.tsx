@@ -7,6 +7,7 @@ import { CollectionArt } from "../components/PixelArt";
 import { NameSheet } from "../components/NameSheet";
 import {
   ActionButton,
+  Counted,
   Empty,
   GhostButton,
   Screen,
@@ -18,7 +19,7 @@ import { ChevronRightIcon, LibraryIcon, ShareIcon, StarIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
-import { personName, pluralise } from "../lib/format";
+import { personName } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
 import type { BadgeTier } from "../types";
 
@@ -170,8 +171,8 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
         {isMe ? (
           <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
-            {pluralise(tracks.length, "track")} ·{" "}
-            {pluralise(playlists.length, "playlist")}
+            <Counted count={tracks.length} one="track" /> ·{" "}
+            <Counted count={playlists.length} one="playlist" />
           </span>
         ) : null}
       </div>
@@ -282,7 +283,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                         marginTop: 2,
                       }}
                     >
-                      {pluralise(playlist.track_count ?? 0, "track")}
+                      <Counted count={playlist.track_count ?? 0} one="track" />
                     </span>
                   </span>
                   <ChevronRightIcon

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { haptic } from "../telegram";
-import type { IconProps } from "../icons";
+import { ArrowRightIcon, type IconProps } from "../icons";
 
 /**
  * The small shared pieces: the scroll container every screen sits in, the
@@ -66,6 +66,13 @@ export function Screen({
 /**
  * A run-in header above a shelf or a list. More space above than below, so the
  * heading belongs to what follows it rather than floating between two blocks.
+ *
+ * 16.5px, not 13. At 13 the heading was the same size as the row captions under
+ * it, so a screen with four shelves read as one continuous grey column and you
+ * had to find the section breaks by looking at the gaps. It is one of exactly
+ * two heading treatments in the app — this and the uppercase eyebrow in TopBar.
+ * Its trailing action stays small: the size difference between a heading and
+ * its affordance is what says which one is the label.
  */
 export function SectionHeader({
   title,
@@ -88,7 +95,9 @@ export function SectionHeader({
         marginBottom: 9,
       }}
     >
-      <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>
+      <span
+        style={{ fontSize: 16.5, fontWeight: 600, letterSpacing: "-0.015em" }}
+      >
         {title}
       </span>
       {action ? (
@@ -111,6 +120,55 @@ export function SectionHeader({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The other heading — the small uppercase one. It names a kind of thing rather
+ * than a section of content: what sort of screen you are on in the top bar,
+ * what a list in the player's sheet is. There were three heading styles in the
+ * app before this was shared; the player had invented a fourth locally.
+ */
+export const EYEBROW: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: "var(--color-nav-muted)",
+};
+
+/**
+ * A number, set in the pixel display face.
+ *
+ * Digits only, and never a whole phrase: Pixelify Sans renders lowercase words
+ * at 11px as a smudge. `<Num>142</Num> tracks` is the shape — the number wears
+ * the accent face and the word beside it stays in the reading face. Tabular
+ * figures because most of these sit in a column or count up live, and figures
+ * that change width make the line twitch.
+ */
+export function Num({ children }: { children: ReactNode }) {
+  return <span className="nav-numeral">{children}</span>;
+}
+
+/**
+ * `12 tracks` with the 12 in the pixel face — the shape most counts in the app
+ * take. It exists so that the split between the digits and the word is made
+ * once rather than at every call site, and so that nothing is tempted to put
+ * the whole phrase in the display face.
+ */
+export function Counted({
+  count,
+  one,
+  many = `${one}s`,
+}: {
+  count: number;
+  one: string;
+  many?: string;
+}) {
+  return (
+    <>
+      <Num>{count}</Num> {count === 1 ? one : many}
+    </>
   );
 }
 
@@ -236,7 +294,10 @@ export function Chip({
       <span>
         {label}
         {count == null ? null : (
-          <span style={{ opacity: active ? 0.55 : 0.5 }}> · {count}</span>
+          <span style={{ opacity: active ? 0.55 : 0.5 }}>
+            {" · "}
+            <Num>{count}</Num>
+          </span>
         )}
       </span>
     </button>
@@ -365,8 +426,20 @@ export function ChipRow({ children }: { children: ReactNode }) {
 }
 
 /**
- * The lime action button — `Play all`, `Save`, `Add`. Full width by default
- * because that is how it appears in every screen that has one.
+ * The action button — `Play all`, `Save`, `Add`. Full width by default because
+ * that is how it appears in every screen that has one.
+ *
+ * Two shapes, and which one to use is a rule rather than a preference:
+ *
+ * - `solid` — a flat lime pill. For compact actions living inside something
+ *   else: a row's `Add`, a bar's `Add to…`, a sheet's confirm. There are
+ *   several of these on screen at once and they must not each shout.
+ * - `disc` — glass pill with a lime disc at its head, the shape the bottom
+ *   nav's active tab already wears. For the one hero action a screen has:
+ *   `Play all`, an empty state's way out, the deck's Resume. One per screen,
+ *   or the rule is broken and neither is primary any more.
+ *
+ * `solid` is the default so nothing that already existed moves.
  */
 export function ActionButton({
   children,
@@ -374,6 +447,7 @@ export function ActionButton({
   icon: Icon,
   height = 38,
   grow = true,
+  variant = "solid",
   disabled,
 }: {
   children: ReactNode;
@@ -381,36 +455,78 @@ export function ActionButton({
   icon?: (props: IconProps) => ReactNode;
   height?: number;
   grow?: boolean;
+  variant?: "solid" | "disc";
   disabled?: boolean;
 }) {
+  const disc = variant === "disc";
+  // The disc is inset from the capsule by the same 3px the bottom nav uses, and
+  // the label's room on the far side matches it plus the optical weight of a
+  // filled circle, so the text sits in the middle of what is left rather than
+  // in the middle of the button.
+  const discSize = height - 6;
+
   return (
     <button
-      className="nav-press"
+      className={`nav-press ${disc ? "nav-glass" : ""}`}
       disabled={disabled}
       onClick={() => {
         haptic.press();
         onClick();
       }}
       style={{
+        position: "relative",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 7,
+        gap: disc ? 0 : 7,
         flex: grow ? 1 : "none",
         height,
-        padding: grow ? undefined : "0 16px",
+        padding: disc ? "3px" : grow ? undefined : "0 16px",
         borderRadius: height / 2,
-        background: "var(--color-nav-action)",
-        color: "#0A0A0A",
+        background: disc ? undefined : "var(--color-nav-action)",
+        color: disc ? "#fff" : "#0A0A0A",
         fontSize: 13,
         fontWeight: 600,
         letterSpacing: "-0.01em",
         opacity: disabled ? 0.4 : 1,
-        boxShadow: disabled ? undefined : "0 6px 20px rgba(223,252,142,.2)",
+        boxShadow: disabled || disc ? undefined : "0 6px 20px rgba(223,252,142,.2)",
       }}
     >
-      {Icon ? <Icon size={14} /> : null}
-      {children}
+      {disc ? (
+        <>
+          <span
+            style={{
+              display: "grid",
+              placeItems: "center",
+              flex: "none",
+              width: discSize,
+              height: discSize,
+              borderRadius: "50%",
+              background: "var(--color-nav-action)",
+              color: "#0A0A0A",
+              boxShadow: "0 6px 18px rgba(223,252,142,.34)",
+            }}
+          >
+            {Icon ? <Icon size={Math.round(discSize * 0.42)} /> : null}
+          </span>
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              // Balanced against the disc so the label reads centred in the
+              // capsule rather than centred in the gap beside it.
+              padding: `0 ${Math.round(discSize * 0.4)}px 0 ${Math.round(discSize * 0.3)}px`,
+            }}
+          >
+            {children}
+          </span>
+        </>
+      ) : (
+        <>
+          {Icon ? <Icon size={14} /> : null}
+          {children}
+        </>
+      )}
     </button>
   );
 }
@@ -567,11 +683,14 @@ export function Empty({
   title,
   body,
   action,
+  actionIcon = ArrowRightIcon,
   onAction,
 }: {
   title: string;
   body?: string;
   action?: string;
+  /** The glyph inside the disc. Whatever the way out of this empty state is. */
+  actionIcon?: (props: IconProps) => ReactNode;
   onAction?: () => void;
 }) {
   return (
@@ -602,8 +721,14 @@ export function Empty({
         </span>
       ) : null}
       {action ? (
-        <div style={{ marginTop: 8 }}>
-          <ActionButton grow={false} onClick={() => onAction?.()}>
+        <div style={{ marginTop: 10 }}>
+          <ActionButton
+            grow={false}
+            variant="disc"
+            height={44}
+            icon={actionIcon}
+            onClick={() => onAction?.()}
+          >
             {action}
           </ActionButton>
         </div>

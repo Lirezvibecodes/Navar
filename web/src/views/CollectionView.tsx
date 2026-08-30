@@ -3,7 +3,8 @@ import type { Navigation } from "../App";
 import { CollectionArt } from "../components/PixelArt";
 import { TrackListScreen } from "../components/TrackListScreen";
 import { useLibrary } from "../context/LibraryContext";
-import { pluralise, trackTitle } from "../lib/format";
+import { Counted } from "../components/ui";
+import { trackTitle } from "../lib/format";
 
 /**
  * An album or an artist.
@@ -50,9 +51,12 @@ export function CollectionView({
         />
       }
       name={name}
-      subtitle={[artist, pluralise(rows.length, "track")]
-        .filter(Boolean)
-        .join(" · ")}
+      subtitle={
+        <>
+          {artist ? <>{artist}{" · "}</> : null}
+          <Counted count={rows.length} one="track" />
+        </>
+      }
       tracks={rows}
       sourceKey={`${kind}:${name}`}
       sourceLabel={name}

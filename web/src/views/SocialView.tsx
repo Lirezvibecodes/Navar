@@ -6,6 +6,7 @@ import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
 import {
   ActionButton,
+  Counted,
   Empty,
   Screen,
   SectionHeader,
@@ -356,9 +357,14 @@ export function SocialView({ nav }: { nav: Navigation }) {
               person={person}
               index={i}
               note={
-                person.mutual_count === 1
-                  ? "1 friend in common"
-                  : person.mutual_count + " friends in common"
+                <>
+                  <Counted
+                    count={person.mutual_count}
+                    one="friend"
+                    many="friends"
+                  />{" "}
+                  in common
+                </>
               }
               onOpen={() => openProfile(person.telegram_user_id)}
               action={<AddFriendButton userId={person.telegram_user_id} />}
@@ -507,7 +513,7 @@ function PersonRow({
   index: number;
   onOpen: () => void;
   action?: React.ReactNode;
-  note?: string;
+  note?: React.ReactNode;
 }) {
   return (
     <div

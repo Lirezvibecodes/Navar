@@ -150,7 +150,7 @@ function Shell({ me }: { me: Me }) {
     }
     switch (view.type) {
       case "home":
-        return <HomeView nav={nav} />;
+        return <HomeView nav={nav} onOpenPlayer={() => setPlayerOpen(true)} />;
       case "library":
         return <LibraryView nav={nav} />;
       case "crate":

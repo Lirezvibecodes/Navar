@@ -2,17 +2,16 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
-import * as api from "../api";
 import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
+import { LyricStrip, LyricsPane, useLyrics } from "../components/Lyrics";
 import { Cover } from "../components/PixelArt";
 import { TrackMenu } from "../components/TrackMenu";
 import type { TrackMenuTarget } from "../components/TrackMenu";
-import { Chip, RoundButton, Sheet, SheetItem } from "../components/ui";
+import { Chip, EYEBROW, Num, RoundButton, Sheet, SheetItem } from "../components/ui";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -40,8 +39,6 @@ import {
   trackTitle,
   trackUploader,
 } from "../lib/format";
-import { activeLineAt, parseLyrics, type Lyrics } from "../lib/lyrics";
-import { scrollBehavior } from "../lib/motion";
 import {
   artGlowCss,
   artShadowCss,
@@ -490,7 +487,13 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               }}
             >
               <MoonIcon size={13} />
-              {sleepAt ? `Stops in ${formatDuration((sleepAt - now) / 1000)}` : "Sleep timer"}
+              {sleepAt ? (
+                <>
+                  Stops in <Num>{formatDuration((sleepAt - now) / 1000)}</Num>
+                </>
+              ) : (
+                "Sleep timer"
+              )}
             </button>
           </div>
           </div>
@@ -905,14 +908,14 @@ function Scrubber({
           if (e.key === "ArrowLeft") onSeek(Math.max(0, position - 10));
           if (e.key === "ArrowRight") onSeek(Math.min(duration, position + 10));
         }}
-        // A 4px rail with a 44px hit area around it.
+        // A 5px rail with a 44px hit area around it.
         style={{ padding: "20px 0", cursor: "pointer", touchAction: "none" }}
       >
         <div
           style={{
             position: "relative",
-            height: 4,
-            borderRadius: 2,
+            height: 5,
+            borderRadius: 2.5,
             background: "rgba(255,255,255,.13)",
           }}
         >
@@ -921,7 +924,7 @@ function Scrubber({
               position: "absolute",
               inset: "0 auto 0 0",
               width: `${pct}%`,
-              borderRadius: 2,
+              borderRadius: 2.5,
               background: "var(--color-nav-action)",
             }}
           />
@@ -930,11 +933,11 @@ function Scrubber({
               position: "absolute",
               top: "50%",
               left: `${pct}%`,
-              width: 12,
-              height: 12,
-              marginTop: -6,
-              marginLeft: -6,
-              borderRadius: 6,
+              width: 14,
+              height: 14,
+              marginTop: -7,
+              marginLeft: -7,
+              borderRadius: 7,
               background: "var(--color-nav-action)",
               transform: dragging != null ? "scale(1.25)" : undefined,
               transition: "transform var(--dur-tap) var(--ease)",
@@ -951,8 +954,8 @@ function Scrubber({
           marginTop: -12,
         }}
       >
-        <span>{formatDuration(shown)}</span>
-        <span>{formatRemaining(shown, duration)}</span>
+        <span className="nav-numeral">{formatDuration(shown)}</span>
+        <span className="nav-numeral">{formatRemaining(shown, duration)}</span>
       </div>
     </div>
   );
@@ -1014,199 +1017,6 @@ function Segments({
           onAnimationEnd={() => setPulse(false)}
         />
       ))}
-    </div>
-  );
-}
-
-/**
- * Lyrics. A timed file scrolls itself and every line is a seek target; a plain
- * paste is a page of text and stays still, because scrolling text nobody
- * timed would just be guessing.
- *
- * Opening this pane is what sends the server to look. The first person to open
- * it on a given track waits on that lookup — which is why the waiting state
- * says what is happening rather than showing a bare spinner — and everybody
- * after them, including that person on their next play, gets the stored
- * answer. A track LRCLIB does not have is asked about exactly once, ever.
- */
-interface Words {
-  state: "loading" | "ready" | "none";
-  lyrics: Lyrics | null;
-}
-
-/**
- * One lookup per track, shared by the strip under the transport and the pane
- * behind it.
- *
- * Opening the player is now what sends the server to look, where it used to be
- * opening the Lyrics pane — the strip cannot show words nobody has asked for.
- * The server stores both answers, including "LRCLIB has never heard of this",
- * so a track is still only ever looked up once no matter how many times it is
- * played.
- */
-function useLyrics(trackId: string | null): Words {
-  const [words, setWords] = useState<Words>({ state: "loading", lyrics: null });
-
-  useEffect(() => {
-    if (!trackId) return;
-    let live = true;
-    setWords({ state: "loading", lyrics: null });
-    api
-      .getLyrics(trackId)
-      .then((raw) => {
-        if (!live) return;
-        const lyrics = parseLyrics(raw);
-        setWords({ state: lyrics ? "ready" : "none", lyrics });
-      })
-      .catch(() => live && setWords({ state: "none", lyrics: null }));
-    return () => {
-      live = false;
-    };
-  }, [trackId]);
-
-  return words;
-}
-
-/** Which line is being sung, or the first one when nobody timed the file. */
-function activeIn(lyrics: Lyrics | null, position: number): number {
-  if (!lyrics) return -1;
-  if (lyrics.kind !== "timed") return 0;
-  return activeLineAt(lyrics.lines, position);
-}
-
-/**
- * The words, under the transport, three lines at a time.
- *
- * A window that does not move over a column that does: the line being sung is
- * held in the middle band and the verse slides past it. That is the whole
- * illusion, and it is why the column is translated by whole line-heights
- * rather than each line animating to a new place — lines that move
- * individually arrive at slightly different times and read as a list
- * reshuffling rather than as a song going by.
- *
- * It renders nothing at all when there is nothing to render. A strip that sat
- * there empty would be a promise the track cannot keep, and the Lyrics segment
- * is still there for anyone who wants to check.
- */
-function LyricStrip({
-  words,
-  position,
-  onOpen,
-}: {
-  words: Words;
-  position: number;
-  onOpen: () => void;
-}) {
-  const { state, lyrics } = words;
-  const active = useMemo(() => activeIn(lyrics, position), [lyrics, position]);
-
-  if (state !== "ready" || !lyrics || lyrics.lines.length === 0) return null;
-
-  return (
-    <button
-      className="nav-press"
-      aria-label="Open lyrics"
-      onClick={onOpen}
-      style={{
-        display: "block",
-        width: "100%",
-        padding: "2px 18px 6px",
-        textAlign: "center",
-      }}
-    >
-      <span className="nav-lyric-strip" style={{ display: "block" }}>
-        <span
-          className="nav-lyric-track"
-          style={{
-            display: "block",
-            transform: `translateY(calc(${1 - Math.max(0, active)} * var(--lyric-line)))`,
-          }}
-        >
-          {lyrics.lines.map((line, i) => (
-            <span
-              key={i}
-              className="nav-lyric-line"
-              data-on={i === active}
-              style={{ display: "block" }}
-            >
-              {line.text || " "}
-            </span>
-          ))}
-        </span>
-      </span>
-    </button>
-  );
-}
-
-function LyricsPane({
-  words,
-  position,
-  onSeek,
-}: {
-  words: Words;
-  position: number;
-  onSeek: (seconds: number) => void;
-}) {
-  const { state, lyrics } = words;
-  const activeRef = useRef<HTMLParagraphElement | null>(null);
-
-  const active = useMemo(
-    () =>
-      lyrics?.kind === "timed" ? activeLineAt(lyrics.lines, position) : -1,
-    [lyrics, position]
-  );
-
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({
-      block: "center",
-      behavior: scrollBehavior(),
-    });
-  }, [active]);
-
-  return (
-    <div className="nav-scroll" style={{ flex: 1, minHeight: 0, padding: "10px 22px" }}>
-      {state === "loading" ? (
-        <p style={{ fontSize: 12.5, color: "var(--color-nav-muted)" }}>
-          Looking for lyrics&hellip;
-        </p>
-      ) : state === "none" || !lyrics ? (
-        <p style={{ fontSize: 12.5, color: "var(--color-nav-muted)", lineHeight: 1.6 }}>
-          No lyrics found for this one.
-        </p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          {lyrics.lines.map((line, i) => {
-            const on = i === active;
-            const timed = lyrics.kind === "timed";
-            return (
-              <p
-                key={i}
-                ref={on ? activeRef : undefined}
-                onClick={() => {
-                  if (timed && line.at != null) {
-                    haptic.select();
-                    onSeek(line.at);
-                  }
-                }}
-                style={{
-                  margin: 0,
-                  fontSize: on || !timed ? 15 : 12.5,
-                  lineHeight: 1.3,
-                  color: !timed
-                    ? "rgba(255,255,255,.8)"
-                    : on
-                      ? "#fff"
-                      : "var(--color-nav-ghost)",
-                  transition: "color var(--dur-state) var(--ease)",
-                  cursor: timed ? "pointer" : undefined,
-                }}
-              >
-                {line.text || " "}
-              </p>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -1337,7 +1147,7 @@ function QueuePane({
                 color: "var(--color-nav-faint)",
               }}
             >
-              and {contextNext.length - QUEUE_PREVIEW} more after these
+              and <Num>{contextNext.length - QUEUE_PREVIEW}</Num> more after these
             </p>
           ) : null}
         </>
@@ -1364,14 +1174,9 @@ function QueueHeading({
         marginBottom: 6,
       }}
     >
-      <span
-        className="nav-clip"
-        style={{
-          fontSize: 11,
-          color: "var(--color-nav-muted)",
-          letterSpacing: ".04em",
-        }}
-      >
+      {/* The app has exactly two heading styles — the big section head and this
+          small eyebrow. This used to invent a third, here, locally. */}
+      <span className="nav-clip" style={EYEBROW}>
         {label}
       </span>
       {action ? (
@@ -1466,7 +1271,10 @@ function QueueRow({
         </div>
       </div>
 
-      <span style={{ fontSize: 11, color: "var(--color-nav-faint)", flex: "none" }}>
+      <span
+        className="nav-numeral"
+        style={{ fontSize: 11, color: "var(--color-nav-faint)", flex: "none" }}
+      >
         {formatDuration(track.duration_seconds)}
       </span>
 

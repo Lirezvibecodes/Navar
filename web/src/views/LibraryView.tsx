@@ -6,12 +6,13 @@ import { NameSheet } from "../components/NameSheet";
 import {
   Chip,
   ChipRow,
+  Counted,
   Empty,
   Screen,
   SectionHeader,
   Skeleton,
 } from "../components/ui";
-import { CrateIcon } from "../icons";
+import { ChevronRightIcon, CrateIcon, HeartIcon } from "../icons";
 import {
   albumsOf,
   artistsOf,
@@ -19,7 +20,6 @@ import {
   type Grouped,
 } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
-import { pluralise } from "../lib/format";
 import { haptic } from "../telegram";
 import type { View } from "../view";
 
@@ -42,6 +42,10 @@ export function LibraryView({ nav }: { nav: Navigation }) {
 
   const albums = useMemo(() => albumsOf(tracks), [tracks]);
   const artists = useMemo(() => artistsOf(tracks), [tracks]);
+  const favorites = useMemo(
+    () => tracks.filter((t) => t.favorited_at != null).length,
+    [tracks]
+  );
 
   const newPlaylist = async (name: string) => {
     try {
@@ -64,6 +68,8 @@ export function LibraryView({ nav }: { nav: Navigation }) {
 
   return (
     <Screen>
+      <FavouritesTile count={favorites} onOpen={() => nav.push({ type: "crate", filter: "favorites" })} />
+
       <ChipRow>
         {/* The Crate is a destination rather than a filter, which is why it
             carries a glyph and the three filters do not. It used to be a card
@@ -104,7 +110,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
               name: p.name,
               cover: p.cover_track_id,
               art: api.playlistArtworkUrl(p),
-              caption: pluralise(p.track_count ?? 0, "track"),
+              caption: <Counted count={p.track_count ?? 0} one="track" />,
               to: { type: "playlist", id: p.id, name: p.name } as View,
             }))}
             nav={nav}
@@ -126,7 +132,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
                 key: a.name,
                 name: a.name,
                 cover: a.cover_track_id,
-                caption: pluralise(a.track_count, "track"),
+                caption: <Counted count={a.track_count} one="track" />,
                 to: { type: "album", name: a.name } as View,
               }))}
               nav={nav}
@@ -156,6 +162,72 @@ export function LibraryView({ nav }: { nav: Navigation }) {
 }
 
 
+
+/**
+ * Favourites, at the head of the library.
+ *
+ * The heart has been on every track row and in the player since the beginning,
+ * and until this tile existed it wrote to a set no screen ever read. That is
+ * the whole reason this is here: it is a door, not a decoration, and it is the
+ * one bright thing on the screen because it is the only shortcut on it.
+ *
+ * Dark ink on the gradient. White on lime is unreadable, and the left half of
+ * this tile is lime.
+ */
+function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }) {
+  return (
+    <button
+      className="nav-press nav-rise"
+      onClick={() => {
+        haptic.tap();
+        onOpen();
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        width: "100%",
+        height: 66,
+        marginBottom: 12,
+        padding: "0 14px",
+        borderRadius: 16,
+        textAlign: "left",
+        color: "#0A0A0A",
+        background: "linear-gradient(110deg, #dffc8e, #89aeff)",
+        boxShadow: "0 10px 26px rgba(0,0,0,.45)",
+      }}
+    >
+      <span
+        style={{
+          display: "grid",
+          placeItems: "center",
+          flex: "none",
+          width: 38,
+          height: 38,
+          borderRadius: 19,
+          background: "rgba(10,10,10,.13)",
+        }}
+      >
+        <HeartIcon size={18} />
+      </span>
+
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span
+          className="nav-display"
+          style={{ display: "block", fontSize: 16, lineHeight: 1.1 }}
+        >
+          Favourites
+        </span>
+        <span style={{ display: "block", marginTop: 3, fontSize: 11.5, opacity: 0.68 }}>
+          <Counted count={count} one="track" />
+        </span>
+      </span>
+
+      <ChevronRightIcon size={15} style={{ flex: "none", opacity: 0.55 }} />
+    </button>
+  );
+}
+
 /**
  * The square tiles: playlists and albums are the same shape and the same tap.
  *
@@ -179,7 +251,7 @@ function Grid({
     cover?: string | null;
     /** A picture the item owns outright — a playlist cover. Wins over `cover`. */
     art?: string | null;
-    caption: string;
+    caption: React.ReactNode;
     to: View;
   }[];
   nav: Navigation;

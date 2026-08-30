@@ -4,10 +4,17 @@
  * layer would be machinery serving nobody. Navigation is a stack of these,
  * pushed and popped by the shell, with Telegram's own back button popping it.
  */
+/**
+ * The three cuts of the Crate. `favorites` is the newest and the one that had
+ * nowhere to go: every heart in the app writes `favorited_at`, and until there
+ * was a filter for it, nothing ever read that back.
+ */
+export type CrateFilter = "all" | "unsorted" | "favorites";
+
 export type View =
   | { type: "home" }
   | { type: "library" }
-  | { type: "crate"; filter: "all" | "unsorted" }
+  | { type: "crate"; filter: CrateFilter }
   /**
    * `name` is not a convenience. Your own playlists are in the library, so the
    * header can look theirs up — but a friend's playlist, or one opened from an

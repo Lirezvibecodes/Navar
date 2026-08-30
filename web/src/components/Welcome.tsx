@@ -1,7 +1,13 @@
 import { useRef, useState } from "react";
 import { ChooseName } from "./ChooseName";
 import { ActionButton } from "./ui";
-import { CrateIcon, HeadphonesIcon, SocialIcon, type IconProps } from "../icons";
+import {
+  ArrowRightIcon,
+  CrateIcon,
+  HeadphonesIcon,
+  SocialIcon,
+  type IconProps,
+} from "../icons";
 import { scrollBehavior } from "../lib/motion";
 import { haptic } from "../telegram";
 import type { Me } from "../types";
@@ -133,12 +139,33 @@ export function Welcome({ onDone }: { onDone: () => void }) {
         flexDirection: "column",
         position: "relative",
         zIndex: 1,
-        // The same box ChooseName draws itself in, so the two screens do not
-        // shift under each other when the second replaces the first.
-        padding:
-          "calc(var(--nav-top-inset) + 24px) 0 calc(var(--tg-safe-bottom) + 24px)",
+        // The band runs to the very top of the screen and carries the inset
+        // itself, so this container starts at zero. ChooseName still draws the
+        // old box; the two no longer match, which is the price of the hello
+        // having a face and is worth it exactly once.
+        padding: "0 0 calc(var(--tg-safe-bottom) + 24px)",
       }}
     >
+      {/* The wordmark, once, in the app's own colours. Dark ink on it: this is
+          the one bright surface in Navaar, and white on lime is unreadable. */}
+      <div
+        className="nav-hero-band"
+        style={{
+          flex: "none",
+          display: "grid",
+          placeItems: "center",
+          paddingTop: "calc(var(--nav-top-inset) + 34px)",
+          paddingBottom: 30,
+        }}
+      >
+        <span
+          className="nav-display"
+          style={{ fontSize: 38, lineHeight: 1, color: "#0A0A0A" }}
+        >
+          Navaar
+        </span>
+      </div>
+
       <div
         className="nav-rise"
         style={{ margin: "auto 0", display: "flex", flexDirection: "column", gap: 22 }}
@@ -168,7 +195,13 @@ export function Welcome({ onDone }: { onDone: () => void }) {
               hold someone who has read enough hostage to a swipe they have no
               reason to know is coming. */}
           <div style={{ display: "flex" }}>
-            <ActionButton height={42} grow={false} onClick={onDone}>
+            <ActionButton
+              height={46}
+              grow={false}
+              variant="disc"
+              icon={ArrowRightIcon}
+              onClick={onDone}
+            >
               Let&rsquo;s pick your name
             </ActionButton>
           </div>
