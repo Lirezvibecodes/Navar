@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { haptic } from "../telegram";
 import { ArrowRightIcon, type IconProps } from "../icons";
+import { backdropCss, type Palette } from "../lib/palette";
 
 /**
  * The small shared pieces: the scroll container every screen sits in, the
@@ -34,18 +35,39 @@ import { ArrowRightIcon, type IconProps } from "../icons";
  * own padding — adding --tg-safe-bottom here counted it twice and left a strip
  * of dead space under the last row of every list.
  */
+// Kept outside React, keyed by screen identity, so a screen that remounts on
+// every navigation (every push bumps the stack's key) can still put the
+// reader back where they left off instead of snapping to the top.
+const lastScroll = new Map<string, number>();
+
 export function Screen({
   children,
   className = "",
   gap = 0,
+  scrollKey,
 }: {
   children: ReactNode;
   className?: string;
   gap?: number;
+  /** Restores and remembers scrollTop across the remount a navigation causes. */
+  scrollKey?: string;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (scrollKey && ref.current) ref.current.scrollTop = lastScroll.get(scrollKey) ?? 0;
+    // Deliberately re-runs only when the key itself changes, not on every
+    // render — this is a one-time restore on mount, not a sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollKey]);
+
   return (
     <div
+      ref={ref}
       className={`nav-scroll nav-screen ${className}`}
+      onScroll={
+        scrollKey ? () => lastScroll.set(scrollKey, ref.current?.scrollTop ?? 0) : undefined
+      }
       style={{
         flex: 1,
         minHeight: 0,
@@ -60,6 +82,30 @@ export function Screen({
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * The tint a playlist or album screen wears, taken from its own cover.
+ *
+ * Fixed to the viewport rather than scrolled with the list, the same way the
+ * app's own static wash (`.nav-screen-bg`) is — and painted after it in the
+ * DOM with no z-index of its own, so it layers above that wash and below
+ * whatever the screen actually renders, purely by document order. No fade: the
+ * screen it sits behind is freshly mounted on every visit, unlike the player,
+ * which swaps tracks in place and needs one to avoid a cut.
+ */
+export function CoverBackdrop({ palette }: { palette: Palette | null }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        pointerEvents: "none",
+        background: backdropCss(palette),
+      }}
+    />
   );
 }
 
@@ -1059,5 +1105,91 @@ export function useLongPress(onLongPress: () => void, ms = 420) {
     onPointerCancel: clear,
     /** True when the press already fired, so the click handler can stand down. */
     consumed: () => fired.current,
+  };
+}
+
+const SWIPE_QUEUE_PX = 44;
+const SWIPE_NEXT_PX = 104;
+
+export type SwipeQueueStage = "none" | "queue" | "next";
+
+/**
+ * Swipe right on a row to queue it, without needing the ⋯ menu.
+ *
+ * Two thresholds, one direction: past the first, releasing adds the track to
+ * the end of the queue; past the second, releasing plays it next. Both are
+ * already reachable from the row's own menu — see TrackMenu — so this is a
+ * shortcut layered on an existing, visible action rather than a hidden one.
+ *
+ * The axis is decided once, in the first ~10px of movement, and never
+ * revisited: a vertical scroll that drifts sideways must stay a scroll for
+ * its whole gesture, not lock into a swipe partway through it.
+ */
+export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) {
+  const [dragX, setDragX] = useState(0);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const deciding = useRef(false);
+  const active = useRef(false);
+  const stage = useRef<SwipeQueueStage>("none");
+
+  const stageFor = (dx: number): SwipeQueueStage => {
+    if (dx >= SWIPE_NEXT_PX) return "next";
+    if (dx >= SWIPE_QUEUE_PX) return "queue";
+    return "none";
+  };
+
+  const reset = () => {
+    start.current = null;
+    deciding.current = false;
+    active.current = false;
+    stage.current = "none";
+    setDragX(0);
+  };
+
+  return {
+    dragX,
+    stage: stageFor(dragX),
+    onPointerDown: (e: React.PointerEvent) => {
+      start.current = { x: e.clientX, y: e.clientY };
+      deciding.current = true;
+      active.current = false;
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const s = start.current;
+      if (!s) return;
+      const dx = e.clientX - s.x;
+      const dy = e.clientY - s.y;
+      if (deciding.current) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        deciding.current = false;
+        if (Math.abs(dy) >= Math.abs(dx) || dx <= 0) {
+          start.current = null;
+          return;
+        }
+        active.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      if (!active.current) return;
+      e.preventDefault();
+      const clamped = Math.max(0, Math.min(dx, SWIPE_NEXT_PX + 24));
+      const next = stageFor(clamped);
+      if (next !== stage.current) {
+        stage.current = next;
+        haptic.select();
+      }
+      setDragX(clamped);
+    },
+    onPointerUp: () => {
+      const finished = stage.current;
+      if (finished === "next") onQueueNext();
+      else if (finished === "queue") onQueueLast();
+      reset();
+    },
+    onPointerCancel: reset,
+    onPointerLeave: () => {
+      if (active.current) reset();
+    },
+    /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
+    dragging: () => active.current,
   };
 }

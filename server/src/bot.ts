@@ -33,7 +33,12 @@ import {
 import { t } from "./i18n";
 import { refreshAvatar } from "./avatars";
 import { handleFriendInvite, registerFriendActions } from "./bot-friends";
-import { handlePlaylistShare, handleTrackShare, registerShareActions } from "./bot-share";
+import {
+  handlePlaylistShare,
+  handleTrackShare,
+  handleTrackShareToken,
+  registerShareActions,
+} from "./bot-share";
 import {
   beginBatch,
   endBatchByCommand,
@@ -193,6 +198,15 @@ export function createBot(): Telegraf | null {
     const trackMatch = /^track_([0-9a-fA-F-]{36})$/.exec(ctx.startPayload ?? "");
     if (trackMatch) {
       await handleTrackShare(ctx.from.id, trackMatch[1], (text, extra) => ctx.reply(text, extra));
+      return;
+    }
+    // The opaque-token twin of the match above, reached from the public
+    // /s/track/:token page rather than a forward inside Telegram. Sixteen
+    // base64url characters — newShareSlug()'s exact output — so it can never
+    // collide with a UUID's 36.
+    const trackTokenMatch = /^track_([A-Za-z0-9_-]{16})$/.exec(ctx.startPayload ?? "");
+    if (trackTokenMatch) {
+      await handleTrackShareToken(ctx.from.id, trackTokenMatch[1], (text) => ctx.reply(text));
       return;
     }
     const playlistMatch = /^playlist_([0-9a-fA-F-]{36})$/.exec(ctx.startPayload ?? "");

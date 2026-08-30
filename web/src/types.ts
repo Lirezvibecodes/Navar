@@ -79,6 +79,8 @@ export interface Me {
   handle: string | null;
   /** Whether friends are shown what you are playing. Off until you say so. */
   listening_public: boolean;
+  /** One of the 8 accent presets, or "lime" for the app's own default. */
+  accent_color: string;
 }
 
 /**
@@ -191,6 +193,15 @@ export interface PersonResult extends Person {
 /** Somebody two hops away, and how many friends you have in common. */
 export interface Suggestion extends Person {
   mutual_count: number;
+  /** Who those friends are, so the row can name a couple of them. */
+  mutual_friends: Person[];
+}
+
+/** A rollup of recent plays: what this person has been into lately. */
+export interface ListeningStats {
+  totalPlays: number;
+  topTrack: ActivityTrack | null;
+  topArtist: string | null;
 }
 
 /**
@@ -221,6 +232,12 @@ export interface UserProfile {
   endorsed: boolean;
   can_endorse: boolean;
   playlists: Playlist[];
+  /** Null unless the viewer may see it: themselves, or a friend. */
+  friend_count: number | null;
+  /** Null under the same rule as friend_count. */
+  stats: ListeningStats | null;
+  /** Populated only for a not-yet-connected suggested profile. */
+  mutual_friends: Person[];
 }
 
 /** Somebody else's playlist as Home carries it: whose it is, and no share slug. */

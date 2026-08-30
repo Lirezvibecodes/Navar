@@ -23,7 +23,7 @@ import {
   revalidate,
   ttl,
 } from "../lib/cache";
-import { formatAge, personName, trackTitle } from "../lib/format";
+import { formatAge, namesList, personName, trackTitle } from "../lib/format";
 import { haptic, onActivationChange, shareLink } from "../telegram";
 import type { ActivityItem, Person, PersonResult, Suggestion } from "../types";
 
@@ -357,14 +357,18 @@ export function SocialView({ nav }: { nav: Navigation }) {
               person={person}
               index={i}
               note={
-                <>
-                  <Counted
-                    count={person.mutual_count}
-                    one="friend"
-                    many="friends"
-                  />{" "}
-                  in common
-                </>
+                person.mutual_friends.length > 0 ? (
+                  <>Friends with {namesList(person.mutual_friends, person.mutual_count)}</>
+                ) : (
+                  <>
+                    <Counted
+                      count={person.mutual_count}
+                      one="friend"
+                      many="friends"
+                    />{" "}
+                    in common
+                  </>
+                )
               }
               onOpen={() => openProfile(person.telegram_user_id)}
               action={<AddFriendButton userId={person.telegram_user_id} />}

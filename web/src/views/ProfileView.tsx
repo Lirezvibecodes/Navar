@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton } from "./SocialView";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
+import { ImageCropSheet } from "../components/ImageCropSheet";
 import { NameSheet } from "../components/NameSheet";
+import { PersonTile } from "../components/PersonTile";
+import { AccentPicker } from "../context/ThemeContext";
 import {
   ActionButton,
   Counted,
@@ -21,7 +24,7 @@ import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { personName } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
-import type { BadgeTier } from "../types";
+import type { BadgeTier, ListeningStats } from "../types";
 
 /**
  * One person's page — yours or somebody else's.
@@ -40,6 +43,13 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 
   const isMe = me?.id === userId;
   const [renaming, setRenaming] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  // Bumped after a fresh upload so this session's own view of the avatar it
+  // just replaced skips the browser's cache instead of showing the old bytes
+  // until the picture happens to be refetched some other way.
+  const [avatarBust, setAvatarBust] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
   // Cached per person, so stepping back out of somebody's page and into it
   // again — which is most of how the Social tab is used — costs nothing.
   const {
@@ -136,6 +146,32 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     }
   };
 
+  const uploadAvatar = async (image: Blob) => {
+    setAvatarBusy(true);
+    try {
+      await api.uploadAvatar(image);
+      setAvatarBust((n) => n + 1);
+      haptic.success();
+    } catch (err) {
+      errorToast(err, "Could not set that picture");
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const setAccent = async (name: string) => {
+    if (!me) return;
+    const prev = me.accent_color;
+    setMe({ ...me, accent_color: name });
+    try {
+      await api.setAccentColor(name);
+      haptic.success();
+    } catch (err) {
+      setMe({ ...me, accent_color: prev });
+      errorToast(err, "Could not change that");
+    }
+  };
+
   return (
     <Screen>
       <div
@@ -148,12 +184,33 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           padding: "10px 0 4px",
         }}
       >
-        <Avatar
-          userId={userId}
-          username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
-          hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
-          size={76}
-        />
+        {isMe ? (
+          <button
+            className="nav-press"
+            aria-label="Change your photo"
+            disabled={avatarBusy}
+            onClick={() => {
+              haptic.tap();
+              fileRef.current?.click();
+            }}
+            style={{ borderRadius: "50%" }}
+          >
+            <Avatar
+              userId={userId}
+              username={me?.handle ?? me?.username}
+              hasAvatar={true}
+              size={76}
+              bust={avatarBust}
+            />
+          </button>
+        ) : (
+          <Avatar
+            userId={userId}
+            username={person?.handle ?? person?.username}
+            hasAvatar={person?.has_avatar ?? false}
+            size={76}
+          />
+        )}
         {/* Tapping your own name is the whole rename affordance. A name is
             the only thing on this page that is yours to edit, so a control
             saying so would be louder than the thing it controls. */}
@@ -173,6 +230,16 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
             <Counted count={tracks.length} one="track" /> ·{" "}
             <Counted count={playlists.length} one="playlist" />
+            {profile?.friend_count != null ? (
+              <>
+                {" "}
+                · <Counted count={profile.friend_count} one="friend" many="friends" />
+              </>
+            ) : null}
+          </span>
+        ) : profile?.friend_count != null ? (
+          <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
+            <Counted count={profile.friend_count} one="friend" many="friends" />
           </span>
         ) : null}
       </div>
@@ -217,11 +284,18 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       {isMe ? (
         <>
           <SectionHeader title="Listening" />
+          <StatsLine stats={profile?.stats ?? null} />
           <Toggle
             label="Show friends what I am playing"
             hint="Only your friends, only while you are playing something, and only for a few minutes after you stop."
             checked={me?.listening_public ?? false}
             onChange={(next) => void setListening(next)}
+          />
+
+          <SectionHeader title="Appearance" />
+          <AccentPicker
+            value={me?.accent_color ?? "lime"}
+            onSelect={(name) => void setAccent(name)}
           />
 
           <SectionHeader title="Your library" />
@@ -235,6 +309,31 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </>
       ) : (
         <>
+          {known && profile?.stats && profile.stats.totalPlays > 0 ? (
+            <>
+              <SectionHeader title="Listening" />
+              <StatsLine stats={profile.stats} />
+            </>
+          ) : null}
+
+          {!known && (profile?.mutual_friends.length ?? 0) > 0 ? (
+            <>
+              <SectionHeader title="Friends in common" />
+              <div className="nav-shelf" style={{ gap: 12 }}>
+                {profile!.mutual_friends.map((friend, i) => (
+                  <PersonTile
+                    key={friend.telegram_user_id}
+                    person={friend}
+                    index={i}
+                    onOpen={() =>
+                      nav.push({ type: "profile", userId: Number(friend.telegram_user_id) })
+                    }
+                  />
+                ))}
+              </div>
+            </>
+          ) : null}
+
           {/* What somebody you are not connected to has published to anyone.
               A friend gets the dedicated screen above instead, which is the
               same list with room to breathe. */}
@@ -312,6 +411,30 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         onSubmit={(value) => void rename(value)}
         onClose={() => setRenaming(false)}
       />
+
+      {isMe ? (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={(e) => {
+              const picked = e.target.files?.[0];
+              if (picked) setCropFile(picked);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+            style={{ display: "none" }}
+          />
+          <ImageCropSheet
+            file={cropFile}
+            onCancel={() => setCropFile(null)}
+            onConfirm={(blob) => {
+              setCropFile(null);
+              void uploadAvatar(blob);
+            }}
+          />
+        </>
+      ) : null}
     </Screen>
   );
 }
@@ -348,5 +471,36 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
       <StarIcon size={11} />
       {tier.label}
     </span>
+  );
+}
+
+/**
+ * What this person has been into lately: how much, and the top of it.
+ *
+ * Nothing renders once there is nothing to say — a brand new account has zero
+ * plays, and a stats line reading "0 plays" would be answering a question
+ * nobody asked yet.
+ */
+function StatsLine({ stats }: { stats: ListeningStats | null }) {
+  if (!stats || stats.totalPlays === 0) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        padding: "0 2px 14px",
+        fontSize: 12.5,
+      }}
+    >
+      <span>
+        <Counted count={stats.totalPlays} one="play" many="plays" /> logged
+      </span>
+      {stats.topArtist ? (
+        <span style={{ color: "var(--color-nav-muted)" }}>
+          Most played: {stats.topArtist}
+        </span>
+      ) : null}
+    </div>
   );
 }

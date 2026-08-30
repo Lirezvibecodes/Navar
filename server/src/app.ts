@@ -11,6 +11,7 @@ import { friendsRouter } from "./routes/friends";
 import { socialRouter } from "./routes/social";
 import { homeRouter } from "./routes/home";
 import { sharedRouter } from "./routes/shared";
+import { trackShareRouter, storyShareRouter } from "./routes/trackShare";
 
 // The web app is built into this package (see the build script) and served
 // from the same origin, so the Mini App only ever depends on this one domain
@@ -72,6 +73,15 @@ export function createApp(bot: Telegraf | null): Express {
   // Deliberately last, and deliberately without requireAuth: everything above
   // this line knows who is calling and nothing below it does.
   app.use("/api/shared", sharedRouter());
+
+  // The server-rendered card a track-share link opens outside Telegram
+  // entirely. It has to be registered ahead of the SPA catch-all below —
+  // "/s/track/:token" matches that route's `!api|health|telegraf` pattern and
+  // would otherwise be swallowed by the app shell instead of rendering here.
+  app.use("/s/track", trackShareRouter());
+
+  // The HTTPS URL a rendered story card is fetched back from — see storyShare.ts.
+  app.use("/s/story", storyShareRouter());
 
   // Vite content-hashes everything it emits into /assets, so a file at a given
   // name can never change its contents — a year and `immutable` are safe by

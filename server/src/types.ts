@@ -119,3 +119,18 @@ export interface SharedPlaylist {
 export interface SharedPlaylistPage extends SharedPlaylist {
   app_link: string | null;
 }
+
+/**
+ * The track behind a live track-share token, on the same "the token is the
+ * whole credential" terms as SharedPlaylist. `sender_name` is the one person
+ * this kind of link does name — whoever sent it — the same exception
+ * SharedPlaylist makes for a playlist's owner.
+ */
+export interface TrackShare extends SharedTrack {
+  sender_name: string | null;
+}
+
+/** What GET /s/track/:token answers with: the row, plus the way back in. */
+export interface SharedTrackPage extends TrackShare {
+  app_link: string | null;
+}

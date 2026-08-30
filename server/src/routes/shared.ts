@@ -57,7 +57,8 @@ const MAX_PER_WINDOW = 120;
 const buckets = new Map<string, { count: number; resetAt: number }>();
 const SWEEP_AT = 5_000;
 
-function rateLimit(req: Request, res: Response, next: NextFunction): void {
+/** Exported so the other unauthenticated surfaces — track shares, story cards — share one bucket map instead of each keeping their own. */
+export function rateLimit(req: Request, res: Response, next: NextFunction): void {
   const now = Date.now();
 
   if (buckets.size > SWEEP_AT) {

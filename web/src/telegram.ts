@@ -23,6 +23,8 @@
  * knows about the hardware wins, and the one reporting zero costs nothing.
  */
 
+import { currentAccentHex } from "./context/ThemeContext";
+
 export interface SafeAreaInset {
   top: number;
   bottom: number;
@@ -55,6 +57,9 @@ export interface TelegramWebApp {
 
   /** Opens a t.me URL inside the Telegram client rather than a browser tab. */
   openTelegramLink?: (url: string) => void;
+
+  /** Opens the native story editor with the given HTTPS image, Bot API 7.8+. */
+  shareToStory?: (mediaUrl: string, params?: { text?: string; widget_link?: { url: string; name?: string } }) => void;
 
   disableVerticalSwipes?: () => void;
   enableVerticalSwipes?: () => void;
@@ -326,7 +331,7 @@ export function setMainButton(config: MainButtonConfig | null): () => void {
   try {
     tg.MainButton.setParams({
       text: config.text,
-      color: "#DFFC8E",
+      color: currentAccentHex(),
       text_color: "#0A0A0A",
       is_active: config.enabled !== false,
       is_visible: true,
@@ -392,5 +397,18 @@ export function shareLink(url: string, text: string): boolean {
   app.openTelegramLink(
     `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`
   );
+  return true;
+}
+
+/**
+ * Opens the native story editor with a rendered card. `mediaUrl` has to be a
+ * real HTTPS URL Telegram's own servers can fetch — a blob: URL from the
+ * canvas that drew it won't do — which is why callers upload the card first
+ * and pass back the link that upload returns.
+ */
+export function shareToStory(mediaUrl: string, appLink?: string): boolean {
+  const app = getTelegramWebApp();
+  if (!app?.shareToStory || !app.isVersionAtLeast("7.8")) return false;
+  app.shareToStory(mediaUrl, appLink ? { widget_link: { url: appLink, name: "Navaar" } } : undefined);
   return true;
 }

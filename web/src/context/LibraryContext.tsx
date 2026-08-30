@@ -8,7 +8,8 @@ import {
 } from "react";
 import * as api from "../api";
 import { cacheKey, dropCache } from "../lib/cache";
-import type { Me, Playlist, Track } from "../types";
+import { splitArtists } from "../lib/artists";
+import type { FriendPlaylist, Me, Playlist, Track } from "../types";
 
 /**
  * Everything the app knows about your own music, loaded once.
@@ -36,10 +37,14 @@ interface LibraryApi {
   setMe: (me: Me) => void;
   tracks: Track[];
   playlists: Playlist[];
+  /** Other people's playlists this person has saved — kept live by reference, never copied. */
+  followedPlaylists: FriendPlaylist[];
   loading: boolean;
   error: string | null;
 
   reload: () => Promise<void>;
+  follow: (playlistId: string) => Promise<void>;
+  unfollow: (playlistId: string) => Promise<void>;
   /** Replaces one row everywhere it is held. */
   putTrack: (track: Track) => void;
   /** Drops rows from local state; the caller has already told the server. */
@@ -83,6 +88,7 @@ export function LibraryProvider({
 }) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [followedPlaylists, setFollowedPlaylists] = useState<FriendPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,15 +96,36 @@ export function LibraryProvider({
     if (!me) return;
     setError(null);
     try {
-      const [t, p] = await Promise.all([api.listTracks(), api.listPlaylists()]);
+      const [t, p, f] = await Promise.all([
+        api.listTracks(),
+        api.listPlaylists(),
+        api.listFollowedPlaylists(),
+      ]);
       setTracks(t);
       setPlaylists(p);
+      setFollowedPlaylists(f);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load your library");
     } finally {
       setLoading(false);
     }
   }, [me]);
+
+  // Optimistic on the way out — dropping a followed playlist you have just
+  // opened should not wait on a round trip to disappear from your library —
+  // and reconciled with the server's own list on the way in, since a follow
+  // needs the owner's name and cover, which this client does not otherwise have.
+  const follow = useCallback(async (playlistId: string) => {
+    await api.followPlaylist(playlistId);
+    dropCache(cacheKey.home);
+    setFollowedPlaylists(await api.listFollowedPlaylists());
+  }, []);
+
+  const unfollow = useCallback(async (playlistId: string) => {
+    setFollowedPlaylists((rows) => rows.filter((p) => p.id !== playlistId));
+    dropCache(cacheKey.home);
+    await api.unfollowPlaylist(playlistId);
+  }, []);
 
   useEffect(() => {
     void reload();
@@ -189,9 +216,12 @@ export function LibraryProvider({
       setMe,
       tracks,
       playlists,
+      followedPlaylists,
       loading,
       error,
       reload,
+      follow,
+      unfollow,
       putTrack,
       dropTracks,
       markInPlaylist,
@@ -205,9 +235,12 @@ export function LibraryProvider({
       setMe,
       tracks,
       playlists,
+      followedPlaylists,
       loading,
       error,
       reload,
+      follow,
+      unfollow,
       putTrack,
       dropTracks,
       markInPlaylist,
@@ -254,10 +287,32 @@ function groupBy(tracks: Track[], key: (t: Track) => string | null): Grouped[] {
   return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * An album needs more than one track to be worth a shelf of its own — a
+ * single-track "album" is indistinguishable from a single that happened to
+ * carry an album tag.
+ */
 export function albumsOf(tracks: Track[]): Grouped[] {
-  return groupBy(tracks, (t) => t.album);
+  return groupBy(tracks, (t) => t.album).filter((g) => g.track_count > 1);
 }
 
 export function artistsOf(tracks: Track[]): Grouped[] {
-  return groupBy(tracks, (t) => t.artist);
+  const groups = new Map<string, Grouped>();
+  for (const track of tracks) {
+    if (!track.artist) continue;
+    for (const name of splitArtists(track.artist)) {
+      const existing = groups.get(name);
+      if (existing) {
+        existing.track_count += 1;
+        existing.cover_track_id ??= track.has_cover ? track.id : null;
+      } else {
+        groups.set(name, {
+          name,
+          track_count: 1,
+          cover_track_id: track.has_cover ? track.id : null,
+        });
+      }
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -26,6 +26,9 @@ interface AvatarProps {
   /** The lime ring that marks somebody who is listening right now. */
   ring?: boolean;
   className?: string;
+  /** Bumped after this session uploads a new picture, so the browser does not
+   *  keep serving the old bytes for the rest of it from its own cache. */
+  bust?: number;
 }
 
 export function Avatar({
@@ -35,6 +38,7 @@ export function Avatar({
   size,
   ring,
   className,
+  bust,
 }: AvatarProps) {
   const [failed, setFailed] = useState(false);
   const seed = String(userId);
@@ -51,7 +55,7 @@ export function Avatar({
         flex: "none",
         overflow: "hidden",
         background: showImage ? "#141414" : tintFor(seed),
-        border: ring ? "1.5px solid #DFFC8E" : undefined,
+        border: ring ? "1.5px solid var(--color-nav-action)" : undefined,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -63,7 +67,7 @@ export function Avatar({
     >
       {showImage ? (
         <img
-          src={avatarUrl(userId)}
+          src={avatarUrl(userId, bust)}
           alt=""
           loading="lazy"
           decoding="async"

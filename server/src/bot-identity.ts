@@ -34,3 +34,9 @@ export function miniAppLink(): string | null {
   if (!botUsername) return null;
   return `https://t.me/${botUsername}?startapp`;
 }
+
+/** The link a shared-track page's button opens, to redeem the token in chat. */
+export function trackShareLink(token: string): string | null {
+  if (!botUsername) return null;
+  return `https://t.me/${botUsername}?start=track_${token}`;
+}

@@ -5,6 +5,7 @@ import {
   getTrackForListener,
   getUserLanguage,
   playlistVisibleToRequester,
+  redeemTrackShare,
   saveTrackToLibrary,
   searchOwnPlaylists,
   searchOwnTracks,
@@ -42,6 +43,33 @@ export async function handleTrackShare(
     Markup.inlineKeyboard([
       Markup.button.callback(t(lang, "btn_add_to_library"), `save_track_${track.id}`),
     ])
+  );
+}
+
+/**
+ * Handle a `?start=track_<token>` deep link — the opaque-token twin of
+ * {@link handleTrackShare} above, reached from the public `/s/track/:token`
+ * page rather than a forward inside Telegram. Where that one is gated by
+ * whether the recipient can already see the track (a friend, a shared
+ * playlist), this one has no such relationship to check: the token itself,
+ * resolved by redeemTrackShare, is the entire authorization, which is why it
+ * works for a stranger with no prior connection to the sender at all.
+ */
+export async function handleTrackShareToken(
+  recipientTelegramId: number,
+  token: string,
+  reply: (text: string) => Promise<unknown>
+): Promise<void> {
+  const lang = await getUserLanguage(recipientTelegramId);
+  const saved = await redeemTrackShare(token, recipientTelegramId);
+  if (!saved) {
+    await reply(t(lang, "share_track_unavailable"));
+    return;
+  }
+  await reply(
+    t(lang, saved.already ? "track_duplicate" : "track_added", {
+      title: trackLabel(saved.track),
+    })
   );
 }
 

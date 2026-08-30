@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
-import { CollectionArt, Cover } from "../components/PixelArt";
+import { CollectionArt, Cover, collectionArtUrl } from "../components/PixelArt";
+import { ImageCropSheet } from "../components/ImageCropSheet";
 import { NameSheet } from "../components/NameSheet";
 import { ShareSheet } from "../components/ShareSheet";
 import { TrackListScreen } from "../components/TrackListScreen";
 import {
   Counted,
+  CoverBackdrop,
   Empty,
   GhostButton,
   Sheet,
@@ -19,6 +21,7 @@ import {
   EditIcon,
   ImageIcon,
   NoteIcon,
+  PlusIcon,
   ShareIcon,
   TrashIcon,
 } from "../icons";
@@ -26,6 +29,7 @@ import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { trackTitle } from "../lib/format";
+import { usePaletteForUrl } from "../lib/palette";
 import { haptic } from "../telegram";
 import type { PlaylistVisibility, Track } from "../types";
 
@@ -60,13 +64,15 @@ export function PlaylistView({
   /** The name whatever opened this knew. See View in view.ts. */
   name?: string;
 }) {
-  const { playlists, putPlaylist, dropPlaylist } = useLibrary();
+  const { playlists, followedPlaylists, follow, unfollow, putPlaylist, dropPlaylist } =
+    useLibrary();
   const { toast, errorToast, undoToast } = useToast();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [picking, setPicking] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [describing, setDescribing] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -79,7 +85,35 @@ export function PlaylistView({
   // decided to do it.
   const playlist = playlists.find((p) => p.id === id);
   const owned = playlist != null;
-  const title = playlist?.name ?? pushedName ?? "Playlist";
+
+  // The library array only ever holds your own playlists, so a friend's
+  // playlist has to be fetched separately for its own metadata — cover,
+  // description, track count. Without this, a shared playlist had nothing to
+  // show for a cover but the first track in the list, which is why it used to
+  // look right in one place and wrong when actually opened. When the
+  // playlist is your own, the fetcher is a no-op and `meta` is just `playlist`.
+  const { data: fetchedMeta } = useCached(
+    cacheKey.playlistMeta(id),
+    () => (owned ? Promise.resolve(null) : api.getPlaylist(id)),
+    ttl.playlistMeta
+  );
+  const meta = playlist ?? fetchedMeta ?? undefined;
+  const title = meta?.name ?? pushedName ?? "Playlist";
+
+  const following = followedPlaylists.some((p) => p.id === id);
+  const [followBusy, setFollowBusy] = useState(false);
+  const toggleFollow = async () => {
+    setFollowBusy(true);
+    haptic.tap();
+    try {
+      if (following) await unfollow(id);
+      else await follow(id);
+    } catch (err) {
+      errorToast(err, following ? "Could not unfollow that" : "Could not follow that");
+    } finally {
+      setFollowBusy(false);
+    }
+  };
 
   // The order lives on the server, so the rows are fetched rather than
   // filtered — but they are also the same rows every time this playlist is
@@ -95,6 +129,14 @@ export function PlaylistView({
     ttl.playlistTracks
   );
   const tracks = rows ?? [];
+
+  // Same precedence CollectionArt draws the header art with, so the wash
+  // behind the screen always agrees with the picture sitting on top of it.
+  const artUrl = collectionArtUrl(
+    meta?.cover_track_id ?? tracks[0]?.id,
+    meta ? api.playlistArtworkUrl(meta) : null
+  );
+  const palette = usePaletteForUrl(artUrl, `playlist:${id}`);
 
   // Only worth a toast when there are still rows on screen from a previous
   // visit; with nothing to show, the screen itself says so and says it for as
@@ -155,19 +197,16 @@ export function PlaylistView({
    * hide it on a track first. The image goes to the cover channel and the row
    * keeps a file_id, exactly as a track's artwork does.
    */
-  const uploadArtwork = async (file: File | undefined) => {
-    if (!file) return;
+  const uploadArtwork = async (image: Blob) => {
     setUploading(true);
     try {
-      putPlaylist(await api.uploadPlaylistArtwork(id, file));
+      putPlaylist(await api.uploadPlaylistArtwork(id, image));
       haptic.success();
       setPicking(false);
     } catch (err) {
       errorToast(err, "Could not set that picture");
     } finally {
       setUploading(false);
-      // Cleared so that picking the same file twice still fires a change.
-      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -216,23 +255,24 @@ export function PlaylistView({
 
   return (
     <>
+      <CoverBackdrop palette={palette} />
       <TrackListScreen
         nav={nav}
         art={
           <CollectionArt
             name={title}
-            coverTrackId={playlist?.cover_track_id ?? tracks[0]?.id}
-            src={playlist ? api.playlistArtworkUrl(playlist) : null}
+            coverTrackId={meta?.cover_track_id ?? tracks[0]?.id}
+            src={meta ? api.playlistArtworkUrl(meta) : null}
             size={96}
             radius={16}
           />
         }
         name={title}
         subtitle={
-          <Counted count={playlist?.track_count ?? tracks.length} one="track" />
+          <Counted count={meta?.track_count ?? tracks.length} one="track" />
         }
         note={
-          playlist?.description ? (
+          meta?.description ? (
             <p
               className="nav-rise"
               style={{
@@ -243,7 +283,7 @@ export function PlaylistView({
                 whiteSpace: "pre-wrap",
               }}
             >
-              {playlist.description}
+              {meta.description}
             </p>
           ) : null
         }
@@ -269,7 +309,15 @@ export function PlaylistView({
               width={44}
               onClick={() => setMenuOpen(true)}
             />
-          ) : null
+          ) : (
+            <GhostButton
+              icon={following ? CheckIcon : PlusIcon}
+              disabled={followBusy}
+              onClick={() => void toggleFollow()}
+            >
+              {following ? "Following" : "Follow"}
+            </GhostButton>
+          )
         }
       />
 
@@ -344,7 +392,12 @@ export function PlaylistView({
           ref={fileRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/gif"
-          onChange={(e) => void uploadArtwork(e.target.files?.[0])}
+          onChange={(e) => {
+            const picked = e.target.files?.[0];
+            if (picked) setCropFile(picked);
+            // Cleared so that picking the same file twice still opens the crop sheet.
+            if (fileRef.current) fileRef.current.value = "";
+          }}
           style={{ display: "none" }}
         />
         <SheetDivider />
@@ -354,6 +407,15 @@ export function PlaylistView({
           onPick={(trackId) => void chooseCover(trackId)}
         />
       </Sheet>
+
+      <ImageCropSheet
+        file={cropFile}
+        onCancel={() => setCropFile(null)}
+        onConfirm={(blob) => {
+          setCropFile(null);
+          void uploadArtwork(blob);
+        }}
+      />
 
       <ShareSheet
         open={sharing}

@@ -8,14 +8,17 @@ import {
   removePlaylistTracksBulk,
   createPlaylist,
   deletePlaylist,
+  followPlaylist,
   getPerson,
   getPlaylist,
   getPlaylistCover,
+  listFollowedPlaylists,
   listPlaylists,
   listPlaylistTracksForListener,
   playlistVisibleToRequester,
   removePlaylistTrack,
   rotatePlaylistSlug,
+  unfollowPlaylist,
   updatePlaylist,
   updatePlaylistCover,
   setPlaylistCover,
@@ -229,6 +232,78 @@ export function playlistsRouter(): Router {
         return;
       }
       res.status(204).end();
+    })
+  );
+
+  /**
+   * The playlists this person has saved from other people's libraries.
+   *
+   * Declared ahead of GET /:id so "followed" is never read as a playlist id.
+   */
+  router.get(
+    "/followed",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const followed = await listFollowedPlaylists(
+        (req as AuthedRequest).telegramUserId
+      );
+      res.json(followed);
+    })
+  );
+
+  /**
+   * Save or unsave somebody else's playlist. A follow is a reference by id,
+   * never a copy — opening it always goes through the same visibility-scoped
+   * routes every other viewer uses, so it can never drift out of sync with
+   * the original. A 404 covers both "no such playlist" and "not visible to
+   * you", and following your own playlist is quietly a no-op.
+   */
+  router.post(
+    "/:id/follow",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const ok = await followPlaylist(
+        (req as AuthedRequest).telegramUserId,
+        req.params.id
+      );
+      if (!ok) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.status(204).end();
+    })
+  );
+
+  router.delete(
+    "/:id/follow",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      await unfollowPlaylist((req as AuthedRequest).telegramUserId, req.params.id);
+      res.status(204).end();
+    })
+  );
+
+  /**
+   * A playlist's own metadata — name, description, visibility, cover.
+   *
+   * Read-scoped exactly like /:id/tracks below it, for the same reason: the
+   * playlist screen needs this for a friend's playlist too, and the client's
+   * own library array only ever holds the caller's own playlists. Without
+   * this route the screen had nothing to fall back on but the first track in
+   * the list, which is why a shared playlist's cover used to look right in
+   * one place and wrong in another.
+   */
+  router.get(
+    "/:id",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const requesterId = (req as AuthedRequest).telegramUserId;
+      const playlist = await playlistVisibleToRequester(req.params.id, requesterId);
+      if (!playlist) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(playlist);
     })
   );
 

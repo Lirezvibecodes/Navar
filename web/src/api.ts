@@ -1,6 +1,7 @@
 import type {
   ActivityItem,
   Collection,
+  FriendPlaylist,
   HomePayload,
   ListeningNow,
   Me,
@@ -119,6 +120,15 @@ export function saveTrack(id: string): Promise<Track> {
   return request<Track>(`/api/tracks/${id}/save`, { method: "POST" });
 }
 
+/**
+ * A link for handing this track to somebody outside Navaar entirely — a
+ * public page with no session behind it, unlike saveTrack above which only
+ * ever works between people who can already see each other's libraries.
+ */
+export function shareTrack(id: string): Promise<{ url: string; app_link: string | null }> {
+  return request(`/api/tracks/${id}/share`, { method: "POST" });
+}
+
 /** Bulk delete returns the ids that actually moved, so undo puts back those. */
 export function deleteTracks(trackIds: string[]): Promise<{ deleted: string[] }> {
   return request(`/api/tracks/bulk`, {
@@ -155,14 +165,43 @@ export function trackCoverUrl(id: string): string {
   return `${API_BASE}/api/tracks/${id}/cover?token=${encodeURIComponent(sessionToken ?? "")}`;
 }
 
-export function avatarUrl(userId: string | number): string {
-  return `${API_BASE}/api/users/${userId}/avatar?token=${encodeURIComponent(sessionToken ?? "")}`;
+/**
+ * `bust` forces a fresh fetch right after this session uploads its own new
+ * picture — an <img> that already painted the old one never re-requests an
+ * unchanged src, and nobody else's view of it needs to change until they next
+ * open the app anyway, the same staleness the Telegram-photo refresh already
+ * has.
+ */
+export function avatarUrl(userId: string | number, bust?: number): string {
+  const v = bust != null ? `&v=${bust}` : "";
+  return `${API_BASE}/api/users/${userId}/avatar?token=${encodeURIComponent(sessionToken ?? "")}${v}`;
 }
 
 // --- Playlists --------------------------------------------------------------
 
 export function listPlaylists(): Promise<Playlist[]> {
   return request<Playlist[]>("/api/playlists");
+}
+
+/**
+ * One playlist's own metadata, read-scoped rather than owner-scoped — this
+ * resolves for a friend's playlist too, unlike listPlaylists.
+ */
+export function getPlaylist(id: string): Promise<Playlist> {
+  return request<Playlist>(`/api/playlists/${id}`);
+}
+
+/** Playlists saved from other people's libraries, kept live by reference. */
+export function listFollowedPlaylists(): Promise<FriendPlaylist[]> {
+  return request<FriendPlaylist[]>("/api/playlists/followed");
+}
+
+export function followPlaylist(id: string): Promise<void> {
+  return request<void>(`/api/playlists/${id}/follow`, { method: "POST" });
+}
+
+export function unfollowPlaylist(id: string): Promise<void> {
+  return request<void>(`/api/playlists/${id}/follow`, { method: "DELETE" });
 }
 
 export function createPlaylist(name: string): Promise<Playlist> {
@@ -242,9 +281,9 @@ export function playlistArtworkUrl(
   return `${API_BASE}/api/playlists/${playlist.id}/artwork?v=${v}&token=${encodeURIComponent(sessionToken ?? "")}`;
 }
 
-export function uploadPlaylistArtwork(id: string, file: File): Promise<Playlist> {
+export function uploadPlaylistArtwork(id: string, file: Blob): Promise<Playlist> {
   const form = new FormData();
-  form.append("cover", file);
+  form.append("cover", file, "cover.jpg");
   return request<Playlist>(`/api/playlists/${id}/artwork`, {
     method: "POST",
     body: form,
@@ -372,6 +411,30 @@ export function recordPlay(trackId: string): Promise<void> {
   return request<void>("/api/me/plays", {
     method: "POST",
     body: json({ trackId }),
+  });
+}
+
+/** Replace the Telegram profile photo with a picture chosen and cropped here. */
+export function uploadAvatar(image: Blob): Promise<void> {
+  const form = new FormData();
+  form.append("avatar", image, "avatar.jpg");
+  return request<void>("/api/me/avatar", { method: "POST", body: form });
+}
+
+/** Upload a rendered story card, getting back the HTTPS URL shareToStory needs. */
+export function uploadStoryCard(image: Blob): Promise<{ url: string }> {
+  const form = new FormData();
+  form.append("card", image, "story.jpg");
+  return request("/api/me/story-card", { method: "POST", body: form });
+}
+
+/** One of the 8 presets from the accent-colour picker. */
+export function setAccentColor(
+  accentColor: string
+): Promise<{ accent_color: string }> {
+  return request("/api/me/accent", {
+    method: "POST",
+    body: json({ accentColor }),
   });
 }
 

@@ -15,6 +15,7 @@ import { FirstRun } from "./components/Welcome";
 import { LibraryProvider, useLibrary } from "./context/LibraryContext";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
 import { ToastProvider } from "./context/ToastContext";
+import { ThemeEffect } from "./context/ThemeContext";
 import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
 import { CrateView } from "./views/CrateView";
@@ -325,12 +326,18 @@ function Boot() {
   // creates rows for people who have only ever forwarded a file, so this is the
   // first screen of the app rather than a step in a sign-up the app never had.
   if (me.handle == null) {
-    return <FirstRun me={me} onChosen={(handle) => setMe({ ...me, handle })} />;
+    return (
+      <>
+        <ThemeEffect me={me} />
+        <FirstRun me={me} onChosen={(handle) => setMe({ ...me, handle })} />
+      </>
+    );
   }
 
   return (
     <LibraryProvider me={me} setMe={setMe}>
       <PlayerProvider>
+        <ThemeEffect me={me} />
         <Shell me={me} />
       </PlayerProvider>
     </LibraryProvider>

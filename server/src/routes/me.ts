@@ -1,13 +1,29 @@
 import { Router } from "express";
+import multer from "multer";
 import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
+  ACCENT_PRESETS,
+  getListeningStats,
+  getPerson,
   recordPlay,
+  setAccentColor,
+  setCustomAvatar,
   setHandle,
   setListeningPrivacy,
   setListeningStatus,
 } from "../repo";
+import { captionOf, personLabel } from "../channels";
+import { storeCover } from "./covers";
 import { HANDLE_RULE, normaliseHandle } from "../handles";
+
+/** Same allowlist the playlist and track cover uploads use. */
+const COVER_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 /**
  * The caller's own account.
@@ -133,6 +149,108 @@ export function meRouter(): Router {
         return;
       }
       res.status(204).end();
+    })
+  );
+
+  /**
+   * A picture the user chose themselves, replacing the Telegram profile photo.
+   *
+   * The client always sends an already-square, already-cropped image — see
+   * ImageCropSheet — so there is nothing to do here but store it and mark it
+   * custom, the same marker that stops the next /start from overwriting it.
+   */
+  router.post(
+    "/avatar",
+    requireAuth,
+    upload.single("avatar"),
+    asyncHandler(async (req, res) => {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: "Missing avatar file" });
+        return;
+      }
+      if (!COVER_TYPES.has(file.mimetype)) {
+        res.status(400).json({ error: "Avatar must be a JPEG, PNG, WebP or GIF" });
+        return;
+      }
+
+      const telegramUserId = (req as AuthedRequest).telegramUserId;
+      const person = await getPerson(telegramUserId);
+      const stored = await storeCover(
+        file.buffer,
+        file.mimetype,
+        captionOf([`Avatar — ${personLabel(telegramUserId, person?.username)}`])
+      );
+      if (stored.kind !== "telegram") {
+        res.status(503).json({ error: "Could not store that picture right now" });
+        return;
+      }
+
+      await setCustomAvatar(telegramUserId, stored.fileId);
+      res.status(204).end();
+    })
+  );
+
+  /**
+   * A rendered story card (see storyCard.ts), handed back as an HTTPS URL for
+   * shareToStory — Telegram's story editor fetches the image itself, so a
+   * blob: URL from the canvas that drew it is useless here, and it needs a
+   * real address the way /avatar's picture never does.
+   */
+  router.post(
+    "/story-card",
+    requireAuth,
+    upload.single("card"),
+    asyncHandler(async (req, res) => {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: "Missing card file" });
+        return;
+      }
+      if (!COVER_TYPES.has(file.mimetype)) {
+        res.status(400).json({ error: "Card must be a JPEG, PNG, WebP or GIF" });
+        return;
+      }
+
+      const telegramUserId = (req as AuthedRequest).telegramUserId;
+      const person = await getPerson(telegramUserId);
+      const stored = await storeCover(
+        file.buffer,
+        file.mimetype,
+        captionOf([`Story card — ${personLabel(telegramUserId, person?.username)}`])
+      );
+      if (stored.kind !== "telegram") {
+        res.status(503).json({ error: "Could not render that card right now" });
+        return;
+      }
+
+      const origin = `${req.protocol}://${req.get("host")}`;
+      res.json({ url: `${origin}/s/story/${encodeURIComponent(stored.fileId)}` });
+    })
+  );
+
+  /** What this person has been listening to — top track, top artist, play count. */
+  router.get(
+    "/stats",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      res.json(await getListeningStats((req as AuthedRequest).telegramUserId));
+    })
+  );
+
+  /** One of the 8 presets from the accent-colour picker. */
+  router.post(
+    "/accent",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const { accentColor } = req.body ?? {};
+      if (typeof accentColor !== "string" || !ACCENT_PRESETS.has(accentColor)) {
+        res.status(400).json({ error: "Not a valid accent colour" });
+        return;
+      }
+
+      await setAccentColor((req as AuthedRequest).telegramUserId, accentColor);
+      res.json({ accent_color: accentColor });
     })
   );
 

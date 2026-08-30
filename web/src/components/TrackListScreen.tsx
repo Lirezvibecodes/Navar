@@ -68,7 +68,7 @@ export function TrackListScreen({
   actions?: ReactNode;
 }) {
   const { owns, setFavorite } = useLibrary();
-  const { current, isPlaying, playFrom, setShuffle } = usePlayer();
+  const { current, isPlaying, playFrom, setShuffle, queueNext, queueLast } = usePlayer();
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);
 
   const source = useMemo(
@@ -166,6 +166,8 @@ export function TrackListScreen({
                 onToggleFavorite={() =>
                   void setFavorite(track, track.favorited_at == null)
                 }
+                onQueueNext={() => queueNext(track)}
+                onQueueLast={() => queueLast(track)}
               />
             ))
           )}

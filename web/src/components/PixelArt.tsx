@@ -11,10 +11,10 @@ import { trackCoverUrl } from "../api";
  */
 
 const VARIANTS = [
-  ["#89AEFF", "#BCE4FE", "#DFFC8E", "#141414"],
-  ["#DFFC8E", "#141414", "#89AEFF", "#BCE4FE"],
+  ["#89AEFF", "#BCE4FE", "var(--color-nav-action)", "#141414"],
+  ["var(--color-nav-action)", "#141414", "#89AEFF", "#BCE4FE"],
   ["#E0389B", "#1A1A1A", "#BCE4FE", "#89AEFF"],
-  ["#BCE4FE", "#DFFC8E", "#1F1F1F", "#E0389B"],
+  ["#BCE4FE", "var(--color-nav-action)", "#1F1F1F", "#E0389B"],
 ];
 
 function variantFor(seed: string): string[] {
@@ -86,6 +86,20 @@ export function Cover({
 }
 
 /**
+ * The image a collection tile actually shows: its own picture if it has one,
+ * else the cover of a track inside it, else nothing (the pattern takes over).
+ * Pulled out of `CollectionArt` so anything that needs the same URL — the
+ * backdrop behind a playlist or album screen, say — asks the one place that
+ * knows the precedence instead of re-deriving it.
+ */
+export function collectionArtUrl(
+  coverTrackId: string | null | undefined,
+  src?: string | null
+): string | null {
+  return src ?? (coverTrackId ? trackCoverUrl(coverTrackId) : null);
+}
+
+/**
  * The square for a playlist, album or artist: an image of its own if it has
  * one, else the artwork of a track inside it, else the pattern seeded on the
  * collection's own name.
@@ -111,7 +125,7 @@ export function CollectionArt({
   fill?: boolean;
   className?: string;
 }) {
-  const art = src ?? (coverTrackId ? trackCoverUrl(coverTrackId) : null);
+  const art = collectionArtUrl(coverTrackId, src);
   return (
     <div
       className={className}

@@ -47,6 +47,7 @@ const store = new Map<string, Entry>();
 export const cacheKey = {
   home: "home",
   playlistTracks: (id: string) => `playlist:${id}:tracks`,
+  playlistMeta: (id: string) => `playlist:${id}:meta`,
   profile: (id: string | number) => `profile:${id}`,
   friends: "friends",
   suggestions: "social:suggestions",
@@ -68,6 +69,8 @@ export const ttl = {
   home: 60_000,
   /** Only you reorder your own playlist, and doing so drops the key anyway. */
   playlistTracks: 300_000,
+  /** Somebody else's playlist can change its cover or name at any time. */
+  playlistMeta: 60_000,
   /** Badges and endorsements are other people's doing. */
   profile: 60_000,
   friends: 60_000,

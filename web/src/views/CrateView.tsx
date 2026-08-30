@@ -63,7 +63,7 @@ export function CrateView({
 }) {
   const { tracks, loading, owns, setFavorite, dropTracks, putTrack, playlists } =
     useLibrary();
-  const { current, isPlaying, playFrom, setShuffle } = usePlayer();
+  const { current, isPlaying, playFrom, setShuffle, queueNext, queueLast } = usePlayer();
   const { errorToast, undoToast, setToastLift } = useToast();
 
   const [tab, setTab] = useState<CrateFilter>(filter);
@@ -300,6 +300,8 @@ export function CrateView({
                 onToggleFavorite={() =>
                   void setFavorite(track, track.favorited_at == null)
                 }
+                onQueueNext={() => queueNext(track)}
+                onQueueLast={() => queueLast(track)}
               />
             ))
           )}

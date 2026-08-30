@@ -1,0 +1,2 @@
+ALTER TABLE users DROP COLUMN IF EXISTS avatar_source;
+ALTER TABLE users DROP COLUMN IF EXISTS accent_color;

@@ -20,6 +20,7 @@ import {
   type Grouped,
 } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
+import { personName } from "../lib/format";
 import { haptic } from "../telegram";
 import type { View } from "../view";
 
@@ -35,7 +36,7 @@ import type { View } from "../view";
  * somebody else's library use.
  */
 export function LibraryView({ nav }: { nav: Navigation }) {
-  const { tracks, playlists, loading, putPlaylist } = useLibrary();
+  const { tracks, playlists, followedPlaylists, loading, putPlaylist } = useLibrary();
   const { errorToast } = useToast();
   const [tab, setTab] = useState<"all" | "albums" | "artists">("all");
   const [naming, setNaming] = useState(false);
@@ -105,14 +106,26 @@ export function LibraryView({ nav }: { nav: Navigation }) {
             spaceAbove={14}
           />
           <Grid
-            items={playlists.map((p) => ({
-              key: p.id,
-              name: p.name,
-              cover: p.cover_track_id,
-              art: api.playlistArtworkUrl(p),
-              caption: <Counted count={p.track_count ?? 0} one="track" />,
-              to: { type: "playlist", id: p.id, name: p.name } as View,
-            }))}
+            items={[
+              ...playlists.map((p) => ({
+                key: p.id,
+                name: p.name,
+                cover: p.cover_track_id,
+                art: api.playlistArtworkUrl(p),
+                caption: <Counted count={p.track_count ?? 0} one="track" />,
+                to: { type: "playlist", id: p.id, name: p.name } as View,
+              })),
+              // Yours says how much is in it, theirs says whose it is — same
+              // rule HomeView's shelf cards already follow.
+              ...followedPlaylists.map((p) => ({
+                key: p.id,
+                name: p.name,
+                cover: p.cover_track_id,
+                art: api.playlistArtworkUrl(p),
+                caption: personName(p.person),
+                to: { type: "playlist", id: p.id, name: p.name } as View,
+              })),
+            ]}
             nav={nav}
           />
 
@@ -193,7 +206,7 @@ function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }
         borderRadius: 16,
         textAlign: "left",
         color: "#0A0A0A",
-        background: "linear-gradient(110deg, #dffc8e, #89aeff)",
+        background: "linear-gradient(110deg, var(--color-nav-action), #89aeff)",
         boxShadow: "0 10px 26px rgba(0,0,0,.45)",
       }}
     >

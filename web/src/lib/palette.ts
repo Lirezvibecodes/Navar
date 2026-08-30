@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { cached, cacheKey, peek, ttl } from "./cache";
 import { trackCoverUrl } from "../api";
 
@@ -139,7 +140,7 @@ function darken(h: number, s: number, l: number, alpha: number): Rgb {
 
 // --- Extraction ------------------------------------------------------------
 
-function loadCover(trackId: string): Promise<HTMLImageElement | null> {
+function loadCover(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new Image();
     // Deliberately no crossOrigin. Covers are served by this same origin with
@@ -159,7 +160,7 @@ function loadCover(trackId: string): Promise<HTMLImageElement | null> {
     img.onerror = () => {
       settle(null);
     };
-    img.src = trackCoverUrl(trackId);
+    img.src = url;
   });
 }
 
@@ -233,8 +234,8 @@ function bucketsOf(pixels: Uint8ClampedArray): Bucket[] {
     .sort((a, b) => b.weight - a.weight);
 }
 
-async function extract(trackId: string): Promise<Palette | null> {
-  const img = await loadCover(trackId);
+async function extract(url: string): Promise<Palette | null> {
+  const img = await loadCover(url);
   if (!img) return null;
 
   const pixels = readPixels(img);
@@ -255,26 +256,60 @@ async function extract(trackId: string): Promise<Palette | null> {
 }
 
 /**
- * Colours never change for a track, so this is cached for the session and a
- * track already played comes back with its backdrop on the first frame. A cover
- * that failed caches its null too: it is the same cover, and asking the network
- * again on every replay would cost more than the tint is worth.
+ * Colours never change for a given image, so this is cached for the session
+ * under whatever key identifies it and a cover already seen comes back with
+ * its backdrop on the first frame. A cover that failed caches its null too: it
+ * is the same image, and asking the network again on every visit would cost
+ * more than the tint is worth.
  */
+export function paletteForUrl(url: string, key: string): Promise<Palette | null> {
+  return cached(cacheKey.palette(key), () => extract(url), ttl.palette);
+}
+
+/** The player's own case: a track's own cover, by its id. */
 export function paletteFor(
   trackId: string,
   hasCover: boolean
 ): Promise<Palette | null> {
   if (!hasCover) return Promise.resolve(null);
-  return cached(cacheKey.palette(trackId), () => extract(trackId), ttl.palette);
+  return paletteForUrl(trackCoverUrl(trackId), trackId);
 }
 
 /**
  * The answer if it is already known, without waiting a frame for it. Undefined
- * means this cover has not been looked at yet, which is not the same as having
+ * means this image has not been looked at yet, which is not the same as having
  * been looked at and yielded nothing.
  */
-export function peekPalette(trackId: string): Palette | null | undefined {
-  return peek<Palette | null>(cacheKey.palette(trackId));
+export function peekPalette(key: string): Palette | null | undefined {
+  return peek<Palette | null>(cacheKey.palette(key));
+}
+
+/**
+ * The same seed-then-correct pattern the player uses for its own backdrop,
+ * generalised to any image: a playlist or album screen wants the identical
+ * colour-derived wash, just keyed off a cover it does not own a track id for.
+ */
+export function usePaletteForUrl(url: string | null, key: string): Palette | null {
+  const [state, setState] = useState<{ key: string | null; palette: Palette | null }>(
+    () => ({ key: url ? key : null, palette: (url && peekPalette(key)) || null })
+  );
+  if (state.key !== (url ? key : null)) {
+    setState({ key: url ? key : null, palette: (url && peekPalette(key)) || null });
+  }
+
+  useEffect(() => {
+    if (!url) return;
+    let live = true;
+    void paletteForUrl(url, key).then((palette) => {
+      if (!live) return;
+      setState((prev) => (prev.key === key ? { key, palette } : prev));
+    });
+    return () => {
+      live = false;
+    };
+  }, [url, key]);
+
+  return state.palette;
 }
 
 // --- CSS -------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import multer from "multer";
 import { requireAuth, AuthedRequest } from "../middleware";
 import {
+  createTrackShare,
   getPerson,
   getTrack,
   getTrackCover,
@@ -18,6 +19,7 @@ import {
   recordLyricsLookup,
   updateTrackFields,
 } from "../repo";
+import { trackShareLink } from "../bot-identity";
 import type { TrackFilter } from "../repo";
 
 /** Reads a `{ trackIds: [...] }` body, rejecting anything that is not a list of strings. */
@@ -332,6 +334,34 @@ export function tracksRouter(): Router {
         return;
       }
       res.status(saved.already ? 200 : 201).json(saved.track);
+    })
+  );
+
+  /**
+   * A link for handing this track to somebody outside Navaar entirely — no
+   * account, no friendship, just the page at the other end of the token. The
+   * visibility check here is the same one /:id/save makes; the token itself
+   * carries the authorization from that point on.
+   */
+  router.post(
+    "/:id/share",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const senderId = (req as AuthedRequest).telegramUserId;
+      const source = await getTrackForListener(req.params.id, senderId);
+      if (!source) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      const token = await createTrackShare(req.params.id, senderId);
+      if (!token) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      const origin = `${req.protocol}://${req.get("host")}`;
+      res.json({ token, url: `${origin}/s/track/${token}`, app_link: trackShareLink(token) });
     })
   );
 

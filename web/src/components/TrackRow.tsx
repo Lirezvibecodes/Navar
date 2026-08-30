@@ -2,11 +2,11 @@ import { useState } from "react";
 import type { Track } from "../types";
 import { Cover } from "./PixelArt";
 import { Avatar } from "./Avatar";
-import { CheckIcon, DotsIcon, HeartIcon } from "../icons";
+import { CheckIcon, DotsIcon, HeartIcon, PlayNextIcon, QueueAddIcon } from "../icons";
 import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/format";
 import { haptic } from "../telegram";
 import { useLibrary } from "../context/LibraryContext";
-import { useLongPress } from "./ui";
+import { useLongPress, useSwipeQueue } from "./ui";
 
 /**
  * One track, everywhere a track appears in a list.
@@ -58,6 +58,10 @@ export interface TrackRowProps {
   onPlay: () => void;
   onMenu?: () => void;
   onToggleFavorite?: () => void;
+  /** Swipe right, past the second threshold, to play this next. Optional — a
+   *  row with neither of these two just doesn't grow the swipe affordance. */
+  onQueueNext?: () => void;
+  onQueueLast?: () => void;
 }
 
 export function TrackRow({
@@ -75,9 +79,16 @@ export function TrackRow({
   onPlay,
   onMenu,
   onToggleFavorite,
+  onQueueNext,
+  onQueueLast,
 }: TrackRowProps) {
   const { me } = useLibrary();
   const press = useLongPress(() => onEnterSelection?.());
+  const canSwipe = !selectable && !!(onQueueNext || onQueueLast);
+  const swipe = useSwipeQueue(
+    () => (onQueueLast ?? onQueueNext)?.(),
+    () => (onQueueNext ?? onQueueLast)?.()
+  );
 
   // The heart pops only while it is being filled — never on a rerender that
   // happens to carry a favourite the row already had.
@@ -92,28 +103,77 @@ export function TrackRow({
   const uploader = trackUploader(track, me?.id);
   const tag = uploader && !uploader.you ? uploader : null;
 
+  const revealStage = canSwipe ? swipe.stage : "none";
+
   return (
     <div
       className="nav-row-in"
       style={
         {
           "--i": index,
+          position: "relative",
+          borderRadius: 12,
+          margin: "0 -8px",
+          overflow: canSwipe ? "hidden" : undefined,
+        } as React.CSSProperties
+      }
+    >
+      {canSwipe ? (
+        // Sits behind the row and only shows through the gap the swipe opens
+        // up — the same "play next" / "add to queue" actions TrackMenu already
+        // offers, just reachable a beat faster from the row itself.
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            paddingLeft: 14,
+            gap: 6,
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "#0A0A0A",
+            background: "var(--color-nav-action)",
+            opacity: revealStage === "none" ? 0 : 1,
+            transition: "opacity var(--dur-tap) var(--ease)",
+          }}
+        >
+          {revealStage === "next" ? <PlayNextIcon size={15} /> : <QueueAddIcon size={15} />}
+          {revealStage === "next" ? "Play next" : "Add to queue"}
+        </div>
+      ) : null}
+
+      <div
+        {...(canSwipe
+          ? {
+              onPointerDown: swipe.onPointerDown,
+              onPointerMove: swipe.onPointerMove,
+              onPointerUp: swipe.onPointerUp,
+              onPointerCancel: swipe.onPointerCancel,
+              onPointerLeave: swipe.onPointerLeave,
+            }
+          : {})}
+        style={{
           display: "flex",
           alignItems: "center",
           gap: 11,
           height: 52,
-          borderRadius: 12,
           padding: "0 8px",
-          margin: "0 -8px",
+          borderRadius: 12,
           background: playing
             ? "rgba(223,252,142,.07)"
             : selected
               ? "rgba(255,255,255,.05)"
-              : undefined,
-          transition: "background-color var(--dur-state) var(--ease)",
-        } as React.CSSProperties
-      }
-    >
+              : "var(--color-nav-bg)",
+          transform: canSwipe && swipe.dragX ? `translateX(${swipe.dragX}px)` : undefined,
+          transition:
+            canSwipe && swipe.dragging()
+              ? "background-color var(--dur-state) var(--ease)"
+              : "background-color var(--dur-state) var(--ease), transform var(--dur-tap) var(--ease)",
+          touchAction: canSwipe ? "pan-y" : undefined,
+        }}
+      >
       {selectable ? (
         <button
           role="checkbox"
@@ -173,7 +233,25 @@ export function TrackRow({
           textAlign: "left",
         }}
       >
-        <Cover trackId={track.id} hasCover={track.has_cover} size={40} radius={9} />
+        <span style={{ position: "relative", flex: "none" }}>
+          <Cover trackId={track.id} hasCover={track.has_cover} size={40} radius={9} />
+          {/* Whose it is, when that is somebody other than you — pinned to the
+              cover's corner rather than sharing the subtitle line, so it never
+              crowds out the artist name the line already exists to show. */}
+          {tag ? (
+            <span
+              className="nav-uploader-badge"
+              title={`Added by @${tag.name}`}
+              style={{
+                position: "absolute",
+                right: -3,
+                bottom: -3,
+              }}
+            >
+              <Avatar userId={tag.id} username={tag.name} size={16} />
+            </span>
+          ) : null}
+        </span>
         <span style={{ flex: 1, minWidth: 0 }}>
           <span
             className="nav-clip"
@@ -199,12 +277,6 @@ export function TrackRow({
               minWidth: 0,
             }}
           >
-            {tag ? (
-              <span className="nav-uploader-tag" title={`Added by @${tag.name}`}>
-                <Avatar userId={tag.id} username={tag.name} size={14} />
-                <span className="nav-clip">@{tag.name}</span>
-              </span>
-            ) : null}
             <span className="nav-clip">
               <Highlighted text={meta} query={query} />
             </span>
@@ -273,6 +345,7 @@ export function TrackRow({
           ) : null}
         </div>
       )}
+      </div>
     </div>
   );
 }

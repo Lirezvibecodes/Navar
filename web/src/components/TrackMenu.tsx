@@ -23,11 +23,15 @@ import {
   PlayNextIcon,
   PlaylistIcon,
   QueueAddIcon,
+  ShareIcon,
+  SparklesIcon,
   TrashIcon,
   UserIcon,
 } from "../icons";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
-import { haptic } from "../telegram";
+import { haptic, shareLink, shareToStory } from "../telegram";
+import { renderStoryCard } from "../lib/storyCard";
+import { LyricsPickerSheet } from "./LyricsPickerSheet";
 
 /**
  * The `⋯` behind every track row.
@@ -76,6 +80,7 @@ export function TrackMenu({
 
   const [adding, setAdding] = useState<Track | null>(null);
   const [editing, setEditing] = useState<Track | null>(null);
+  const [pickingLyric, setPickingLyric] = useState<Track | null>(null);
 
   const track = target?.track ?? null;
   const owned = track ? owns(track) : false;
@@ -121,6 +126,41 @@ export function TrackMenu({
     }
   };
 
+  /**
+   * A link for handing this track to somebody outside Navaar entirely.
+   * Minting it requires a session, which is why this is owned-only even
+   * though the page it opens needs no account at all.
+   */
+  const share = async (t: Track) => {
+    try {
+      const { url } = await api.shareTrack(t.id);
+      if (!shareLink(url, `Listen to ${trackTitle(t)} on Navaar`)) {
+        toast("Not available outside Telegram");
+      }
+    } catch (err) {
+      errorToast(err, "Could not create that link");
+    } finally {
+      onClose();
+    }
+  };
+
+  /**
+   * Cover art, title, artist and (if picked) one lyric line, rendered to a
+   * canvas, then uploaded so Telegram's own story editor — which fetches the
+   * image itself rather than accepting one in memory — has a real URL to open.
+   */
+  const shareStory = async (t: Track, lyricLine: string | null) => {
+    try {
+      const blob = await renderStoryCard(t, lyricLine);
+      const { url } = await api.uploadStoryCard(blob);
+      if (!shareToStory(url)) {
+        toast("Story sharing needs a newer Telegram");
+      }
+    } catch (err) {
+      errorToast(err, "Could not build that story");
+    }
+  };
+
   // The one membership change with no crate row behind it: the track is
   // still yours and still in the Crate, so nothing in LibraryContext moves and
   // there is no invalidation to inherit. Undoing it goes back through
@@ -144,7 +184,7 @@ export function TrackMenu({
   return (
     <>
       <Sheet
-        open={target != null && !adding && !editing}
+        open={target != null && !adding && !editing && !pickingLyric}
         onClose={onClose}
         title={track ? `${trackTitle(track)} · ${trackArtist(track)}` : undefined}
       >
@@ -182,6 +222,20 @@ export function TrackMenu({
                 icon={PlaylistIcon}
                 label="Add to playlist"
                 onClick={() => setAdding(track)}
+              />
+            ) : null}
+            {owned ? (
+              <SheetItem
+                icon={ShareIcon}
+                label="Share link"
+                onClick={() => void share(track)}
+              />
+            ) : null}
+            {owned ? (
+              <SheetItem
+                icon={SparklesIcon}
+                label="Share to Story"
+                onClick={() => setPickingLyric(track)}
               />
             ) : null}
             {track.album ? (
@@ -251,6 +305,17 @@ export function TrackMenu({
         track={editing}
         onClose={() => {
           setEditing(null);
+          onClose();
+        }}
+      />
+
+      <LyricsPickerSheet
+        track={pickingLyric}
+        onPick={(line) => {
+          if (pickingLyric) void shareStory(pickingLyric, line);
+        }}
+        onClose={() => {
+          setPickingLyric(null);
           onClose();
         }}
       />

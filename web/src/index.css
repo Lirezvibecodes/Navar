@@ -344,7 +344,7 @@ body {
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E")
       repeat,
-    linear-gradient(150deg, #dffc8e, #89aeff);
+    linear-gradient(150deg, var(--color-nav-action), #89aeff);
   border-radius: 0 0 26px 26px;
 }
 
@@ -968,37 +968,17 @@ button {
 /* ---------------------------------------------------------------------------
    Who put it here
 
-   The credit face a row already carried, now with the name beside it. It has a
-   hard ceiling because it is the least important thing on the line: a person
-   with a long handle gives up their own name before the song gives up its
-   artist.
+   Used to share the subtitle line with the artist name, where it crowded the
+   very thing that line exists to show. Pinned to the cover's corner instead —
+   a face is enough of a credit on a 40px square, and it never costs the
+   artist name a single character of its own space.
    --------------------------------------------------------------------------- */
 
-.nav-uploader-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  /* Shrinks eight times as readily as the artist beside it, so a narrow phone
-     takes the space out of the handle and not out of the song. Its floor is
-     the face plus an ellipsis — the nameless credit avatar this line carried
-     before, so the worst case is where we started. */
-  flex: 0 8 auto;
-  /* The floor that makes that shrink factor mean anything. Left at `auto` the
-     minimum is the tag's own min-content — face plus the whole capped handle —
-     and a flex item cannot shrink past its minimum, so the factor above would
-     never come into play. 40px is the face, its gap, and enough of a handle to
-     be a handle; it is under the natural width of even the shortest username
-     Telegram issues, so it is a floor and never a padding. */
-  min-width: 40px;
-  color: rgba(255, 255, 255, 0.62);
-}
-
-/* The ceiling belongs on the name, not on the tag around it. A max-width on
-   the flex item itself is a max-size violation the moment a handle is longer
-   than the cap, and a violated item is frozen at its cap — which would hand
-   the whole squeeze back to the artist, the exact opposite of the rule above. */
-.nav-uploader-tag .nav-clip {
-  max-width: 10ch;
+.nav-uploader-badge {
+  display: block;
+  border-radius: 999px;
+  line-height: 0;
+  box-shadow: 0 0 0 2px var(--color-nav-card-top);
 }
 
 /* ---------------------------------------------------------------------------

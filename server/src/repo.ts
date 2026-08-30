@@ -7,6 +7,7 @@ import type {
   SharedPlaylist,
   SharedTrack,
   Track,
+  TrackShare,
 } from "./types";
 
 export type Lang = "en" | "fa";
@@ -1347,6 +1348,150 @@ export async function getSharedPlaylistCover(
   return fileId ? { kind: "telegram", fileId } : null;
 }
 
+/**
+ * The link for handing one track to somebody outside Navaar.
+ *
+ * One live token per (track, sender): re-sharing the same track returns the
+ * token already out there instead of minting a second one, the same way
+ * ON CONFLICT DO UPDATE lets saveTrackToLibrary re-target a save rather than
+ * accumulate rows for the same pair. Scoped to a track the sender may
+ * actually see, under the same visibility expression the read path uses.
+ */
+export async function createTrackShare(
+  trackId: string,
+  senderTelegramId: number
+): Promise<string | null> {
+  const { rows } = await getPool().query<{ token: string }>(
+    `INSERT INTO track_shares (token, track_id, sender_telegram_id)
+     SELECT $3, t.id, $2 FROM tracks t
+     WHERE t.id = $1 AND ${LIVE_T} AND ${trackVisibleTo("$2", "t")}
+     ON CONFLICT (track_id, sender_telegram_id) DO UPDATE
+       SET token = track_shares.token
+     RETURNING token`,
+    [trackId, senderTelegramId, newShareSlug()]
+  );
+  return rows[0]?.token ?? null;
+}
+
+/**
+ * The track behind a live share token, for the server-rendered page a
+ * stranger with no session lands on. The token and the track travel together
+ * in one join for the same reason getSharedTrack's do: there is no other
+ * check standing between this route and every track in the database.
+ */
+export async function getTrackShareForPage(
+  token: string
+): Promise<TrackShare | null> {
+  const { rows } = await getPool().query<TrackShare>(
+    `SELECT ${SHARED_TRACK_COLUMNS}, COALESCE(u.handle, u.username) AS sender_name
+     FROM track_shares ts
+     JOIN tracks t ON t.id = ts.track_id AND ${LIVE_T}
+     LEFT JOIN users u ON u.telegram_user_id = ts.sender_telegram_id
+     WHERE ts.token = $1`,
+    [token]
+  );
+  return rows[0] ?? null;
+}
+
+/** The artwork for a shared track's page, under the same token join. */
+export async function getTrackShareCover(
+  token: string
+): Promise<CoverSource | null> {
+  const { rows } = await getPool().query<{
+    cover_image: Buffer | null;
+    cover_mime_type: string | null;
+    cover_file_id: string | null;
+  }>(
+    `SELECT t.cover_image, t.cover_mime_type, t.cover_file_id
+     FROM track_shares ts
+     JOIN tracks t ON t.id = ts.track_id AND ${LIVE_T}
+     WHERE ts.token = $1`,
+    [token]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  if (row.cover_file_id) return { kind: "telegram", fileId: row.cover_file_id };
+  if (row.cover_image) {
+    return { kind: "bytes", image: row.cover_image, mimeType: row.cover_mime_type };
+  }
+  return null;
+}
+
+/**
+ * Redeeming a track-share token: copying the sender's track into the
+ * recipient's own library, the same transaction saveTrackToLibrary runs for
+ * a visible track, with the token's join standing in for trackVisibleTo. The
+ * token is the entire authority here — a stranger holding it is by
+ * definition someone trackVisibleTo would refuse — and recipientTelegramId
+ * comes from the authenticated bot context, never from the caller, so
+ * resolving the source track id in its own statement first introduces
+ * nothing an attacker could steer.
+ */
+export async function redeemTrackShare(
+  token: string,
+  recipientTelegramId: number
+): Promise<SavedTrack | null> {
+  const { rows } = await getPool().query<{ track_id: string }>(
+    `SELECT ts.track_id FROM track_shares ts
+     JOIN tracks t ON t.id = ts.track_id AND ${LIVE_T}
+     WHERE ts.token = $1`,
+    [token]
+  );
+  const sourceTrackId = rows[0]?.track_id;
+  if (!sourceTrackId) return null;
+
+  return withTransaction(async (client) => {
+    const live = async (): Promise<Track | null> => {
+      const { rows } = await client.query<Track>(
+        `SELECT ${TRACK_COLUMNS_T}
+         FROM track_saves ts
+         JOIN tracks t ON t.id = ts.saved_track_id
+         WHERE ts.saver_id = $1 AND ts.source_track_id = $2 AND ${LIVE_T}`,
+        [recipientTelegramId, sourceTrackId]
+      );
+      return rows[0] ?? null;
+    };
+
+    const existing = await live();
+    if (existing) return { track: existing, already: true };
+
+    const copy = await client.query<Track>(
+      `INSERT INTO tracks
+         (owner_telegram_id, title, artist, album, duration_seconds, telegram_file_id,
+          mime_type, cover_image, cover_mime_type, cover_file_id, origin_adder_id)
+       SELECT $1::BIGINT, t.title, t.artist, t.album, t.duration_seconds,
+              t.telegram_file_id, t.mime_type, t.cover_image, t.cover_mime_type,
+              t.cover_file_id, COALESCE(t.origin_adder_id, t.owner_telegram_id)
+       FROM tracks t
+       WHERE t.id = $2 AND ${LIVE_T} AND t.owner_telegram_id <> $1
+       RETURNING ${TRACK_COLUMNS}`,
+      [recipientTelegramId, sourceTrackId]
+    );
+    const track = copy.rows[0];
+    if (!track) return null;
+
+    const claim = await client.query(
+      `INSERT INTO track_saves (saver_id, origin_id, source_track_id, saved_track_id)
+       SELECT $1, t.owner_telegram_id, t.id, $3 FROM tracks t WHERE t.id = $2
+       ON CONFLICT (saver_id, source_track_id) DO UPDATE
+         SET saved_track_id = EXCLUDED.saved_track_id, created_at = now()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM tracks prev
+           WHERE prev.id = track_saves.saved_track_id AND prev.deleted_at IS NULL
+         )
+       RETURNING saved_track_id`,
+      [recipientTelegramId, sourceTrackId, track.id]
+    );
+    if (claim.rowCount === 0) {
+      await client.query(`DELETE FROM tracks WHERE id = $1`, [track.id]);
+      const winner = await live();
+      return winner ? { track: winner, already: true } : null;
+    }
+
+    return { track, already: false };
+  });
+}
+
 export async function addPlaylistTrack(
   playlistId: string,
   trackId: string,
@@ -2634,6 +2779,70 @@ export async function recordPlay(
 }
 
 /**
+ * A rollup of the plays table, not a lifetime total — see {@link recordPlay}
+ * for why `plays` itself only covers the retention window. Good enough for
+ * "what have you been into lately"; a lifetime count belongs on
+ * `total_listened_seconds` instead.
+ */
+export interface ListeningStats {
+  totalPlays: number;
+  topTrack: ActivityTrack | null;
+  topArtist: string | null;
+}
+
+export async function getListeningStats(telegramUserId: number): Promise<ListeningStats> {
+  const { rows } = await getPool().query<{
+    track_id: string;
+    title: string | null;
+    artist: string | null;
+    has_cover: boolean;
+    play_count: string;
+  }>(
+    `SELECT t.id AS track_id, t.title, t.artist, ${HAS_COVER_T} AS has_cover,
+       COUNT(*)::int AS play_count
+     FROM plays p
+     JOIN tracks t ON t.id = p.track_id
+     WHERE p.telegram_user_id = $1 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
+     GROUP BY t.id
+     ORDER BY play_count DESC`,
+    [telegramUserId]
+  );
+
+  let totalPlays = 0;
+  const artistCounts = new Map<string, number>();
+  for (const row of rows) {
+    const count = Number(row.play_count);
+    totalPlays += count;
+    for (const name of splitArtists(row.artist ?? "")) {
+      artistCounts.set(name, (artistCounts.get(name) ?? 0) + count);
+    }
+  }
+
+  let topArtist: string | null = null;
+  let topArtistCount = 0;
+  for (const [name, count] of artistCounts) {
+    if (count > topArtistCount) {
+      topArtist = name;
+      topArtistCount = count;
+    }
+  }
+
+  const top = rows[0];
+  return {
+    totalPlays,
+    topTrack: top
+      ? {
+          id: top.track_id,
+          title: top.title,
+          artist: top.artist,
+          cover_track_id: top.has_cover ? top.track_id : null,
+        }
+      : null,
+    topArtist,
+  };
+}
+
+/**
  * Playlists the people this viewer knows have opened up lately.
  *
  * Ordered by when the playlist last changed, which is the nearest thing
@@ -2835,6 +3044,8 @@ export interface PersonResult extends PersonSummary {
 /** Somebody the viewer has not met, and how many friends they have in common. */
 export interface Suggestion extends PersonSummary {
   mutual_count: number;
+  /** Who those friends are, so "3 friends in common" can name them. */
+  mutual_friends: PersonSummary[];
 }
 
 /**
@@ -2982,7 +3193,7 @@ export async function getProfileStats(telegramUserId: number): Promise<ProfileSt
 export async function listFriendSuggestions(
   viewerTelegramId: number
 ): Promise<Suggestion[]> {
-  const { rows } = await getPool().query<Suggestion>(
+  const { rows } = await getPool().query<Record<string, unknown>>(
     `WITH mine AS (
        SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS id
        FROM friendships
@@ -2995,12 +3206,21 @@ export async function listFriendSuggestions(
      )
      SELECT u.telegram_user_id, u.username, u.handle,
        (u.avatar_file_id IS NOT NULL) AS has_avatar,
-       COUNT(*)::int AS mutual_count
+       COUNT(*)::int AS mutual_count,
+       -- The mutual friends are exactly the "mine" rows this join found for
+       -- this candidate, so aggregating them here needs no second query.
+       json_agg(json_build_object(
+         'telegram_user_id', mu.telegram_user_id::text,
+         'username', mu.username,
+         'handle', mu.handle,
+         'has_avatar', (mu.avatar_file_id IS NOT NULL)
+       ) ORDER BY LOWER(COALESCE(mu.handle, mu.username))) AS mutual_friends
      FROM mine m
      JOIN friendships f
        ON f.status = 'accepted' AND m.id IN (f.requester_id, f.addressee_id)
      JOIN users u ON u.telegram_user_id =
        CASE WHEN f.requester_id = m.id THEN f.addressee_id ELSE f.requester_id END
+     JOIN users mu ON mu.telegram_user_id = m.id
      WHERE u.telegram_user_id <> $1
        AND u.telegram_user_id NOT IN (SELECT id FROM connected)
      GROUP BY u.telegram_user_id, u.username, u.handle, u.avatar_file_id
@@ -3008,7 +3228,15 @@ export async function listFriendSuggestions(
      LIMIT ${SUGGESTION_LIMIT}`,
     [viewerTelegramId]
   );
-  return rows;
+  return rows.map((row) => ({
+    telegram_user_id: String(row.telegram_user_id),
+    username: (row.username as string | null) ?? null,
+    handle: (row.handle as string | null) ?? null,
+    has_avatar: Boolean(row.has_avatar),
+    mutual_count: Number(row.mutual_count ?? 0),
+    // The row card only ever has room to name a couple of them.
+    mutual_friends: ((row.mutual_friends as PersonSummary[] | null) ?? []).slice(0, 3),
+  }));
 }
 
 /**
@@ -3024,6 +3252,40 @@ export async function listFriendSuggestions(
  * place it exists — a route that wanted to render "12 endorsements" would have
  * to come here and change this line, which is the point of putting it here.
  */
+/**
+ * Friends the viewer and this other person share — the same two-hop shape
+ * {@link listFriendSuggestions} uses, narrowed to one candidate instead of
+ * every stranger-of-a-friend at once. Meant for a person the viewer has not
+ * added yet; asking it about an existing friend just re-derives their own
+ * friend list back at them.
+ */
+async function mutualFriendsOf(
+  viewerTelegramId: number,
+  targetTelegramId: number,
+  limit: number
+): Promise<PersonSummary[]> {
+  const { rows } = await getPool().query<Record<string, unknown>>(
+    `WITH viewer_friends AS (
+       SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS id
+       FROM friendships
+       WHERE status = 'accepted' AND $1 IN (requester_id, addressee_id)
+     ),
+     target_friends AS (
+       SELECT CASE WHEN requester_id = $2 THEN addressee_id ELSE requester_id END AS id
+       FROM friendships
+       WHERE status = 'accepted' AND $2 IN (requester_id, addressee_id)
+     )
+     SELECT ${personColumns("u", "person")}
+     FROM viewer_friends vf
+     JOIN target_friends tf ON tf.id = vf.id
+     JOIN users u ON u.telegram_user_id = vf.id
+     ORDER BY LOWER(COALESCE(u.handle, u.username))
+     LIMIT ${limit}`,
+    [viewerTelegramId, targetTelegramId]
+  );
+  return rows.map((row) => personFrom(row, "person")!);
+}
+
 export interface UserProfile {
   person: PersonSummary;
   state: FriendshipState;
@@ -3037,7 +3299,19 @@ export interface UserProfile {
    */
   can_endorse: boolean;
   playlists: Playlist[];
+  /**
+   * How many friends they have. Null rather than 0 when the viewer isn't
+   * entitled to know — a stranger's friend count is exactly the kind of thing
+   * `listFriends` already keeps to a person and their own friends only.
+   */
+  friend_count: number | null;
+  /** Their listening, on the same friends-or-self rule as `friend_count`. */
+  stats: ListeningStats | null;
+  /** Who the viewer and this person both know, when they are not yet friends. */
+  mutual_friends: PersonSummary[];
 }
+
+const MUTUAL_FRIENDS_ON_PROFILE_LIMIT = 6;
 
 export async function getUserProfile(
   viewerTelegramId: number,
@@ -3062,6 +3336,19 @@ export async function getUserProfile(
   if (!row) return null;
 
   const endorsed = Boolean(row.endorsed);
+  const state = row.state as FriendshipState;
+  const isSelf = viewerTelegramId === targetTelegramId;
+  const canSeeStats = isSelf || state === "friends";
+
+  const [playlists, friendCount, stats, mutualFriends] = await Promise.all([
+    listPlaylistsVisibleTo(targetTelegramId, viewerTelegramId),
+    canSeeStats ? listFriends(targetTelegramId).then((f) => f.length) : Promise.resolve(null),
+    canSeeStats ? getListeningStats(targetTelegramId) : Promise.resolve(null),
+    !isSelf && state !== "friends"
+      ? mutualFriendsOf(viewerTelegramId, targetTelegramId, MUTUAL_FRIENDS_ON_PROFILE_LIMIT)
+      : Promise.resolve([]),
+  ]);
+
   return {
     person: {
       telegram_user_id: String(row.telegram_user_id),
@@ -3069,11 +3356,14 @@ export async function getUserProfile(
       handle: (row.handle as string | null) ?? null,
       has_avatar: Boolean(row.has_avatar),
     },
-    state: row.state as FriendshipState,
+    state,
     tier: tierFor(Number(row.endorsement_count ?? 0)),
     endorsed,
     can_endorse: !endorsed && Boolean(row.has_saved),
-    playlists: await listPlaylistsVisibleTo(targetTelegramId, viewerTelegramId),
+    playlists,
+    friend_count: friendCount,
+    stats,
+    mutual_friends: mutualFriends,
   };
 }
 

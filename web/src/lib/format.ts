@@ -94,3 +94,19 @@ export function personName(
   if (person.username) return `@${person.username}`;
   return person.first_name?.trim() || "Someone";
 }
+
+/**
+ * "Alice", "Alice and Bob", or "Alice, Bob and 3 others" — never more than two
+ * named, so a suggestion row stays one line whether two friends or twelve sit
+ * behind it. `total` is the true count; the list may be a shorter sample.
+ */
+export function namesList(
+  people: Parameters<typeof personName>[0][],
+  total: number
+): string {
+  const named = people.slice(0, 2).map((p) => personName(p));
+  const rest = total - named.length;
+  if (named.length === 0) return "";
+  if (rest > 0) return `${named.join(", ")} and ${pluralise(rest, "other")}`;
+  return named.length === 1 ? named[0] : `${named[0]} and ${named[1]}`;
+}

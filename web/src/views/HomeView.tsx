@@ -92,7 +92,7 @@ export function HomeView({
   const rest = shelf.slice(1);
 
   return (
-    <Screen>
+    <Screen scrollKey="home">
       {decked ? (
         <div style={{ marginTop: 6 }}>
           <Deck
