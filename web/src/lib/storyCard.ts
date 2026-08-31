@@ -2,8 +2,8 @@ import { trackCoverUrl } from "../api";
 import type { Track } from "../types";
 
 /**
- * Renders a track as a Telegram/Instagram story: cover art over a blurred
- * wash of the same image, title and artist, an optional picked lyric line,
+ * Renders a track as a Telegram/Instagram story: cover art over a pixelated
+ * wash of the same image, title and artist, up to four picked lyric lines,
  * and the Navaar wordmark. Fixed at the platform's own story aspect (9:16)
  * so it needs no cropping on either end once it lands there.
  */
@@ -13,6 +13,14 @@ const HEIGHT = 1920;
 const COVER_SIZE = 760;
 const COVER_RADIUS = 28;
 const COVER_Y = 300;
+
+/** Background wash resolution before it's blown back up with smoothing off —
+ *  low enough that each block reads as a visible pixel, matching the rest of
+ *  the app's pixel-art fallback art rather than a smooth photo blur. */
+const WASH_PIXEL_W = 54;
+const WASH_PIXEL_H = Math.round((HEIGHT / WIDTH) * WASH_PIXEL_W);
+
+const MAX_LYRIC_LINES = 8;
 
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
@@ -57,6 +65,28 @@ function drawCoverFit(
   ctx.restore();
 }
 
+/** Fills the whole canvas with a blocky, pixelated wash of `img`: drawn small
+ *  onto an offscreen canvas, then scaled back up with smoothing disabled so
+ *  each source block stays a hard-edged square instead of blurring. */
+function drawPixelatedWash(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
+  const tiny = document.createElement("canvas");
+  tiny.width = WASH_PIXEL_W;
+  tiny.height = WASH_PIXEL_H;
+  const tctx = tiny.getContext("2d");
+  if (!tctx) return;
+  tctx.filter = "brightness(.45) saturate(1.3)";
+  const scale =
+    Math.max(WASH_PIXEL_W / img.naturalWidth, WASH_PIXEL_H / img.naturalHeight) * 1.2;
+  const dw = img.naturalWidth * scale;
+  const dh = img.naturalHeight * scale;
+  tctx.drawImage(img, (WASH_PIXEL_W - dw) / 2, (WASH_PIXEL_H - dh) / 2, dw, dh);
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tiny, 0, 0, WIDTH, HEIGHT);
+  ctx.restore();
+}
+
 /** Greedy word wrap, capped at `maxLines` — a card is a fixed canvas, not a scroller. */
 function wrapLines(
   ctx: CanvasRenderingContext2D,
@@ -83,10 +113,10 @@ function wrapLines(
 
 export async function renderStoryCard(
   track: Pick<Track, "id" | "title" | "artist" | "has_cover">,
-  lyricLine: string | null
+  lyricLines: string[]
 ): Promise<Blob> {
   await Promise.all([
-    document.fonts.load('700 34px "Pixelify Sans"'),
+    document.fonts.load('700 46px "Pixelify Sans"'),
     document.fonts.load('600 52px "General Sans"'),
     document.fonts.load('italic 400 34px "General Sans"'),
   ]);
@@ -103,14 +133,7 @@ export async function renderStoryCard(
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
   if (cover) {
-    ctx.save();
-    ctx.filter = "blur(80px) brightness(.45) saturate(1.3)";
-    const scale =
-      Math.max(WIDTH / cover.naturalWidth, HEIGHT / cover.naturalHeight) * 1.2;
-    const dw = cover.naturalWidth * scale;
-    const dh = cover.naturalHeight * scale;
-    ctx.drawImage(cover, (WIDTH - dw) / 2, (HEIGHT - dh) / 2, dw, dh);
-    ctx.restore();
+    drawPixelatedWash(ctx, cover);
   }
 
   const scrim = ctx.createLinearGradient(0, 0, 0, HEIGHT);
@@ -141,20 +164,22 @@ export async function renderStoryCard(
     ctx.fillText(track.artist, WIDTH / 2, titleY + 58, WIDTH - 140);
   }
 
-  if (lyricLine) {
+  if (lyricLines.length) {
     ctx.fillStyle = "rgba(245,245,245,.85)";
     ctx.font = 'italic 400 34px "General Sans"';
-    const lines = wrapLines(ctx, `"${lyricLine}"`, WIDTH - 200, 3);
+    const wrapped = lyricLines
+      .flatMap((raw) => wrapLines(ctx, `"${raw}"`, WIDTH - 200, 2))
+      .slice(0, MAX_LYRIC_LINES);
     let y = titleY + 150;
-    for (const line of lines) {
+    for (const line of wrapped) {
       ctx.fillText(line, WIDTH / 2, y, WIDTH - 200);
       y += 46;
     }
   }
 
   ctx.fillStyle = "rgba(245,245,245,.5)";
-  ctx.font = '700 34px "Pixelify Sans"';
-  ctx.fillText("NAVAAR", WIDTH / 2, HEIGHT - 120);
+  ctx.font = '700 46px "Pixelify Sans"';
+  ctx.fillText("NAVAAR", WIDTH / 2, HEIGHT - 170);
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

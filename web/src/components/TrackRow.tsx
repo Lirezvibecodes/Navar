@@ -165,7 +165,7 @@ export function TrackRow({
             ? "rgba(var(--color-nav-action-rgb),.07)"
             : selected
               ? "rgba(255,255,255,.05)"
-              : "var(--color-nav-bg)",
+              : "transparent",
           transform: canSwipe && swipe.dragX ? `translateX(${swipe.dragX}px)` : undefined,
           transition:
             canSwipe && swipe.dragging()

@@ -10,7 +10,7 @@ import type { Me } from "../types";
  * eight without a second contrast decision per colour.
  */
 export const ACCENT_PRESETS: Record<string, { action: string; soft: string }> = {
-  lime: { action: "#c6f24a", soft: "#e6f7c4" },
+  lime: { action: "#dffc8e", soft: "#eaf7c9" },
   peach: { action: "#ffab5c", soft: "#ffdcb8" },
   blush: { action: "#ff85a1", soft: "#ffd0da" },
   lilac: { action: "#b083ff", soft: "#e0cfff" },

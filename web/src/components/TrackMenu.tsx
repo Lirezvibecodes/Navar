@@ -145,13 +145,14 @@ export function TrackMenu({
   };
 
   /**
-   * Cover art, title, artist and (if picked) one lyric line, rendered to a
-   * canvas, then uploaded so Telegram's own story editor — which fetches the
-   * image itself rather than accepting one in memory — has a real URL to open.
+   * Cover art, title, artist and (if picked) up to four lyric lines, rendered
+   * to a canvas, then uploaded so Telegram's own story editor — which fetches
+   * the image itself rather than accepting one in memory — has a real URL to
+   * open.
    */
-  const shareStory = async (t: Track, lyricLine: string | null) => {
+  const shareStory = async (t: Track, lyricLines: string[]) => {
     try {
-      const blob = await renderStoryCard(t, lyricLine);
+      const blob = await renderStoryCard(t, lyricLines);
       const { url } = await api.uploadStoryCard(blob);
       if (!shareToStory(url)) {
         toast("Story sharing needs a newer Telegram");
@@ -311,8 +312,8 @@ export function TrackMenu({
 
       <LyricsPickerSheet
         track={pickingLyric}
-        onPick={(line) => {
-          if (pickingLyric) void shareStory(pickingLyric, line);
+        onPick={(lines) => {
+          if (pickingLyric) void shareStory(pickingLyric, lines);
         }}
         onClose={() => {
           setPickingLyric(null);
