@@ -198,7 +198,7 @@ function LevelRow({
         padding: "9px 8px",
         borderRadius: 12,
         textAlign: "left",
-        background: chosen ? "rgba(223,252,142,.07)" : undefined,
+        background: chosen ? "rgba(var(--color-nav-action-rgb),.07)" : undefined,
       }}
     >
       <span

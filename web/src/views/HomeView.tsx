@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
-import { Deck } from "../components/Deck";
 import { Cover, CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
 import { Counted, Screen, SectionHeader, Skeleton, Empty } from "../components/ui";
@@ -29,13 +28,7 @@ import { haptic } from "../telegram";
  * onto a screen that keeps all of it, so a row scrolling off the end of Home
  * never takes anything with it.
  */
-export function HomeView({
-  nav,
-  onOpenPlayer,
-}: {
-  nav: Navigation;
-  onOpenPlayer: () => void;
-}) {
+export function HomeView({ nav }: { nav: Navigation }) {
   const { current, playFrom } = usePlayer();
 
   // Held across the remount every navigation performs, so coming back to Home
@@ -85,32 +78,13 @@ export function HomeView({
   // hidden by saying it.
   if (!home.continue_listening && !home.playlists) return <FirstRun />;
 
-  // The deck takes the head of the shelf, and the shelf gives it up. Showing
-  // the same track twice, six pixels apart, at two different sizes, reads as a
-  // bug rather than as emphasis.
-  const decked = shelf[0] ?? null;
-  const rest = shelf.slice(1);
-
   return (
     <Screen scrollKey="home">
-      {decked ? (
-        <div style={{ marginTop: 6 }}>
-          <Deck
-            track={decked}
-            live={current?.id === decked.id}
-            onPlay={() =>
-              playFrom({ label: "Recent", key: "home:recent", tracks: shelf }, decked)
-            }
-            onOpen={onOpenPlayer}
-          />
-        </div>
-      ) : null}
-
-      {rest.length > 0 ? (
+      {shelf.length > 0 ? (
         <>
           <SectionHeader title="Continue listening" />
           <div className="nav-shelf" style={{ gap: 10 }}>
-            {rest.map((track, i) => (
+            {shelf.map((track, i) => (
               <button
                 key={track.id}
                 className="nav-press nav-row-in"
@@ -228,8 +202,8 @@ export function HomeView({
             marginTop: 22,
             padding: "0 12px",
             borderRadius: 12,
-            background: "rgba(223,252,142,.09)",
-            border: "1px solid rgba(223,252,142,.32)",
+            background: "rgba(var(--color-nav-action-rgb),.09)",
+            border: "1px solid rgba(var(--color-nav-action-rgb),.32)",
             color: "var(--color-nav-action-soft)",
             fontSize: 12,
           }}
@@ -367,7 +341,7 @@ function PlaylistCard({
           borderRadius: 18,
           background: "var(--color-nav-action)",
           color: "#0A0A0A",
-          boxShadow: "0 6px 18px rgba(223,252,142,.34)",
+          boxShadow: "0 6px 18px rgba(var(--color-nav-action-rgb),.34)",
         }}
       >
         <PlayIcon size={13} />
@@ -384,13 +358,6 @@ function PlaylistCard({
 function FirstRun() {
   return (
     <Screen>
-      {/* The same object the steady-state screen opens on, with nothing in it.
-          A first run that shows a different shape teaches you a layout you then
-          never see again. */}
-      <div style={{ marginTop: 6 }}>
-        <Deck track={null} live={false} onPlay={() => {}} onOpen={() => {}} />
-      </div>
-
       <div
         className="nav-rise"
         style={{

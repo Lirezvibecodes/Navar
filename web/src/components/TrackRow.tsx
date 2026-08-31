@@ -26,7 +26,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
       {text.slice(0, at)}
       <mark
         style={{
-          background: "rgba(223,252,142,.22)",
+          background: "rgba(var(--color-nav-action-rgb),.22)",
           color: "inherit",
           borderRadius: 3,
           padding: "0 1px",
@@ -162,7 +162,7 @@ export function TrackRow({
           padding: "0 8px",
           borderRadius: 12,
           background: playing
-            ? "rgba(223,252,142,.07)"
+            ? "rgba(var(--color-nav-action-rgb),.07)"
             : selected
               ? "rgba(255,255,255,.05)"
               : "var(--color-nav-bg)",

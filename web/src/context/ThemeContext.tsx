@@ -10,14 +10,14 @@ import type { Me } from "../types";
  * eight without a second contrast decision per colour.
  */
 export const ACCENT_PRESETS: Record<string, { action: string; soft: string }> = {
-  lime: { action: "#dffc8e", soft: "#eaf7c9" },
-  peach: { action: "#ffcfa8", soft: "#ffe6cf" },
-  blush: { action: "#ffc2d1", soft: "#ffdde6" },
-  lilac: { action: "#d8c2ff", soft: "#ebdcff" },
-  mint: { action: "#b6f2d8", soft: "#d8f8e9" },
-  sand: { action: "#f2e2b6", soft: "#f8f0d8" },
-  gold: { action: "#f7dd8a", soft: "#fbecc0" },
-  aqua: { action: "#a8ecff", soft: "#d3f5ff" },
+  lime: { action: "#c6f24a", soft: "#e6f7c4" },
+  peach: { action: "#ffab5c", soft: "#ffdcb8" },
+  blush: { action: "#ff85a1", soft: "#ffd0da" },
+  lilac: { action: "#b083ff", soft: "#e0cfff" },
+  mint: { action: "#5be8ad", soft: "#c3f5de" },
+  sand: { action: "#e8c96a", soft: "#f5e7bd" },
+  gold: { action: "#ffc93c", soft: "#ffe6a0" },
+  aqua: { action: "#4fd6ff", soft: "#bdefff" },
 };
 
 const DEFAULT_NAME = "lime";
@@ -33,12 +33,19 @@ export function currentAccentHex(): string {
   return liveHex;
 }
 
+/** "#rrggbb" -> "r, g, b", for use inside rgba(var(--x), alpha). */
+function hexToRgbChannels(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
 function apply(name: string): void {
   const preset = ACCENT_PRESETS[name] ?? ACCENT_PRESETS[DEFAULT_NAME];
   liveHex = preset.action;
   const root = document.documentElement.style;
   root.setProperty("--color-nav-action", preset.action);
   root.setProperty("--color-nav-action-soft", preset.soft);
+  root.setProperty("--color-nav-action-rgb", hexToRgbChannels(preset.action));
 }
 
 /**

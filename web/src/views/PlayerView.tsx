@@ -11,7 +11,15 @@ import { LyricStrip, LyricsPane, useLyrics } from "../components/Lyrics";
 import { Cover } from "../components/PixelArt";
 import { TrackMenu } from "../components/TrackMenu";
 import type { TrackMenuTarget } from "../components/TrackMenu";
-import { Chip, EYEBROW, Num, RoundButton, Sheet, SheetItem } from "../components/ui";
+import {
+  Chip,
+  EYEBROW,
+  Num,
+  RoundButton,
+  Sheet,
+  SheetItem,
+  useSwipeRemove,
+} from "../components/ui";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -416,7 +424,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                 placeItems: "center",
                 background: "var(--color-nav-action)",
                 color: "#0A0A0A",
-                boxShadow: "0 8px 26px rgba(223,252,142,.22)",
+                boxShadow: "0 8px 26px rgba(var(--color-nav-action-rgb),.22)",
               }}
             >
               <span style={{ display: "grid", placeItems: "center" }}>
@@ -1215,26 +1223,82 @@ function QueueRow({
   moves?: QueueMoves;
 }) {
   const [movesOpen, setMovesOpen] = useState(false);
+  const canSwipe = !!moves;
+  const swipe = useSwipeRemove(() => moves?.remove());
 
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        minHeight: 52,
+        position: "relative",
         borderRadius: 10,
-        background: lifted ? "rgba(255,255,255,.07)" : undefined,
-        transform: lifted ? "scale(1.02)" : undefined,
-        transition: "transform var(--dur-state) var(--ease)",
+        overflow: canSwipe ? "hidden" : undefined,
       }}
     >
+      {canSwipe ? (
+        // Sits behind the row and only shows through the gap the leftward
+        // swipe opens up — the same remove the ⋯ sheet already offers, just
+        // reachable a beat faster from the row itself.
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            paddingRight: 16,
+            gap: 6,
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "#0A0A0A",
+            background: "var(--color-nav-danger)",
+            opacity: swipe.armed ? 1 : 0,
+            transition: "opacity var(--dur-tap) var(--ease)",
+          }}
+        >
+          <TrashIcon size={15} />
+          Remove
+        </div>
+      ) : null}
+
+      <div
+        {...(canSwipe
+          ? {
+              onPointerDown: swipe.onPointerDown,
+              onPointerMove: swipe.onPointerMove,
+              onPointerUp: swipe.onPointerUp,
+              onPointerCancel: swipe.onPointerCancel,
+              onPointerLeave: swipe.onPointerLeave,
+            }
+          : {})}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          minHeight: 52,
+          borderRadius: 10,
+          background: lifted ? "rgba(255,255,255,.07)" : undefined,
+          transform: lifted
+            ? "scale(1.02)"
+            : canSwipe && swipe.dragX
+              ? `translateX(${swipe.dragX}px)`
+              : undefined,
+          transition:
+            canSwipe && swipe.dragging()
+              ? "background-color var(--dur-state) var(--ease)"
+              : "background-color var(--dur-state) var(--ease), transform var(--dur-tap) var(--ease)",
+          touchAction: canSwipe ? "pan-y" : undefined,
+        }}
+      >
       {moves ? (
         <button
           className="nav-press"
           aria-label="Reorder — long press to lift, or use the menu"
           data-own-drag
-          onPointerDown={onLift}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onLift?.();
+          }}
           onClick={() => setMovesOpen(true)}
           style={{
             width: 28,
@@ -1293,6 +1357,7 @@ function QueueRow({
       >
         <DotsIcon size={15} />
       </button>
+      </div>
 
       {moves ? (
         <Sheet

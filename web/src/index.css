@@ -78,8 +78,9 @@
 
 @theme {
   --color-nav-bg: #030303;
-  --color-nav-action: #dffc8e;
-  --color-nav-action-soft: #eaf7c9;
+  --color-nav-action: #c6f24a;
+  --color-nav-action-soft: #e6f7c4;
+  --color-nav-action-rgb: 198, 242, 74;
   --color-nav-social: #89aeff;
   --color-nav-art: #bce4fe;
   --color-nav-card-top: #171a1f;
@@ -237,7 +238,7 @@ body {
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.19'/%3E%3C/svg%3E")
       repeat,
-    radial-gradient(115% 55% at 50% -8%, rgba(223, 252, 142, 0.11), transparent 62%),
+    radial-gradient(115% 55% at 50% -8%, rgba(var(--color-nav-action-rgb), 0.11), transparent 62%),
     radial-gradient(95% 55% at 108% 104%, rgba(137, 174, 255, 0.09), transparent 66%),
     #030303;
 }
@@ -454,6 +455,14 @@ body {
    land on top of whatever came next, which is why the Albums tab looked like
    it had come off its grid. The taller the page, the harder the squash — the
    Albums tab has the most rows, so it broke first and worst. */
+.nav-screen {
+  /* CoverBackdrop is position:fixed with no z-index, so per CSS stacking
+     rules it paints above any non-positioned sibling regardless of DOM
+     order. Giving Screen's own box a position (z-index:auto) puts it in
+     the same stacking group as the backdrop, where DOM order — backdrop
+     first, screen after — correctly puts the screen's content on top. */
+  position: relative;
+}
 .nav-screen > * {
   flex: none;
 }
@@ -597,7 +606,7 @@ button {
   outline: none;
   box-shadow:
     var(--glass-lift),
-    inset 0 0 0 1.5px rgba(223, 252, 142, 0.55);
+    inset 0 0 0 1.5px rgba(var(--color-nav-action-rgb), 0.55);
 }
 
 /* Truncation is the norm here: every row is a fixed height and track titles
@@ -796,7 +805,7 @@ button {
 .nav-tab[aria-current="page"] .nav-tab-disc {
   background: var(--color-nav-action);
   color: #0a0a0a;
-  box-shadow: 0 6px 18px rgba(223, 252, 142, 0.34);
+  box-shadow: 0 6px 18px rgba(var(--color-nav-action-rgb), 0.34);
 }
 
 /* The room the name occupies — the 8px between it and the disc, the name

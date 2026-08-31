@@ -89,9 +89,11 @@ export function Screen({
  * The tint a playlist or album screen wears, taken from its own cover.
  *
  * Fixed to the viewport rather than scrolled with the list, the same way the
- * app's own static wash (`.nav-screen-bg`) is — and painted after it in the
- * DOM with no z-index of its own, so it layers above that wash and below
- * whatever the screen actually renders, purely by document order. No fade: the
+ * app's own static wash (`.nav-screen-bg`) is. It carries no z-index of its
+ * own, and `.nav-screen` is deliberately given `position: relative` so the
+ * screen's content shares that same auto-z-index stacking group rather than
+ * sitting in the plain in-flow layer beneath it — within a shared group, DOM
+ * order settles the tie, and this backdrop is mounted first. No fade: the
  * screen it sits behind is freshly mounted on every visit, unlike the player,
  * which swaps tracks in place and needs one to avoid a cut.
  */
@@ -332,7 +334,7 @@ export function Chip({
         color: active ? "#0A0A0A" : "rgba(255,255,255,.72)",
         background: active ? "var(--color-nav-action)" : undefined,
         boxShadow: active
-          ? "0 6px 22px rgba(223,252,142,.42), 0 2px 8px rgba(223,252,142,.3)"
+          ? "0 6px 22px rgba(var(--color-nav-action-rgb),.42), 0 2px 8px rgba(var(--color-nav-action-rgb),.3)"
           : undefined,
       }}
     >
@@ -535,7 +537,7 @@ export function ActionButton({
         fontWeight: 600,
         letterSpacing: "-0.01em",
         opacity: disabled ? 0.4 : 1,
-        boxShadow: disabled || disc ? undefined : "0 6px 20px rgba(223,252,142,.2)",
+        boxShadow: disabled || disc ? undefined : "0 6px 20px rgba(var(--color-nav-action-rgb),.2)",
       }}
     >
       {disc ? (
@@ -550,7 +552,7 @@ export function ActionButton({
               borderRadius: "50%",
               background: "var(--color-nav-action)",
               color: "#0A0A0A",
-              boxShadow: "0 6px 18px rgba(223,252,142,.34)",
+              boxShadow: "0 6px 18px rgba(var(--color-nav-action-rgb),.34)",
             }}
           >
             {Icon ? <Icon size={Math.round(discSize * 0.42)} /> : null}
@@ -1184,6 +1186,76 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
       if (finished === "next") onQueueNext();
       else if (finished === "queue") onQueueLast();
       reset();
+    },
+    onPointerCancel: reset,
+    onPointerLeave: () => {
+      if (active.current) reset();
+    },
+    /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
+    dragging: () => active.current,
+  };
+}
+
+const SWIPE_REMOVE_PX = 64;
+
+/**
+ * Swipe left on a row to remove it — the queue's version of useSwipeQueue.
+ * One threshold, the opposite direction: the track is already queued, so the
+ * gesture that adds a track to a queue and the gesture that removes one
+ * already in it can never be mistaken for each other.
+ */
+export function useSwipeRemove(onRemove: () => void) {
+  const [dragX, setDragX] = useState(0);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const deciding = useRef(false);
+  const active = useRef(false);
+  const armed = useRef(false);
+
+  const reset = () => {
+    start.current = null;
+    deciding.current = false;
+    active.current = false;
+    armed.current = false;
+    setDragX(0);
+  };
+
+  return {
+    dragX,
+    armed: dragX <= -SWIPE_REMOVE_PX,
+    onPointerDown: (e: React.PointerEvent) => {
+      start.current = { x: e.clientX, y: e.clientY };
+      deciding.current = true;
+      active.current = false;
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const s = start.current;
+      if (!s) return;
+      const dx = e.clientX - s.x;
+      const dy = e.clientY - s.y;
+      if (deciding.current) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        deciding.current = false;
+        if (Math.abs(dy) >= Math.abs(dx) || dx >= 0) {
+          start.current = null;
+          return;
+        }
+        active.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      if (!active.current) return;
+      e.preventDefault();
+      const clamped = Math.min(0, Math.max(dx, -(SWIPE_REMOVE_PX + 24)));
+      const next = clamped <= -SWIPE_REMOVE_PX;
+      if (next !== armed.current) {
+        armed.current = next;
+        haptic.select();
+      }
+      setDragX(clamped);
+    },
+    onPointerUp: () => {
+      const shouldRemove = armed.current;
+      reset();
+      if (shouldRemove) onRemove();
     },
     onPointerCancel: reset,
     onPointerLeave: () => {

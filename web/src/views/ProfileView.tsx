@@ -1,13 +1,9 @@
-import { useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton } from "./SocialView";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
-import { ImageCropSheet } from "../components/ImageCropSheet";
-import { NameSheet } from "../components/NameSheet";
 import { PersonTile } from "../components/PersonTile";
-import { AccentPicker } from "../context/ThemeContext";
 import {
   ActionButton,
   Counted,
@@ -16,9 +12,14 @@ import {
   Screen,
   SectionHeader,
   Skeleton,
-  Toggle,
 } from "../components/ui";
-import { ChevronRightIcon, LibraryIcon, ShareIcon, StarIcon } from "../icons";
+import {
+  ChevronRightIcon,
+  LibraryIcon,
+  SettingsIcon,
+  ShareIcon,
+  StarIcon,
+} from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
@@ -38,18 +39,10 @@ import type { BadgeTier, ListeningStats } from "../types";
  * what.
  */
 export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }) {
-  const { me, setMe, tracks, playlists } = useLibrary();
+  const { me, tracks, playlists } = useLibrary();
   const { toast, errorToast } = useToast();
 
   const isMe = me?.id === userId;
-  const [renaming, setRenaming] = useState(false);
-  const [cropFile, setCropFile] = useState<File | null>(null);
-  const [avatarBusy, setAvatarBusy] = useState(false);
-  // Bumped after a fresh upload so this session's own view of the avatar it
-  // just replaced skips the browser's cache instead of showing the old bytes
-  // until the picture happens to be refetched some other way.
-  const [avatarBust, setAvatarBust] = useState(0);
-  const fileRef = useRef<HTMLInputElement>(null);
   // Cached per person, so stepping back out of somebody's page and into it
   // again — which is most of how the Social tab is used — costs nothing.
   const {
@@ -114,64 +107,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const known = profile?.state === "friends";
   const shared = !isMe && !known ? (profile?.playlists ?? []) : [];
 
-  /**
-   * The listening switch.
-   *
-   * Applied to local state first, which is what actually turns reporting on:
-   * the player watches this flag, so flipping it sends the track you are on
-   * within the same tick rather than at the next song. Put back if the server
-   * disagrees — this is the one setting where being wrong about it means
-   * telling people something they asked not to tell.
-   */
-  const setListening = async (next: boolean) => {
-    if (!me) return;
-    setMe({ ...me, listening_public: next });
-    try {
-      await api.setListeningPrivacy(next);
-      haptic.success();
-    } catch (err) {
-      setMe({ ...me, listening_public: !next });
-      errorToast(err, "Could not change that");
-    }
-  };
-
-  const rename = async (typed: string) => {
-    if (!me) return;
-    try {
-      const { handle } = await api.setHandle(typed);
-      setMe({ ...me, handle });
-      haptic.success();
-    } catch (err) {
-      errorToast(err, "Could not change your name");
-    }
-  };
-
-  const uploadAvatar = async (image: Blob) => {
-    setAvatarBusy(true);
-    try {
-      await api.uploadAvatar(image);
-      setAvatarBust((n) => n + 1);
-      haptic.success();
-    } catch (err) {
-      errorToast(err, "Could not set that picture");
-    } finally {
-      setAvatarBusy(false);
-    }
-  };
-
-  const setAccent = async (name: string) => {
-    if (!me) return;
-    const prev = me.accent_color;
-    setMe({ ...me, accent_color: name });
-    try {
-      await api.setAccentColor(name);
-      haptic.success();
-    } catch (err) {
-      setMe({ ...me, accent_color: prev });
-      errorToast(err, "Could not change that");
-    }
-  };
-
   return (
     <Screen>
       <div
@@ -184,47 +119,15 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           padding: "10px 0 4px",
         }}
       >
-        {isMe ? (
-          <button
-            className="nav-press"
-            aria-label="Change your photo"
-            disabled={avatarBusy}
-            onClick={() => {
-              haptic.tap();
-              fileRef.current?.click();
-            }}
-            style={{ borderRadius: "50%" }}
-          >
-            <Avatar
-              userId={userId}
-              username={me?.handle ?? me?.username}
-              hasAvatar={true}
-              size={76}
-              bust={avatarBust}
-            />
-          </button>
-        ) : (
-          <Avatar
-            userId={userId}
-            username={person?.handle ?? person?.username}
-            hasAvatar={person?.has_avatar ?? false}
-            size={76}
-          />
-        )}
-        {/* Tapping your own name is the whole rename affordance. A name is
-            the only thing on this page that is yours to edit, so a control
-            saying so would be louder than the thing it controls. */}
-        <button
-          className={isMe ? "nav-press" : undefined}
-          disabled={!isMe}
-          onClick={() => {
-            haptic.tap();
-            setRenaming(true);
-          }}
-          style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.015em" }}
-        >
+        <Avatar
+          userId={userId}
+          username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
+          hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
+          size={76}
+        />
+        <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.015em" }}>
           {name}
-        </button>
+        </span>
         {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
         {isMe ? (
           <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
@@ -285,18 +188,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         <>
           <SectionHeader title="Listening" />
           <StatsLine stats={profile?.stats ?? null} />
-          <Toggle
-            label="Show friends what I am playing"
-            hint="Only your friends, only while you are playing something, and only for a few minutes after you stop."
-            checked={me?.listening_public ?? false}
-            onChange={(next) => void setListening(next)}
-          />
-
-          <SectionHeader title="Appearance" />
-          <AccentPicker
-            value={me?.accent_color ?? "lime"}
-            onSelect={(name) => void setAccent(name)}
-          />
 
           <SectionHeader title="Your library" />
           <GhostButton
@@ -305,6 +196,13 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             onClick={() => nav.push({ type: "crate", filter: "all" })}
           >
             Open The Crate
+          </GhostButton>
+          <GhostButton
+            icon={SettingsIcon}
+            height={44}
+            onClick={() => nav.push({ type: "settings" })}
+          >
+            Settings
           </GhostButton>
         </>
       ) : (
@@ -400,41 +298,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           ) : null}
         </>
       )}
-
-      <NameSheet
-        open={renaming}
-        title="Your name"
-        initial={me?.handle ?? ""}
-        placeholder="yourname"
-        maxLength={20}
-        confirmLabel="Save"
-        onSubmit={(value) => void rename(value)}
-        onClose={() => setRenaming(false)}
-      />
-
-      {isMe ? (
-        <>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            onChange={(e) => {
-              const picked = e.target.files?.[0];
-              if (picked) setCropFile(picked);
-              if (fileRef.current) fileRef.current.value = "";
-            }}
-            style={{ display: "none" }}
-          />
-          <ImageCropSheet
-            file={cropFile}
-            onCancel={() => setCropFile(null)}
-            onConfirm={(blob) => {
-              setCropFile(null);
-              void uploadAvatar(blob);
-            }}
-          />
-        </>
-      ) : null}
     </Screen>
   );
 }

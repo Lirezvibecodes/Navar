@@ -206,7 +206,7 @@ function NameTag({ lit }: { lit: boolean }) {
           placeItems: "center",
           color: lit ? "var(--color-nav-action)" : "var(--color-nav-muted)",
           boxShadow: lit
-            ? "0 10px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(223,252,142,.35), 0 8px 26px rgba(223,252,142,.18)"
+            ? "0 10px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(var(--color-nav-action-rgb),.35), 0 8px 26px rgba(var(--color-nav-action-rgb),.18)"
             : undefined,
           transition: "color 200ms ease, box-shadow 200ms ease",
         }}

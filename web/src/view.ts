@@ -29,7 +29,9 @@ export type View =
   /** One view serves both your own profile and somebody else's; the edit
    *  affordances turn on when userId is you. */
   | { type: "profile"; userId: number }
-  | { type: "friendLibrary"; friendId: number };
+  | { type: "friendLibrary"; friendId: number }
+  /** Reached only from your own profile: name, photo, accent, privacy. */
+  | { type: "settings" };
 
 /** The three destinations the bottom nav and the sidebar offer. */
 export type RootTab = "home" | "library" | "social";
@@ -52,6 +54,7 @@ export function rootTabFor(view: View): RootTab {
     case "social":
     case "profile":
     case "friendLibrary":
+    case "settings":
       return "social";
   }
 }

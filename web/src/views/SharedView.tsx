@@ -324,7 +324,7 @@ function SharedRow({
           padding: "0 8px",
           margin: "0 -8px",
           textAlign: "left",
-          background: current ? "rgba(223,252,142,.07)" : undefined,
+          background: current ? "rgba(var(--color-nav-action-rgb),.07)" : undefined,
           transition: "background-color var(--dur-state) var(--ease)",
         } as React.CSSProperties
       }

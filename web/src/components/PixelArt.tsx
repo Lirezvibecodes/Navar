@@ -38,12 +38,19 @@ function cellSize(size: number): number {
   return 14;
 }
 
+// The same film-grain tile used across .nav-screen-bg / .nav-hero-band in
+// index.css, layered over the conic tile so the fallback art matches the
+// app's grainy look instead of sitting as a flat, banding-prone gradient.
+const GRAIN =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.18'/%3E%3C/svg%3E\")";
+
 export function pixelPattern(seed: string, size: number): React.CSSProperties {
   const [a, b, c, d] = variantFor(seed);
   const cell = cellSize(size);
   return {
-    backgroundImage: `conic-gradient(${a} 0 25%, ${b} 0 50%, ${c} 0 75%, ${d} 0)`,
-    backgroundSize: `${cell}px ${cell}px`,
+    backgroundImage: `${GRAIN}, conic-gradient(${a} 0 25%, ${b} 0 50%, ${c} 0 75%, ${d} 0)`,
+    backgroundSize: `120px 120px, ${cell}px ${cell}px`,
+    backgroundRepeat: "repeat, repeat",
   };
 }
 

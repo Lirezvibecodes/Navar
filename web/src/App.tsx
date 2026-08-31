@@ -25,6 +25,7 @@ import { SocialView } from "./views/SocialView";
 import { ProfileView } from "./views/ProfileView";
 import { FriendLibraryView } from "./views/FriendLibraryView";
 import { PlayerView } from "./views/PlayerView";
+import { SettingsView } from "./views/SettingsView";
 import { SharedView } from "./views/SharedView";
 import { hideSplash } from "./lib/splash";
 import { getTelegramWebApp, initTelegramPlatform, setBackButton } from "./telegram";
@@ -70,6 +71,7 @@ const TITLES: Record<View["type"], string> = {
   social: "Social",
   profile: "Profile",
   friendLibrary: "Their Library",
+  settings: "Settings",
 };
 
 function Shell({ me }: { me: Me }) {
@@ -151,7 +153,7 @@ function Shell({ me }: { me: Me }) {
     }
     switch (view.type) {
       case "home":
-        return <HomeView nav={nav} onOpenPlayer={() => setPlayerOpen(true)} />;
+        return <HomeView nav={nav} />;
       case "library":
         return <LibraryView nav={nav} />;
       case "crate":
@@ -167,6 +169,8 @@ function Shell({ me }: { me: Me }) {
         return <ProfileView nav={nav} userId={view.userId} />;
       case "friendLibrary":
         return <FriendLibraryView nav={nav} friendId={view.friendId} />;
+      case "settings":
+        return <SettingsView nav={nav} />;
     }
   };
 
