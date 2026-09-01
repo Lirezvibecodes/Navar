@@ -1,16 +1,25 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import * as api from "../api";
+import { parseLyrics, type LyricLine } from "../lib/lyrics";
 import type { Track } from "../types";
-import { Sheet, SheetDivider, SheetItem } from "./ui";
+import { Sheet, SheetItem } from "./ui";
 import { CheckIcon, CloseIcon } from "../icons";
 
-const MAX_LINES = 4;
+/** A picked passage this long already fills the card and the video's whole
+ *  10 seconds several times over — past this, extending further wouldn't
+ *  make the output better, just harder to lay out. */
+const MAX_PICK = 10;
 
 /**
- * Which lines of a track's lyrics, if any, ride along on its story card — up
- * to four, kept in their original order regardless of tap order. Skip sits
- * above the list rather than at the bottom of it, because a track with no
- * lyrics on file is the common case and shouldn't cost a scroll to get past.
+ * Which lines of a track's lyrics, if any, ride along on its story card —
+ * always a consecutive passage, the way Apple Music's own lyric-sharing
+ * picker works: tap a line to start it, tap another to draw the passage
+ * between them. A third tap outside that two-line anchor starts over rather
+ * than trying to grow a passage from three points at once.
+ *
+ * Rendered with the same `.nav-lyric-big` states the full lyrics pane uses
+ * (`Lyrics.tsx`), so picking a passage looks like the pane itself rather
+ * than a separate checkbox list bolted on next to it.
  */
 export function LyricsPickerSheet({
   track,
@@ -18,40 +27,57 @@ export function LyricsPickerSheet({
   onClose,
 }: {
   track: Track | null;
-  onPick: (lines: string[]) => void;
+  onPick: (lines: { text: string; at: number | null }[]) => void;
   onClose: () => void;
 }) {
-  const [lyrics, setLyrics] = useState<string | null | undefined>(undefined);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [raw, setRaw] = useState<string | null | undefined>(undefined);
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [focus, setFocus] = useState<number | null>(null);
 
   useEffect(() => {
-    setPicked(new Set());
+    setAnchor(null);
+    setFocus(null);
     if (!track) {
-      setLyrics(undefined);
+      setRaw(undefined);
       return;
     }
     let live = true;
-    setLyrics(undefined);
+    setRaw(undefined);
     void api.getLyrics(track.id).then((text) => {
-      if (live) setLyrics(text);
+      if (live) setRaw(text);
     });
     return () => {
       live = false;
     };
   }, [track]);
 
-  const lines = (lyrics ?? "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines: LyricLine[] = useMemo(() => {
+    const parsed = parseLyrics(raw);
+    return (parsed?.lines ?? []).filter((line) => line.text);
+  }, [raw]);
 
-  const toggle = (i: number) => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else if (next.size < MAX_LINES) next.add(i);
-      return next;
-    });
+  const range =
+    anchor == null || focus == null
+      ? null
+      : ([Math.min(anchor, focus), Math.max(anchor, focus)] as const);
+
+  const tapLine = (i: number) => {
+    if (anchor == null || anchor !== focus) {
+      // Nothing picked yet, or a passage of two-or-more lines already exists —
+      // either way this tap starts a fresh single-line anchor.
+      setAnchor(i);
+      setFocus(i);
+    } else if (i !== anchor) {
+      // Exactly one line anchored: draw the passage out to this line,
+      // clamped so the passage never grows past MAX_PICK lines.
+      const clamped =
+        Math.abs(i - anchor) + 1 > MAX_PICK
+          ? i > anchor
+            ? anchor + MAX_PICK - 1
+            : anchor - MAX_PICK + 1
+          : i;
+      setFocus(clamped);
+    }
   };
 
   const skip = () => {
@@ -60,76 +86,45 @@ export function LyricsPickerSheet({
   };
 
   const confirm = () => {
-    onPick(
-      [...picked]
-        .sort((a, b) => a - b)
-        .map((i) => lines[i])
-    );
+    if (!range) return;
+    onPick(lines.slice(range[0], range[1] + 1).map((l) => ({ text: l.text, at: l.at })));
     onClose();
   };
 
+  const count = range ? range[1] - range[0] + 1 : 0;
+
   return (
-    <Sheet open={track != null} onClose={onClose} title="Pick up to 4 lines for the card">
+    <Sheet open={track != null} onClose={onClose} title="Pick a passage for the card">
       <SheetItem icon={CloseIcon} label="Skip — no lyrics" onClick={skip} />
-      <SheetDivider />
-      {lyrics === undefined ? (
+      {raw === undefined ? (
         <p style={noteStyle}>Looking for lyrics…</p>
       ) : lines.length === 0 ? (
         <p style={noteStyle}>No lyrics found for this track.</p>
       ) : (
         <>
           <div
-            className="nav-scroll"
-            style={{ maxHeight: "40vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}
+            className="nav-scroll nav-lyric-pane"
+            style={{ maxHeight: "42vh", overflowY: "auto", padding: "10px 18px 4px" }}
           >
             {lines.map((line, i) => {
-              const selected = picked.has(i);
+              const picked = range != null && i >= range[0] && i <= range[1];
               return (
-                <button
+                <p
                   key={i}
-                  className="nav-press"
-                  onClick={() => toggle(i)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    textAlign: "left",
-                    width: "100%",
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    fontSize: 13,
-                    lineHeight: 1.4,
-                    color: "var(--color-nav-text)",
-                    background: selected ? "rgba(var(--color-nav-action-rgb),.12)" : undefined,
-                  }}
+                  className="nav-press nav-lyric-big"
+                  data-state={range == null ? "plain" : picked ? "on" : "past"}
+                  onClick={() => tapLine(i)}
+                  style={{ cursor: "pointer" }}
                 >
-                  <span
-                    style={{
-                      flex: "none",
-                      width: 20,
-                      height: 20,
-                      borderRadius: 6,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#0A0A0A",
-                      background: selected ? "var(--color-nav-action)" : "transparent",
-                      border: selected ? "none" : "1.5px solid var(--color-nav-faint)",
-                      transition:
-                        "background-color var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease)",
-                    }}
-                  >
-                    <CheckIcon size={12} style={{ opacity: selected ? 1 : 0 }} />
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0 }}>{line}</span>
-                </button>
+                  {line.text}
+                </p>
               );
             })}
           </div>
           <div style={{ padding: "10px 14px 0" }}>
             <button
               className="nav-press"
-              disabled={picked.size === 0}
+              disabled={count === 0}
               onClick={confirm}
               style={{
                 width: "100%",
@@ -143,11 +138,11 @@ export function LyricsPickerSheet({
                 gap: 6,
                 color: "#0A0A0A",
                 background: "var(--color-nav-action)",
-                opacity: picked.size === 0 ? 0.35 : 1,
+                opacity: count === 0 ? 0.35 : 1,
               }}
             >
               <CheckIcon size={14} />
-              {picked.size === 0 ? "Pick a line" : `Use ${picked.size} line${picked.size > 1 ? "s" : ""}`}
+              {count === 0 ? "Tap a line to start" : `Use ${count} line${count > 1 ? "s" : ""}`}
             </button>
           </div>
         </>

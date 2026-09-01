@@ -401,6 +401,14 @@ export const ImageIcon = icon(
   </>
 );
 
+/** pixel-icon-library/regular/video-camera. */
+export const VideoIcon = icon(
+  <>
+    <path d="M15,7V5H3V6H2V7H1V17H2v1H3v1H15V17h1V7Zm-1,9H13v1H4V16H3V8H4V7h9V8h1Z" />
+    <polygon points="23 7 23 17 22 17 22 18 21 18 21 17 20 17 20 16 19 16 19 15 18 15 18 9 19 9 19 8 20 8 20 7 21 7 21 6 22 6 22 7 23 7" />
+  </>
+);
+
 /** pixel-icon-library/regular/align-left — lines of text, i.e. a description. */
 export const NoteIcon = icon(
   <>

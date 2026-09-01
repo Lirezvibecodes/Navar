@@ -428,6 +428,27 @@ export function uploadStoryCard(image: Blob): Promise<{ url: string }> {
   return request("/api/me/story-card", { method: "POST", body: form });
 }
 
+/**
+ * Upload the frames for a karaoke story video. The server trims the track's
+ * own audio to `[clipStart, clipStart + clipDuration]` and stitches it
+ * against `frames`, each held on screen for its matching entry in
+ * `durations` (seconds), into an MP4 — mirroring `uploadStoryCard`, just
+ * with a manifest describing how the frames play back.
+ */
+export function uploadStoryVideo(
+  trackId: string,
+  frames: Blob[],
+  durations: number[],
+  clipStart: number,
+  clipDuration: number
+): Promise<{ url: string }> {
+  const form = new FormData();
+  form.append("trackId", trackId);
+  form.append("manifest", JSON.stringify({ durations, clipStart, clipDuration }));
+  frames.forEach((f, i) => form.append("frames", f, `frame_${i}.jpg`));
+  return request("/api/me/story-video", { method: "POST", body: form });
+}
+
 /** One of the 8 presets from the accent-colour picker. */
 export function setAccentColor(
   accentColor: string

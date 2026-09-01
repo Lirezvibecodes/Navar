@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getTrackShareCover, getTrackShareForPage } from "../repo";
 import { trackShareLink } from "../bot-identity";
-import { serveCover } from "./covers";
+import { serveCover, serveCoverVideo } from "./covers";
 import { rateLimit } from "./shared";
 import { asyncHandler } from "../asyncHandler";
 
@@ -104,6 +104,19 @@ export function storyShareRouter(): Router {
         req,
         res
       );
+    })
+  );
+  return router;
+}
+
+/** No database row behind this either: the file_id posted by /me/story-video is the credential. */
+export function storyVideoRouter(): Router {
+  const router = Router();
+  router.use(rateLimit);
+  router.get(
+    "/:fileId",
+    asyncHandler(async (req, res) => {
+      await serveCoverVideo(decodeURIComponent(req.params.fileId), req, res);
     })
   );
   return router;

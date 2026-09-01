@@ -86,6 +86,43 @@ export async function serveCover(
 }
 
 /**
+ * Serves a story video by its Telegram file_id, the video twin of
+ * `serveCover`'s Telegram branch.
+ *
+ * There is no bytes fallback here — a video is only ever handed back by the
+ * file_id `/me/story-video` just posted, never held in the database — and
+ * Range is forwarded rather than ignored, the way `tracks.ts`'s `/stream`
+ * already does for audio, so Telegram's story editor and any plain
+ * `<video>` element can both seek it.
+ */
+export async function serveCoverVideo(
+  fileId: string,
+  req: Request,
+  res: Response
+): Promise<void> {
+  const range = req.header("range");
+  const upstream = await fetch(
+    await getTelegramFileDownloadUrl(fileId),
+    range ? { headers: { Range: range } } : undefined
+  );
+  if (!upstream.ok || !upstream.body) {
+    res.status(502).json({ error: "Failed to fetch video from Telegram" });
+    return;
+  }
+
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", "video/mp4");
+  const length = upstream.headers.get("content-length");
+  if (length) res.setHeader("Content-Length", length);
+  const contentRange = upstream.headers.get("content-range");
+  if (range && contentRange) {
+    res.status(206);
+    res.setHeader("Content-Range", contentRange);
+  }
+  Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream).pipe(res);
+}
+
+/**
  * A cheap identity for a blob of bytes. Not a checksum — it only has to change
  * when the picture does, and only for the stored-bytes covers that are on their
  * way out anyway.

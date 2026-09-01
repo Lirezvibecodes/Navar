@@ -29,9 +29,9 @@ import {
   UserIcon,
 } from "../icons";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
-import { haptic, shareLink, shareToStory } from "../telegram";
-import { renderStoryCard } from "../lib/storyCard";
+import { haptic, shareLink } from "../telegram";
 import { LyricsPickerSheet } from "./LyricsPickerSheet";
+import { StoryOutputSheet, type StoryPick } from "./StoryOutputSheet";
 
 /**
  * The `⋯` behind every track row.
@@ -81,6 +81,7 @@ export function TrackMenu({
   const [adding, setAdding] = useState<Track | null>(null);
   const [editing, setEditing] = useState<Track | null>(null);
   const [pickingLyric, setPickingLyric] = useState<Track | null>(null);
+  const [storyPick, setStoryPick] = useState<StoryPick | null>(null);
 
   const track = target?.track ?? null;
   const owned = track ? owns(track) : false;
@@ -144,24 +145,6 @@ export function TrackMenu({
     }
   };
 
-  /**
-   * Cover art, title, artist and (if picked) up to four lyric lines, rendered
-   * to a canvas, then uploaded so Telegram's own story editor — which fetches
-   * the image itself rather than accepting one in memory — has a real URL to
-   * open.
-   */
-  const shareStory = async (t: Track, lyricLines: string[]) => {
-    try {
-      const blob = await renderStoryCard(t, lyricLines);
-      const { url } = await api.uploadStoryCard(blob);
-      if (!shareToStory(url)) {
-        toast("Story sharing needs a newer Telegram");
-      }
-    } catch (err) {
-      errorToast(err, "Could not build that story");
-    }
-  };
-
   // The one membership change with no crate row behind it: the track is
   // still yours and still in the Crate, so nothing in LibraryContext moves and
   // there is no invalidation to inherit. Undoing it goes back through
@@ -185,7 +168,7 @@ export function TrackMenu({
   return (
     <>
       <Sheet
-        open={target != null && !adding && !editing && !pickingLyric}
+        open={target != null && !adding && !editing && !pickingLyric && !storyPick}
         onClose={onClose}
         title={track ? `${trackTitle(track)} · ${trackArtist(track)}` : undefined}
       >
@@ -313,10 +296,19 @@ export function TrackMenu({
       <LyricsPickerSheet
         track={pickingLyric}
         onPick={(lines) => {
-          if (pickingLyric) void shareStory(pickingLyric, lines);
+          if (pickingLyric) setStoryPick({ track: pickingLyric, lines });
+          setPickingLyric(null);
         }}
         onClose={() => {
           setPickingLyric(null);
+          onClose();
+        }}
+      />
+
+      <StoryOutputSheet
+        pick={storyPick}
+        onClose={() => {
+          setStoryPick(null);
           onClose();
         }}
       />

@@ -11,7 +11,7 @@ import { friendsRouter } from "./routes/friends";
 import { socialRouter } from "./routes/social";
 import { homeRouter } from "./routes/home";
 import { sharedRouter } from "./routes/shared";
-import { trackShareRouter, storyShareRouter } from "./routes/trackShare";
+import { trackShareRouter, storyShareRouter, storyVideoRouter } from "./routes/trackShare";
 
 // The web app is built into this package (see the build script) and served
 // from the same origin, so the Mini App only ever depends on this one domain
@@ -82,6 +82,9 @@ export function createApp(bot: Telegraf | null): Express {
 
   // The HTTPS URL a rendered story card is fetched back from — see storyShareRouter in trackShare.ts.
   app.use("/s/story", storyShareRouter());
+
+  // Same idea, for the karaoke story video — see storyVideoRouter in trackShare.ts.
+  app.use("/s/story-video", storyVideoRouter());
 
   // Vite content-hashes everything it emits into /assets, so a file at a given
   // name can never change its contents — a year and `immutable` are safe by

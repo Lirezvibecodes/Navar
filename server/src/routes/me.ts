@@ -6,6 +6,7 @@ import {
   ACCENT_PRESETS,
   getListeningStats,
   getPerson,
+  getTrackForListener,
   recordPlay,
   setAccentColor,
   setCustomAvatar,
@@ -13,8 +14,10 @@ import {
   setListeningPrivacy,
   setListeningStatus,
 } from "../repo";
-import { captionOf, personLabel } from "../channels";
+import { captionOf, personLabel, postCoverVideo } from "../channels";
 import { storeCover } from "./covers";
+import { getTelegramFileDownloadUrl } from "../telegram-files";
+import { renderStoryVideo } from "../ffmpeg";
 import { HANDLE_RULE, normaliseHandle } from "../handles";
 
 /** Same allowlist the playlist and track cover uploads use. */
@@ -23,6 +26,11 @@ const COVER_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const storyVideoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024, files: 20 },
 });
 
 /**
@@ -226,6 +234,98 @@ export function meRouter(): Router {
 
       const origin = `${req.protocol}://${req.get("host")}`;
       res.json({ url: `${origin}/s/story/${encodeURIComponent(stored.fileId)}` });
+    })
+  );
+
+  /**
+   * The karaoke video twin of /story-card: the client already drew each
+   * highlight frame and worked out how long it holds and which slice of the
+   * track it plays over — this just needs the real audio, which only the
+   * server can fetch from Telegram, and ffmpeg to stitch the two together.
+   */
+  router.post(
+    "/story-video",
+    requireAuth,
+    storyVideoUpload.fields([{ name: "frames", maxCount: 20 }]),
+    asyncHandler(async (req, res) => {
+      const files = (req.files as Record<string, Express.Multer.File[]> | undefined)?.frames;
+      if (!files?.length) {
+        res.status(400).json({ error: "Missing frames" });
+        return;
+      }
+      if (files.some((f) => f.mimetype !== "image/jpeg")) {
+        res.status(400).json({ error: "Frames must be JPEG" });
+        return;
+      }
+
+      const { trackId, manifest } = req.body ?? {};
+      if (typeof trackId !== "string" || typeof manifest !== "string") {
+        res.status(400).json({ error: "Missing trackId or manifest" });
+        return;
+      }
+
+      let durations: unknown, clipStart: unknown, clipDuration: unknown;
+      try {
+        ({ durations, clipStart, clipDuration } = JSON.parse(manifest));
+      } catch {
+        res.status(400).json({ error: "Manifest is not valid JSON" });
+        return;
+      }
+      if (
+        !Array.isArray(durations) ||
+        durations.length !== files.length ||
+        !durations.every((d) => typeof d === "number" && d > 0) ||
+        typeof clipStart !== "number" ||
+        typeof clipDuration !== "number" ||
+        clipStart < 0 ||
+        clipDuration <= 0
+      ) {
+        res.status(400).json({ error: "Malformed manifest" });
+        return;
+      }
+
+      const telegramUserId = (req as AuthedRequest).telegramUserId;
+      const track = await getTrackForListener(trackId, telegramUserId);
+      if (!track) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      // Clamped against the track's own length rather than trusted from the
+      // client — a manifest is just numbers a browser sent us.
+      const trackDuration = track.duration_seconds ?? clipStart + clipDuration;
+      const start = Math.max(0, Math.min(clipStart, trackDuration));
+      const duration = Math.max(0.1, Math.min(clipDuration, trackDuration - start));
+
+      const downloadUrl = await getTelegramFileDownloadUrl(track.telegram_file_id);
+      const audioRes = await fetch(downloadUrl);
+      if (!audioRes.ok) {
+        res.status(502).json({ error: "Failed to fetch audio from Telegram" });
+        return;
+      }
+      const audio = Buffer.from(await audioRes.arrayBuffer());
+
+      const video = await renderStoryVideo({
+        frames: files.map((f) => f.buffer),
+        durations,
+        audio,
+        clipStart: start,
+        clipDuration: duration,
+      });
+
+      const person = await getPerson(telegramUserId);
+      const fileId = await postCoverVideo(
+        video,
+        "video/mp4",
+        captionOf([`Story video — ${personLabel(telegramUserId, person?.username)}`])
+      );
+      if (!fileId) {
+        res.status(503).json({ error: "Could not render that video right now" });
+        return;
+      }
+
+      const origin = `${req.protocol}://${req.get("host")}`;
+      res.json({ url: `${origin}/s/story-video/${encodeURIComponent(fileId)}` });
     })
   );
 

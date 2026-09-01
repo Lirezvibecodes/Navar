@@ -3,32 +3,67 @@ import type { Track } from "../types";
 
 /**
  * Renders a track as a Telegram/Instagram story: cover art over a pixelated
- * wash of the same image, title and artist, up to four picked lyric lines,
+ * wash of the same image, title and artist, up to eight picked lyric lines,
  * and the Navaar wordmark. Fixed at the platform's own story aspect (9:16)
  * so it needs no cropping on either end once it lands there.
+ *
+ * `drawStoryFrame` is the shared painter behind both outputs: a single still
+ * card (`renderStoryCard`, mode "static") and every frame of the karaoke
+ * video (`storyVideo.ts`, mode "highlight") — same background, same type,
+ * same lyric layout, so a video's frames never jitter against each other and
+ * never look like a different card than the still image does.
  */
 
 const WIDTH = 1080;
 const HEIGHT = 1920;
+
+/** The canvas size every story frame is drawn at — exported so the video
+ *  pipeline (`storyVideo.ts`) can size its own canvas to match. */
+export const STORY_WIDTH = WIDTH;
+export const STORY_HEIGHT = HEIGHT;
 const COVER_SIZE = 760;
 const COVER_RADIUS = 28;
 const COVER_Y = 300;
 
 /** Background wash resolution before it's blown back up with smoothing off —
  *  low enough that each block reads as a visible pixel, matching the rest of
- *  the app's pixel-art fallback art rather than a smooth photo blur. */
+ *  the app's pixel-art fallback art rather than a smooth photo blur. A light
+ *  blur pass on top of the blocks softens their hard edges without losing
+ *  the pixelation itself. */
 const WASH_PIXEL_W = 54;
 const WASH_PIXEL_H = Math.round((HEIGHT / WIDTH) * WASH_PIXEL_W);
+const WASH_BLUR_PX = 8;
 
 const MAX_LYRIC_LINES = 8;
+const LYRIC_FONT = '700 36px "General Sans"';
+const LYRIC_LINE_HEIGHT = 46;
 
-function loadImage(url: string): Promise<HTMLImageElement | null> {
+/** What the lyric block should look like: every picked line at one flat
+ *  weight for the still image, or one line singled out — the way
+ *  `.nav-lyric-big[data-state]` singles one out in the lyrics pane — for a
+ *  video frame. */
+export type FrameLyrics =
+  | { mode: "static"; lines: string[] }
+  | { mode: "highlight"; lines: string[]; activeIndex: number | null };
+
+export function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
     img.src = url;
   });
+}
+
+/** Loads every font weight the card and its video frames draw with, so the
+ *  first frame painted never falls back to a system face. */
+export function loadStoryFonts(): Promise<FontFace[][]> {
+  return Promise.all([
+    document.fonts.load('700 52px "Pixelify Sans"'),
+    document.fonts.load('700 46px "Pixelify Sans"'),
+    document.fonts.load('400 38px "General Sans"'),
+    document.fonts.load(LYRIC_FONT),
+  ]);
 }
 
 function roundedRectPath(
@@ -66,8 +101,10 @@ function drawCoverFit(
 }
 
 /** Fills the whole canvas with a blocky, pixelated wash of `img`: drawn small
- *  onto an offscreen canvas, then scaled back up with smoothing disabled so
- *  each source block stays a hard-edged square instead of blurring. */
+ *  onto an offscreen canvas, scaled back up with smoothing disabled so each
+ *  source block stays a hard-edged square, then laid onto the real canvas
+ *  through a soft blur so those edges read as gently out of focus rather
+ *  than jagged. */
 function drawPixelatedWash(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
   const tiny = document.createElement("canvas");
   tiny.width = WASH_PIXEL_W;
@@ -81,9 +118,17 @@ function drawPixelatedWash(ctx: CanvasRenderingContext2D, img: HTMLImageElement)
   const dh = img.naturalHeight * scale;
   tctx.drawImage(img, (WASH_PIXEL_W - dw) / 2, (WASH_PIXEL_H - dh) / 2, dw, dh);
 
+  const blocky = document.createElement("canvas");
+  blocky.width = WIDTH;
+  blocky.height = HEIGHT;
+  const bctx = blocky.getContext("2d");
+  if (!bctx) return;
+  bctx.imageSmoothingEnabled = false;
+  bctx.drawImage(tiny, 0, 0, WIDTH, HEIGHT);
+
   ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(tiny, 0, 0, WIDTH, HEIGHT);
+  ctx.filter = `blur(${WASH_BLUR_PX}px)`;
+  ctx.drawImage(blocky, 0, 0);
   ctx.restore();
 }
 
@@ -111,24 +156,35 @@ function wrapLines(
   return lines.slice(0, maxLines);
 }
 
-export async function renderStoryCard(
+/** Wraps every picked lyric line, tagging each wrapped row with which picked
+ *  line it came from — so a video frame can colour a whole (possibly
+ *  multi-row) picked line together, and so the wrap itself, being a pure
+ *  function of the same input, comes out identical on every frame. */
+function wrapLyricRows(
+  ctx: CanvasRenderingContext2D,
+  lines: string[],
+  maxWidth: number
+): { text: string; lineIndex: number }[] {
+  const rows: { text: string; lineIndex: number }[] = [];
+  lines.forEach((raw, lineIndex) => {
+    for (const text of wrapLines(ctx, raw, maxWidth, 2)) {
+      rows.push({ text, lineIndex });
+    }
+  });
+  return rows.slice(0, MAX_LYRIC_LINES);
+}
+
+/**
+ * Paints one full frame of a story card onto `ctx`: background, cover,
+ * title/artist, the lyric block described by `lyrics`, and the wordmark.
+ * Shared by the still-image path and every frame of a karaoke video.
+ */
+export function drawStoryFrame(
+  ctx: CanvasRenderingContext2D,
   track: Pick<Track, "id" | "title" | "artist" | "has_cover">,
-  lyricLines: string[]
-): Promise<Blob> {
-  await Promise.all([
-    document.fonts.load('700 46px "Pixelify Sans"'),
-    document.fonts.load('600 52px "General Sans"'),
-    document.fonts.load('italic 400 34px "General Sans"'),
-  ]);
-
-  const cover = track.has_cover ? await loadImage(trackCoverUrl(track.id)) : null;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = WIDTH;
-  canvas.height = HEIGHT;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas unavailable");
-
+  cover: HTMLImageElement | null,
+  lyrics: FrameLyrics
+): void {
   ctx.fillStyle = "#030303";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
@@ -155,7 +211,7 @@ export async function renderStoryCard(
   ctx.textAlign = "center";
   const titleY = COVER_Y + COVER_SIZE + 100;
   ctx.fillStyle = "#f5f5f5";
-  ctx.font = '600 52px "General Sans"';
+  ctx.font = '700 52px "Pixelify Sans"';
   ctx.fillText(track.title ?? "Untitled", WIDTH / 2, titleY, WIDTH - 140);
 
   if (track.artist) {
@@ -164,22 +220,47 @@ export async function renderStoryCard(
     ctx.fillText(track.artist, WIDTH / 2, titleY + 58, WIDTH - 140);
   }
 
-  if (lyricLines.length) {
-    ctx.fillStyle = "rgba(245,245,245,.85)";
-    ctx.font = 'italic 400 34px "General Sans"';
-    const wrapped = lyricLines
-      .flatMap((raw) => wrapLines(ctx, `"${raw}"`, WIDTH - 200, 2))
-      .slice(0, MAX_LYRIC_LINES);
+  if (lyrics.lines.length) {
+    ctx.font = LYRIC_FONT;
+    const rows = wrapLyricRows(ctx, lyrics.lines, WIDTH - 200);
     let y = titleY + 150;
-    for (const line of wrapped) {
-      ctx.fillText(line, WIDTH / 2, y, WIDTH - 200);
-      y += 46;
+    for (const row of rows) {
+      ctx.fillStyle = lyricColor(lyrics, row.lineIndex);
+      ctx.fillText(row.text, WIDTH / 2, y, WIDTH - 200);
+      y += LYRIC_LINE_HEIGHT;
     }
   }
 
   ctx.fillStyle = "rgba(245,245,245,.5)";
   ctx.font = '700 46px "Pixelify Sans"';
   ctx.fillText("NAVAAR", WIDTH / 2, HEIGHT - 170);
+}
+
+/** Mirrors `.nav-lyric-big[data-state]`'s palette from index.css: a settled
+ *  flat tone for the still image, and past/on/coming for a video frame. */
+function lyricColor(lyrics: FrameLyrics, lineIndex: number): string {
+  if (lyrics.mode === "static") return "rgba(245,245,245,.78)";
+  const { activeIndex } = lyrics;
+  if (activeIndex == null || lineIndex > activeIndex) return "rgba(245,245,245,.4)";
+  if (lineIndex === activeIndex) return "#ffffff";
+  return "rgba(245,245,245,.22)";
+}
+
+export async function renderStoryCard(
+  track: Pick<Track, "id" | "title" | "artist" | "has_cover">,
+  lyricLines: string[]
+): Promise<Blob> {
+  await loadStoryFonts();
+
+  const cover = track.has_cover ? await loadImage(trackCoverUrl(track.id)) : null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = WIDTH;
+  canvas.height = HEIGHT;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+
+  drawStoryFrame(ctx, track, cover, { mode: "static", lines: lyricLines });
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

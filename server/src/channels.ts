@@ -181,6 +181,40 @@ export async function postCoverPhoto(
   }
 }
 
+interface VideoSize {
+  file_id: string;
+}
+
+/**
+ * Puts a rendered story video in the cover channel and returns the file_id
+ * to serve it back by — the video twin of `postCoverPhoto`.
+ */
+export async function postCoverVideo(
+  video: Buffer,
+  mimeType: string,
+  caption?: string
+): Promise<string | null> {
+  const chatId = await channelId("covers");
+  if (!chatId) return null;
+
+  try {
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    if (caption) form.append("caption", truncate(caption, CAPTION_LIMIT));
+    form.append(
+      "video",
+      new Blob([new Uint8Array(video)], { type: mimeType }),
+      "story.mp4"
+    );
+
+    const message = await callBotApi<{ video?: VideoSize }>("sendVideo", form);
+    return message?.video?.file_id ?? null;
+  } catch (err) {
+    console.warn("[channels] could not post story video:", err);
+    return null;
+  }
+}
+
 /** Telegram's hard limit on a caption. */
 const CAPTION_LIMIT = 1024;
 
