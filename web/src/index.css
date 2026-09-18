@@ -1089,6 +1089,16 @@ button {
     filter var(--dur-state) var(--ease),
     transform var(--dur-focal) var(--ease);
 }
+/* A Farsi line carries dir="auto", which gets its direction right but not its
+   alignment or growth edge — text-align and transform-origin above are
+   physical (left), not logical, so an RTL line still opened flush against
+   the same left margin as its neighbours and grew off the wrong edge.
+   :dir(rtl) matches the browser's own bidi detection from dir="auto", so this
+   only fires for lines that are actually RTL, not the whole pane. */
+.nav-lyric-big:dir(rtl) {
+  text-align: right;
+  transform-origin: right center;
+}
 
 /* Sung lines are dimmed harder than unsung ones. That asymmetry is the whole
    reason the screen reads as a position in a song rather than a list. */
