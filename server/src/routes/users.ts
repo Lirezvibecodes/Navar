@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { Readable } from "node:stream";
 import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
@@ -9,7 +8,7 @@ import {
   listPlaylistsVisibleTo,
   searchPeople,
 } from "../repo";
-import { getTelegramFileDownloadUrl } from "../telegram-files";
+import { fetchTelegramFileCached } from "../telegram-files";
 
 /** Rejects a path parameter that is not a Telegram user id. */
 function readUserId(raw: string): number | null {
@@ -70,18 +69,18 @@ export function usersRouter(): Router {
         return;
       }
 
-      const upstream = await fetch(await getTelegramFileDownloadUrl(fileId));
-      if (!upstream.ok || !upstream.body) {
+      const file = await fetchTelegramFileCached(fileId);
+      if (!file) {
         res.status(502).json({ error: "Failed to fetch avatar from Telegram" });
         return;
       }
 
-      res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "image/jpeg");
+      res.setHeader("Content-Type", file.contentType);
       // Avatars change rarely and the file_id only moves when the user changes
       // their photo, so letting the WebView keep it for a day removes a request
       // from every list that shows faces.
       res.setHeader("Cache-Control", "private, max-age=86400");
-      Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream).pipe(res);
+      res.send(file.buffer);
     })
   );
 

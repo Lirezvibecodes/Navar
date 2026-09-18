@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import type { Request, Response } from "express";
 import { postCoverPhoto } from "../channels";
-import { getTelegramFileDownloadUrl } from "../telegram-files";
+import { fetchTelegramFileCached, getTelegramFileDownloadUrl } from "../telegram-files";
 import type { CoverSource } from "../repo";
 
 /**
@@ -72,17 +72,15 @@ export async function serveCover(
     return;
   }
 
-  const upstream = await fetch(await getTelegramFileDownloadUrl(cover.fileId));
-  if (!upstream.ok || !upstream.body) {
+  const file = await fetchTelegramFileCached(cover.fileId);
+  if (!file) {
     res.status(502).json({ error: "Failed to fetch cover from Telegram" });
     return;
   }
 
   // Always a JPEG: it is what sendPhoto produces, whatever went in.
   res.setHeader("Content-Type", "image/jpeg");
-  const length = upstream.headers.get("content-length");
-  if (length) res.setHeader("Content-Length", length);
-  Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream).pipe(res);
+  res.send(file.buffer);
 }
 
 /**
