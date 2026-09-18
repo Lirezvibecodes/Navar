@@ -479,18 +479,28 @@ body {
 
 /* A horizontal shelf. Snaps so a half-shown tile does not sit under the edge.
 
-   touch-action is the important line. Setting overflow-x alone makes the box a
-   scroll container on *both* axes — the other axis computes from `visible` to
-   `auto` — so a shelf silently accepts vertical drags and swallows them
-   without moving. The chip row is a full-width band across the top of every
-   screen, which is exactly where a thumb starts a downward flick, and that is
-   why those pages felt like they would not scroll. Restricting the shelf to
-   pan-x hands the vertical gesture back to the page behind it. */
+   Two axes are in play here, and each needed its own fix. Setting overflow-x
+   alone makes the box a scroll container on *both* axes — the other axis
+   computes from `visible` to `auto` — so without overflow-y: hidden the shelf
+   would claim a vertical drag as its own scroll and then have nothing to
+   scroll, swallowing the gesture instead of moving. touch-action used to be
+   pan-x only, on the theory that restricting the shelf to its own axis would
+   hand a vertical drag back to the page — but touch-action doesn't work by
+   elimination: pan-x on its own means *only* x is a native gesture here, so a
+   vertical drag starting anywhere in the shelf's hit area (the flex container
+   itself, or any card/image/label inside it, since touch-action intersects
+   down the ancestor chain) was never recognized as a pan at all and the page
+   behind it never scrolled. pan-x pan-y keeps pinch/double-tap zoom off while
+   leaving both single-finger directions native, so the browser's own gesture
+   recognizer decides per-touch which axis moves: x against this shelf
+   (overflow-x), y bubbles past it (overflow-y: hidden here) to the page's own
+   scroll container. */
 .nav-shelf {
   display: flex;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
-  touch-action: pan-x;
+  touch-action: pan-x pan-y;
   scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
