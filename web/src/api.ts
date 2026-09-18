@@ -471,6 +471,16 @@ export function getHome(): Promise<HomePayload> {
 }
 
 /**
+ * TEMPORARY — ships the Home touch-event log to the server so it can be
+ * pulled directly instead of transcribed off the screen. Fire-and-forget: a
+ * dropped diagnostic line is not worth surfacing an error over. Remove
+ * alongside HomeView's TouchDebugOverlay once the scroll bug is found.
+ */
+export function postDebugTouchLog(lines: string[]): void {
+  void request("/api/debug/touch-log", { method: "POST", body: json({ lines }) }).catch(() => {});
+}
+
+/**
  * Friends playing something right now. Anybody who has not turned listening on,
  * or who stopped a while ago, is simply absent — there is no hidden row to
  * render, because a row saying somebody is private tells you the one thing they

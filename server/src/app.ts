@@ -12,6 +12,7 @@ import { socialRouter } from "./routes/social";
 import { homeRouter } from "./routes/home";
 import { sharedRouter } from "./routes/shared";
 import { trackShareRouter, storyShareRouter, storyVideoRouter } from "./routes/trackShare";
+import { debugRouter } from "./routes/debug";
 
 // The web app is built into this package (see the build script) and served
 // from the same origin, so the Mini App only ever depends on this one domain
@@ -70,6 +71,8 @@ export function createApp(bot: Telegraf | null): Express {
   app.use("/api/friends", friendsRouter());
   app.use("/api/social", socialRouter());
   app.use("/api/home", homeRouter());
+  // TEMPORARY — see routes/debug.ts. Remove once the Home scroll bug is found.
+  app.use("/api/debug", debugRouter());
   // Deliberately last, and deliberately without requireAuth: everything above
   // this line knows who is calling and nothing below it does.
   app.use("/api/shared", sharedRouter());

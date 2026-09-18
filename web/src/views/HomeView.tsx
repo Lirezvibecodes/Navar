@@ -37,6 +37,20 @@ import { haptic } from "../telegram";
 function TouchDebugOverlay() {
   const [lines, setLines] = useState<string[]>([]);
   const startY = useRef<number | null>(null);
+  const pending = useRef<string[]>([]);
+
+  // Batched rather than one POST per event: touchmove alone can fire dozens
+  // of times a second, and none of this needs to arrive faster than a human
+  // reads it.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (pending.current.length === 0) return;
+      const batch = pending.current;
+      pending.current = [];
+      api.postDebugTouchLog(batch);
+    }, 600);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const describe = (t: EventTarget | null): string => {
@@ -44,8 +58,10 @@ function TouchDebugOverlay() {
       const cls = t.className ? "." + String(t.className).split(" ").slice(0, 2).join(".") : "";
       return t.tagName.toLowerCase() + cls;
     };
-    const log = (s: string) =>
+    const log = (s: string) => {
       setLines((prev) => [...prev.slice(-13), s]);
+      pending.current.push(`${new Date().toISOString().slice(11, 23)} ${s}`);
+    };
 
     const onStart = (e: TouchEvent) => {
       startY.current = e.touches[0]?.clientY ?? null;
