@@ -1099,13 +1099,16 @@ button {
     filter var(--dur-state) var(--ease),
     transform var(--dur-focal) var(--ease);
 }
-/* A Farsi line carries dir="auto", which gets its direction right but not its
-   alignment or growth edge — text-align and transform-origin above are
-   physical (left), not logical, so an RTL line still opened flush against
-   the same left margin as its neighbours and grew off the wrong edge.
-   :dir(rtl) matches the browser's own bidi detection from dir="auto", so this
-   only fires for lines that are actually RTL, not the whole pane. */
-.nav-lyric-big:dir(rtl) {
+/* A Farsi line's dir is set explicitly by the component (see isRtlText in
+   Lyrics.tsx) rather than left to dir="auto", and matched here on the
+   resulting attribute rather than the :dir() pseudo-class — :dir() only
+   shipped in Chrome 120 (Dec 2023), and Telegram's in-app WebView on Android
+   is often well behind that, which is why this line stayed left-aligned
+   there even once its character order was right-to-left. text-align and
+   transform-origin above are physical (left), not logical, so an RTL line
+   still opened flush against the same left margin as its neighbours and grew
+   off the wrong edge. */
+.nav-lyric-big[dir="rtl"] {
   text-align: right;
   transform-origin: right center;
 }

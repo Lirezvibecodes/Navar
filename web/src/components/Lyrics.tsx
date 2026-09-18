@@ -66,6 +66,24 @@ function activeIn(lyrics: Parsed | null, position: number): number {
   return activeLineAt(lyrics.lines, position);
 }
 
+// dir="auto" would answer this too, but it leans on the browser's own bidi
+// detection, exposed to CSS only through the :dir() pseudo-class — which
+// Chrome didn't ship until version 120 (Dec 2023), well ahead of what
+// Telegram's in-app WebView runs on a lot of Android devices. Direction is
+// worked out here instead, from the first strong (non-neutral) character, and
+// set explicitly as dir="rtl" / dir="ltr" so the alignment CSS in index.css
+// can match a plain attribute rather than that pseudo-class.
+const RTL_CHAR = /[֐-׿؀-ۿ܀-ݏݐ-ݿࢠ-ࣿיִ-﷿ﹰ-﻿]/;
+const LTR_CHAR = /[A-Za-z]/;
+
+function lineDir(text: string): "rtl" | "ltr" {
+  for (const ch of text) {
+    if (RTL_CHAR.test(ch)) return "rtl";
+    if (LTR_CHAR.test(ch)) return "ltr";
+  }
+  return "ltr";
+}
+
 /**
  * The words under the transport, three lines at a time.
  *
@@ -117,7 +135,7 @@ export function LyricStrip({
             <span
               key={i}
               className="nav-lyric-line"
-              dir="auto"
+              dir={lineDir(line.text)}
               data-on={i === active}
               style={{ display: "block" }}
             >
@@ -219,7 +237,7 @@ export function LyricsPane({
                 lineRefs.current[i] = el;
               }}
               className="nav-lyric-big"
-              dir="auto"
+              dir={lineDir(line.text)}
               data-state={
                 !timed ? "plain" : i === active ? "on" : i < active ? "past" : "coming"
               }
