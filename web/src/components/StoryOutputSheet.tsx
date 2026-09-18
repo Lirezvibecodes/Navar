@@ -2,11 +2,10 @@ import { useState } from "react";
 import * as api from "../api";
 import type { Track } from "../types";
 import { renderStoryCard } from "../lib/storyCard";
-import { shareStoryVideo } from "../lib/storyVideo";
 import { shareToStory } from "../telegram";
 import { useToast } from "../context/ToastContext";
 import { Sheet, SheetItem } from "./ui";
-import { ImageIcon, VideoIcon } from "../icons";
+import { ImageIcon } from "../icons";
 
 export interface StoryPick {
   track: Track;
@@ -15,8 +14,11 @@ export interface StoryPick {
 
 /**
  * The second step of Share to Story, after a lyric passage (or "Skip") has
- * been picked: a stable image, today's card, or a ten-second video where a
- * picked passage highlights line by line over the track's own audio.
+ * been picked: today's card, as a stable image.
+ *
+ * A ten-second karaoke video used to sit alongside this as a second output —
+ * pulled for now (`storyVideo.ts` still has the rendering code, just nothing
+ * wired to it), leaving the image as the only output.
  */
 export function StoryOutputSheet({
   pick,
@@ -47,20 +49,6 @@ export function StoryOutputSheet({
     }
   };
 
-  const shareVideo = async (p: StoryPick) => {
-    setBusy(true);
-    try {
-      if (!(await shareStoryVideo(p.track, p.lines))) {
-        toast("Story sharing needs a newer Telegram");
-      }
-      onClose();
-    } catch (err) {
-      errorToast(err, "Could not build that story");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <Sheet open={pick != null} onClose={onClose} title="Share to Story">
       <SheetItem
@@ -69,14 +57,6 @@ export function StoryOutputSheet({
         disabled={busy}
         onClick={() => {
           if (pick) void shareImage(pick);
-        }}
-      />
-      <SheetItem
-        icon={VideoIcon}
-        label="10-second video"
-        disabled={busy}
-        onClick={() => {
-          if (pick) void shareVideo(pick);
         }}
       />
     </Sheet>

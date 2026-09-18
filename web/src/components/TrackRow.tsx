@@ -122,6 +122,14 @@ export function TrackRow({
         // Sits behind the row and only shows through the gap the swipe opens
         // up — the same "play next" / "add to queue" actions TrackMenu already
         // offers, just reachable a beat faster from the row itself.
+        //
+        // "Behind" needs pointer-events: none to actually be true: this div is
+        // positioned and the row below it is not, and a positioned box paints
+        // — and hit-tests — above a non-positioned in-flow sibling regardless
+        // of DOM order. Without this, the row is basically always covered
+        // (onQueueNext/onQueueLast are passed everywhere a track list shows
+        // up), and only whichever bit of the row happens to win the browser's
+        // own tie-breaking takes taps at all.
         <div
           aria-hidden
           style={{
@@ -137,6 +145,7 @@ export function TrackRow({
             background: "var(--color-nav-action)",
             opacity: revealStage === "none" ? 0 : 1,
             transition: "opacity var(--dur-tap) var(--ease)",
+            pointerEvents: "none",
           }}
         >
           {revealStage === "next" ? <PlayNextIcon size={15} /> : <QueueAddIcon size={15} />}

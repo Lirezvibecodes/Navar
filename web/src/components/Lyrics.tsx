@@ -3,7 +3,6 @@ import * as api from "../api";
 import { scrollBehavior } from "../lib/motion";
 import {
   activeLineAt,
-  gapBefore,
   parseLyrics,
   type Lyrics as Parsed,
 } from "../lib/lyrics";
@@ -118,6 +117,7 @@ export function LyricStrip({
             <span
               key={i}
               className="nav-lyric-line"
+              dir="auto"
               data-on={i === active}
               style={{ display: "block" }}
             >
@@ -138,9 +138,6 @@ const ANCHOR = 0.38;
 
 /** How long the pane waits after you stop touching it before it takes over. */
 const RESUME_AFTER = 4000;
-
-/** A silence longer than this is an interlude rather than a pause. */
-const INTERLUDE = 5;
 
 export function LyricsPane({
   words,
@@ -217,22 +214,12 @@ export function LyricsPane({
       >
         {lyrics.lines.map((line, i) => (
           <div key={i}>
-            {timed && gapBefore(lyrics.lines, i) > INTERLUDE ? (
-              <span
-                className="nav-lyric-gap"
-                aria-hidden="true"
-                data-on={active === i - 1}
-              >
-                <i />
-                <i />
-                <i />
-              </span>
-            ) : null}
             <p
               ref={(el) => {
                 lineRefs.current[i] = el;
               }}
               className="nav-lyric-big"
+              dir="auto"
               data-state={
                 !timed ? "plain" : i === active ? "on" : i < active ? "past" : "coming"
               }

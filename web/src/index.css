@@ -373,6 +373,13 @@ body {
   padding: 0 14px;
   padding-top: var(--nav-top-inset);
   box-sizing: content-box;
+  /* The bar floats over the scroll container, so its box — title included,
+     which runs flex: 1 and spans most of the width — sits directly over
+     where a thumb naturally starts a downward drag. Left at the default
+     pointer-events: auto, that whole strip swallows the touch before it
+     ever reaches the list underneath, and only drags starting below the
+     bar could scroll. Only the buttons need to catch anything. */
+  pointer-events: none;
 }
 .nav-topbar::before {
   content: "";
@@ -395,6 +402,9 @@ body {
 }
 .nav-topbar > * {
   position: relative;
+}
+.nav-topbar button {
+  pointer-events: auto;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1103,45 +1113,6 @@ button {
 
 .nav-lyric-big[data-far="true"] {
   filter: blur(1.5px);
-}
-
-/* The instrumental. Three squares, the same blocks and the same cadence as
-   the boot loader in index.html — the keyframes are redeclared here because
-   that markup is torn down the moment the app mounts. */
-.nav-lyric-gap {
-  display: flex;
-  gap: 5px;
-  margin: 2px 0 18px;
-}
-
-.nav-lyric-gap i {
-  width: 9px;
-  height: 9px;
-  background: var(--color-nav-action);
-  opacity: 0.16;
-}
-
-.nav-lyric-gap[data-on="true"] i {
-  animation: nav-lyric-block 1.6s ease-in-out infinite;
-}
-
-.nav-lyric-gap[data-on="true"] i:nth-child(2) {
-  animation-delay: 0.16s;
-}
-
-.nav-lyric-gap[data-on="true"] i:nth-child(3) {
-  animation-delay: 0.32s;
-}
-
-@keyframes nav-lyric-block {
-  0%,
-  70%,
-  100% {
-    opacity: 0.16;
-  }
-  30% {
-    opacity: 1;
-  }
 }
 
 /* ---------------------------------------------------------------------------
