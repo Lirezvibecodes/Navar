@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { Cover, CollectionArt } from "../components/PixelArt";
@@ -28,91 +28,6 @@ import { haptic } from "../telegram";
  * onto a screen that keeps all of it, so a row scrolling off the end of Home
  * never takes anything with it.
  */
-/**
- * TEMPORARY diagnostic only — logs raw touch events on Home so we can see
- * what actually happens on a real device when a drag over a button fails to
- * scroll. Remove once the Home scroll bug is found. Pointer-events: none so
- * it cannot itself interfere with the gesture it is watching.
- */
-function TouchDebugOverlay() {
-  const [lines, setLines] = useState<string[]>([]);
-  const startY = useRef<number | null>(null);
-  const pending = useRef<string[]>([]);
-
-  // Batched rather than one POST per event: touchmove alone can fire dozens
-  // of times a second, and none of this needs to arrive faster than a human
-  // reads it.
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (pending.current.length === 0) return;
-      const batch = pending.current;
-      pending.current = [];
-      api.postDebugTouchLog(batch);
-    }, 600);
-    return () => window.clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const describe = (t: EventTarget | null): string => {
-      if (!(t instanceof Element)) return "?";
-      const cls = t.className ? "." + String(t.className).split(" ").slice(0, 2).join(".") : "";
-      return t.tagName.toLowerCase() + cls;
-    };
-    const log = (s: string) => {
-      setLines((prev) => [...prev.slice(-13), s]);
-      pending.current.push(`${new Date().toISOString().slice(11, 23)} ${s}`);
-    };
-
-    const onStart = (e: TouchEvent) => {
-      startY.current = e.touches[0]?.clientY ?? null;
-      log(`start y=${Math.round(startY.current ?? -1)} on ${describe(e.target)}`);
-    };
-    const onMove = (e: TouchEvent) => {
-      const y = e.touches[0]?.clientY ?? null;
-      const dy = y != null && startY.current != null ? Math.round(y - startY.current) : "?";
-      log(`move dy=${dy} defPrevented=${e.defaultPrevented} on ${describe(e.target)}`);
-    };
-    const onEnd = (e: TouchEvent) => log(`end on ${describe(e.target)}`);
-    const onCancel = (e: TouchEvent) => log(`CANCEL on ${describe(e.target)}`);
-
-    window.addEventListener("touchstart", onStart, { passive: true });
-    window.addEventListener("touchmove", onMove, { passive: true });
-    window.addEventListener("touchend", onEnd, { passive: true });
-    window.addEventListener("touchcancel", onCancel, { passive: true });
-    return () => {
-      window.removeEventListener("touchstart", onStart);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onEnd);
-      window.removeEventListener("touchcancel", onCancel);
-    };
-  }, []);
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: 4,
-        right: 4,
-        top: 4,
-        zIndex: 999999,
-        pointerEvents: "none",
-        background: "rgba(0,0,0,.82)",
-        color: "#7CFC7C",
-        fontSize: 9.5,
-        fontFamily: "monospace",
-        lineHeight: 1.35,
-        padding: "4px 6px",
-        borderRadius: 8,
-        maxHeight: "34vh",
-        overflow: "hidden",
-        whiteSpace: "pre-wrap",
-      }}
-    >
-      {lines.length === 0 ? "touch log: drag on a button…" : lines.join("\n")}
-    </div>
-  );
-}
-
 export function HomeView({ nav }: { nav: Navigation }) {
   const { current, playFrom } = usePlayer();
 
@@ -164,9 +79,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
   if (!home.continue_listening && !home.playlists) return <FirstRun />;
 
   return (
-    <>
-      <TouchDebugOverlay />
-      <Screen scrollKey="home">
+    <Screen scrollKey="home">
       {shelf.length > 0 ? (
         <>
           <SectionHeader title="Continue listening" />
@@ -302,8 +215,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
           <ArrowRightIcon size={13} style={{ color: "var(--color-nav-action)" }} />
         </button>
       ) : null}
-      </Screen>
-    </>
+    </Screen>
   );
 }
 
