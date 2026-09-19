@@ -82,6 +82,7 @@
   --color-nav-action-soft: #e6f7c4;
   --color-nav-action-rgb: 198, 242, 74;
   --color-nav-social: #89aeff;
+  --color-nav-social-rgb: 137, 174, 255;
   --color-nav-art: #bce4fe;
   --color-nav-card-top: #171a1f;
   --color-nav-card-bottom: #101216;
@@ -579,6 +580,7 @@ body {
   --dur-view: 300ms; /* a screen replacing another */
   --dur-focal: 460ms; /* the bar becoming the player */
   --dur-tab: 340ms; /* one tab opening while another closes */
+  --dur-settle: 380ms; /* a dragged row easing back to rest after release */
 }
 
 /* Every control gets the same press response. Telegram supplies the haptic;

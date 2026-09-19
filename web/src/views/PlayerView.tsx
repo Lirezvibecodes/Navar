@@ -1290,6 +1290,8 @@ function QueueRow({
     () => (onQueueNext ?? onQueueLast)?.()
   );
   const queueReveal = canSwipeQueue ? swipeQueue.stage : "none";
+  const queueRevealBg = canSwipeQueue ? `rgb(${swipeQueue.revealRgb})` : undefined;
+  const queueRevealOpacity = canSwipeQueue ? swipeQueue.revealOpacity : 0;
 
   return (
     <div
@@ -1322,7 +1324,12 @@ function QueueRow({
             color: "#0A0A0A",
             background: "var(--color-nav-danger)",
             opacity: swipeRemove.armed ? 1 : 0,
-            transition: "opacity var(--dur-tap) var(--ease)",
+            transition: swipeRemove.dragging() ? undefined : "opacity var(--dur-settle) var(--ease)",
+            // Absolutely-positioned, so it paints above the (non-positioned,
+            // in-flow) content row below regardless of DOM order — without
+            // this every tap, drag-handle press and ⋯ press on this row hits
+            // this invisible-at-rest layer instead of the control under it.
+            pointerEvents: "none",
           }}
         >
           <TrashIcon size={15} />
@@ -1333,7 +1340,10 @@ function QueueRow({
       {canSwipeQueue ? (
         // Same idea, rightward: a "Next from: X" row isn't in the explicit
         // queue yet, so swiping it right offers the same play-next/add-to-
-        // queue pair TrackRow's swipe already does elsewhere in the app.
+        // queue pair TrackRow's swipe already does elsewhere in the app. The
+        // color tracks drag distance continuously (see useSwipeQueue) instead
+        // of snapping at the threshold, so the two actions read as one
+        // gesture sliding between them rather than a coin flip at release.
         <div
           aria-hidden
           style={{
@@ -1346,9 +1356,13 @@ function QueueRow({
             fontSize: 11.5,
             fontWeight: 600,
             color: "#0A0A0A",
-            background: "var(--color-nav-action)",
-            opacity: queueReveal === "none" ? 0 : 1,
-            transition: "opacity var(--dur-tap) var(--ease)",
+            background: queueRevealBg,
+            opacity: queueRevealOpacity,
+            transition: swipeQueue.dragging()
+              ? undefined
+              : "opacity var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease)",
+            // Same reasoning as the remove reveal above.
+            pointerEvents: "none",
           }}
         >
           {queueReveal === "next" ? <PlayNextIcon size={15} /> : <QueueAddIcon size={15} />}
@@ -1375,7 +1389,9 @@ function QueueRow({
           transition:
             (canSwipeRemove && swipeRemove.dragging()) || (canSwipeQueue && swipeQueue.dragging())
               ? "background-color var(--dur-state) var(--ease)"
-              : "background-color var(--dur-state) var(--ease), transform var(--dur-tap) var(--ease)",
+              // Releasing eases back to rest over --dur-settle instead of
+              // snapping — same reasoning as TrackRow's own swipe.
+              : "background-color var(--dur-state) var(--ease), transform var(--dur-settle) var(--ease)",
           touchAction: canSwipeRemove || canSwipeQueue ? "pan-y" : undefined,
         }}
       >

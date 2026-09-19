@@ -104,6 +104,11 @@ export function TrackRow({
   const tag = uploader && !uploader.you ? uploader : null;
 
   const revealStage = canSwipe ? swipe.stage : "none";
+  // The label swaps at the threshold (it names one of two discrete actions),
+  // but the color behind it and the reveal's own visibility both track the
+  // raw drag distance — see useSwipeQueue.
+  const revealBg = canSwipe ? `rgb(${swipe.revealRgb})` : undefined;
+  const revealOpacity = canSwipe ? swipe.revealOpacity : 0;
 
   return (
     <div
@@ -142,9 +147,11 @@ export function TrackRow({
             fontSize: 11.5,
             fontWeight: 600,
             color: "#0A0A0A",
-            background: "var(--color-nav-action)",
-            opacity: revealStage === "none" ? 0 : 1,
-            transition: "opacity var(--dur-tap) var(--ease)",
+            background: revealBg,
+            opacity: revealOpacity,
+            transition: swipe.dragging()
+              ? undefined
+              : "opacity var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease)",
             pointerEvents: "none",
           }}
         >
@@ -171,7 +178,10 @@ export function TrackRow({
           transition:
             canSwipe && swipe.dragging()
               ? "background-color var(--dur-state) var(--ease)"
-              : "background-color var(--dur-state) var(--ease), transform var(--dur-tap) var(--ease)",
+              // Releasing eases back to rest over --dur-settle rather than
+              // snapping — the row was dragged there, so it should visibly
+              // travel back, not teleport.
+              : "background-color var(--dur-state) var(--ease), transform var(--dur-settle) var(--ease)",
           touchAction: canSwipe ? "pan-y" : undefined,
         }}
       >

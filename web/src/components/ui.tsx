@@ -1134,6 +1134,13 @@ const SWIPE_NEXT_PX = 104;
 
 export type SwipeQueueStage = "none" | "queue" | "next";
 
+// Mirrors --color-nav-action and --color-nav-social. Read as plain numbers
+// because the reveal color below is interpolated per pixel of drag, which a
+// CSS transition can't do from a threshold-based class swap.
+const QUEUE_RGB: [number, number, number] = [198, 242, 74];
+const NEXT_RGB: [number, number, number] = [137, 174, 255];
+const mixChannel = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+
 /**
  * Swipe right on a row to queue it, without needing the ⋯ menu.
  *
@@ -1253,6 +1260,15 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     };
   }, []);
 
+  // The reveal fades and shifts color continuously with drag distance, rather
+  // than snapping at each threshold, so the row visibly reads as sliding
+  // between two different destinations instead of just lighting up once.
+  const revealOpacity = dragX <= 0 ? 0 : Math.min(dragX / SWIPE_QUEUE_PX, 1);
+  const progress = Math.max(0, Math.min(dragX / SWIPE_NEXT_PX, 1));
+  const revealRgb = [0, 1, 2]
+    .map((i) => mixChannel(QUEUE_RGB[i], NEXT_RGB[i], progress))
+    .join(", ");
+
   return {
     /** Attach to the row element the gesture drags. */
     ref,
@@ -1260,6 +1276,14 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     stage: stageFor(dragX),
     /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
     dragging: () => active.current,
+    /** "r, g, b" — blends from --color-nav-action toward --color-nav-social as
+     *  the drag approaches the "play next" threshold. Interpolate the values,
+     *  not just pick one at the end, so the two thresholds read as one
+     *  continuous gesture rather than a coin flip at release. */
+    revealRgb,
+    /** 0 at rest, ramping to 1 by the first threshold, so a stray few px of
+     *  motion doesn't flash the reveal on and off. */
+    revealOpacity,
   };
 }
 
