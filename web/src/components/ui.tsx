@@ -1179,6 +1179,11 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
   const deciding = useRef(false);
   const active = useRef(false);
   const stage = useRef<SwipeQueueStage>("none");
+  // Bumped once per completed swipe so the confirm glow (see
+  // SwipeQueueConfirm) can key off it and replay on every add, not just the
+  // first — a boolean flag wouldn't change value on back-to-back swipes of
+  // the same row and so wouldn't retrigger the CSS animation.
+  const [confirmTick, setConfirmTick] = useState(0);
   // Latest callbacks without re-binding the listeners on every render.
   const actions = useRef({ onQueueLast, onQueueNext });
   actions.current = { onQueueLast, onQueueNext };
@@ -1249,8 +1254,12 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     const onEnd = () => {
       const finished = stage.current;
       reset();
+      if (finished === "none") return;
       if (finished === "next") actions.current.onQueueNext();
-      else if (finished === "queue") actions.current.onQueueLast();
+      else actions.current.onQueueLast();
+      // Fires in the same commit as reset()'s setDragX(0), so the glow
+      // starts on the very same frame the row begins snapping back.
+      setConfirmTick((t) => t + 1);
     };
 
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -1272,6 +1281,8 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     stage: stageFor(dragX),
     /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
     dragging: () => active.current,
+    /** 0 until the first completed swipe, then increments on every one after. */
+    confirmTick,
   };
 }
 
@@ -1425,6 +1436,44 @@ function SwipeChip({
         {label}
       </div>
     </div>
+  );
+}
+
+/**
+ * A soft wash of the accent colour over the whole row, once, confirming a
+ * completed swipe-to-queue. Keyed on `confirmTick` from useSwipeQueue so
+ * each completed swipe remounts it and replays the animation — a boolean
+ * wouldn't change value (and so wouldn't retrigger) on back-to-back adds of
+ * the same row.
+ *
+ * Only opacity animates, on a layer whose colour and glow are otherwise
+ * static — the same reasoning as everywhere else in this file that
+ * background-color and box-shadow don't get to run every frame. Its timing
+ * reuses --dur-settle/--ease-settle rather than its own values: the row
+ * starts sliding back the instant a swipe completes, so the glow needs to
+ * ride the exact same clock to read as one motion instead of two.
+ */
+export function SwipeQueueConfirm({ confirmTick }: { confirmTick: number }) {
+  if (!confirmTick) return null;
+  return (
+    <div
+      key={confirmTick}
+      aria-hidden
+      className="nav-queue-confirm"
+      style={{
+        position: "absolute",
+        inset: 0,
+        borderRadius: "inherit",
+        background: "rgba(var(--color-nav-action-rgb), .18)",
+        // Inset, not an outer halo — the row wrapper this sits inside clips
+        // with overflow: hidden (that's what keeps the swipe reveal from
+        // bleeding past the row's own rounded corners), so an outer
+        // box-shadow here would just get clipped away unseen. Inset draws
+        // inside the box instead, glowing brightest at the edges.
+        boxShadow: "inset 0 0 16px 2px rgba(var(--color-nav-action-rgb), .55)",
+        pointerEvents: "none",
+      }}
+    />
   );
 }
 

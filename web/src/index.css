@@ -1017,6 +1017,23 @@ button {
   animation: nav-spin 900ms linear infinite;
 }
 
+/* A swiped-to-queue row confirming the add: a quick rise to a soft glow,
+   then a slower fade back out — timed with --dur-settle/--ease-settle so it
+   plays out over exactly the same span as the row snapping back, as one
+   motion rather than two competing ones. */
+@keyframes nav-queue-confirm {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  32% {
+    opacity: 1;
+  }
+}
+.nav-queue-confirm {
+  animation: nav-queue-confirm var(--dur-settle) var(--ease-settle);
+}
+
 /* The play/pause glyph. Both glyphs are stacked and cross-faded rather than
    swapped, so the transport button never blinks empty for a frame. */
 .nav-glyph {

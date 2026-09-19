@@ -18,6 +18,7 @@ import {
   RoundButton,
   Sheet,
   SheetItem,
+  SwipeQueueConfirm,
   SwipeQueueReveal,
   useSwipeQueue,
   useSwipeRemove,
@@ -1474,6 +1475,7 @@ function QueueRow({
         <DotsIcon size={15} />
       </button>
       </div>
+      {canSwipeQueue ? <SwipeQueueConfirm confirmTick={swipeQueue.confirmTick} /> : null}
     </div>
   );
 }

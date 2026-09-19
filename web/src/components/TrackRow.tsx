@@ -6,7 +6,7 @@ import { CheckIcon, DotsIcon, HeartIcon } from "../icons";
 import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/format";
 import { haptic } from "../telegram";
 import { useLibrary } from "../context/LibraryContext";
-import { SwipeQueueReveal, useLongPress, useSwipeQueue } from "./ui";
+import { SwipeQueueConfirm, SwipeQueueReveal, useLongPress, useSwipeQueue } from "./ui";
 
 /**
  * One track, everywhere a track appears in a list.
@@ -318,6 +318,7 @@ export function TrackRow({
         </div>
       )}
       </div>
+      {canSwipe ? <SwipeQueueConfirm confirmTick={swipe.confirmTick} /> : null}
     </div>
   );
 }
