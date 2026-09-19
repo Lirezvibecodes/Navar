@@ -1322,6 +1322,21 @@ export function SwipeQueueReveal({
         pointerEvents: "none",
       }}
     >
+      {/* Add to queue renders first (screen-left) and Play next second
+          (screen-right, hugging the row's own dragged edge) — the opposite
+          of DOM/threshold order. Nothing about the gesture changes: Play
+          next still opens at the first threshold, Add to queue at the
+          second. Swapping only which side each chip sits on means the chip
+          that needs the longer swipe is the one that extends furthest from
+          the row, toward the screen edge — reading as "further swipe,
+          further reveal" instead of both chips growing the same direction. */}
+      <SwipeChip
+        icon={QueueAddIcon}
+        label="Add to queue"
+        width={Math.max(0, Math.min(dragX - NEXT_CHIP_PX, QUEUE_CHIP_PX))}
+        progress={queueProgress}
+        transition={settle}
+      />
       <SwipeChip
         icon={PlayNextIcon}
         label="Play next"
@@ -1330,13 +1345,6 @@ export function SwipeQueueReveal({
         // Fades hard once "Add to queue" starts taking over the gesture —
         // by the time that chip is fully open, this one is barely there.
         opacity={1 - 0.85 * queueProgress}
-        transition={settle}
-      />
-      <SwipeChip
-        icon={QueueAddIcon}
-        label="Add to queue"
-        width={Math.max(0, Math.min(dragX - NEXT_CHIP_PX, QUEUE_CHIP_PX))}
-        progress={queueProgress}
         transition={settle}
       />
     </div>
@@ -1360,33 +1368,41 @@ function SwipeChip({
   transition: string | undefined;
 }) {
   return (
+    // No padding on this box — it's the one whose width must actually reach
+    // zero. box-sizing: border-box alone doesn't get there: a border-box
+    // width is a floor its own padding can't shrink below, so a 14px
+    // paddingLeft here would still force a 14px-wide coloured box at rest,
+    // on every swipeable row, no matter what width says. Padding lives on
+    // the label below instead, an unsized child free to be wider than this
+    // box — which overflow: hidden then clips to nothing at width 0.
     <div
       style={{
-        // border-box, not the default content-box: at width 0 this chip must
-        // occupy zero space. With content-box its own paddingLeft still added
-        // 14px of visible, coloured box outside that "zero" width — a sliver
-        // stuck to the left edge of every queueable row, even fully at rest.
-        boxSizing: "border-box",
         width,
         flex: "none",
         height: "100%",
         overflow: "hidden",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        paddingLeft: 14,
-        fontSize: 11.5,
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-        color: "#0A0A0A",
         opacity,
         background: `rgba(var(--color-nav-action-rgb), ${(0.4 + 0.55 * progress).toFixed(2)})`,
         boxShadow: `0 0 ${Math.round(18 * progress)}px rgba(var(--color-nav-action-rgb), ${(0.6 * progress).toFixed(2)})`,
         transition,
       }}
     >
-      <Icon size={15} />
-      {label}
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          height: "100%",
+          paddingLeft: 14,
+          fontSize: 11.5,
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+          color: "#0A0A0A",
+        }}
+      >
+        <Icon size={15} />
+        {label}
+      </div>
     </div>
   );
 }
