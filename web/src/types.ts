@@ -205,6 +205,9 @@ export interface ListeningStats {
    *  necessarily `topTrack` itself. Null when none of their tracks do. */
   topArtist: { name: string; cover_track_id: string | null } | null;
   totalListenedSeconds: number;
+  /** `topTrack`/`topArtist` widened to a ranked top 3 for the stats panel. */
+  topTracks: Array<ActivityTrack & { plays: number }>;
+  topArtists: Array<{ name: string; cover_track_id: string | null; plays: number }>;
 }
 
 /**

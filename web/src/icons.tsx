@@ -313,6 +313,20 @@ export const BoltIcon = icon(
   </>
 );
 
+/**
+ * Not in the library, so composed from the same blocky primitives PrevIcon
+ * and NextIcon already build missing glyphs from: a shackle arch over a
+ * body block, both grid-aligned rects rather than a hand-drawn curve.
+ */
+export const LockIcon = icon(
+  <>
+    <rect x="7" y="3" width="2" height="6" />
+    <rect x="15" y="3" width="2" height="6" />
+    <rect x="7" y="3" width="10" height="2" />
+    <rect x="4" y="9" width="16" height="12" />
+  </>
+);
+
 export const TagIcon = icon(
   <>
     <polygon points="22 4 22 7 21 7 21 8 20 8 20 7 19 7 19 6 18 6 18 5 17 5 17 4 18 4 18 3 21 3 21 4 22 4" /><polygon points="17 14 18 14 18 21 17 21 17 22 2 22 2 21 1 21 1 6 2 6 2 5 14 5 14 6 13 6 13 7 3 7 3 20 16 20 16 15 17 15 17 14" /><polygon points="18 8 19 8 19 10 18 10 18 11 17 11 17 12 16 12 16 13 15 13 15 14 14 14 14 15 13 15 13 16 12 16 12 17 11 17 11 18 7 18 7 14 8 14 8 13 9 13 9 12 10 12 10 11 11 11 11 10 12 10 12 9 13 9 13 8 14 8 14 7 15 7 15 6 17 6 17 7 18 7 18 8" />

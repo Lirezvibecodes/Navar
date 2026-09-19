@@ -441,16 +441,54 @@ function trackCoverVisibleTo(viewer: string, track: string): string {
   return `(${trackVisibleTo(viewer, track)} OR ${canSeePerson(viewer, `${track}.owner_telegram_id`)})`;
 }
 
-/** The `/cover` route's own lookup — everywhere else keeps using getTrackForListener. */
+/**
+ * SQL fragment: true when `trackId` is one of `target`'s profile showcase
+ * pictures — the background they picked, or a covered track they have
+ * actually played. `getUserProfile`'s own comment says its stats are
+ * "visible to anyone who can open the profile"; that already puts a title
+ * and an artist name for these exact tracks in front of every viewer, so
+ * gating just the picture behind friendship left every stranger's (and, for
+ * the header banner specifically, sometimes even a friend's) profile with a
+ * broken image tile next to text it was already allowed to read. Keyed off
+ * `plays`, not `track.owner_telegram_id`, because a track someone has played
+ * can be a track a third party uploaded and shared, not the profile owner's
+ * own upload.
+ */
+function isProfileShowcaseCover(target: string, track: string): string {
+  return `(
+    EXISTS (SELECT 1 FROM users WHERE telegram_user_id = ${target} AND background_track_id = ${track})
+    OR EXISTS (
+      SELECT 1 FROM plays pl JOIN tracks pt ON pt.id = pl.track_id
+      WHERE pl.telegram_user_id = ${target} AND pl.track_id = ${track}
+        AND pt.deleted_at IS NULL AND (pt.cover_image IS NOT NULL OR pt.cover_file_id IS NOT NULL)
+    )
+  )`;
+}
+
+/**
+ * The `/cover` route's own lookup — everywhere else keeps using getTrackForListener.
+ *
+ * `profileOwnerId`, when given, names whose profile page asked for this
+ * picture. It only ever widens the check, to exactly the tracks that
+ * person's own profile already shows a title and artist for — see
+ * `isProfileShowcaseCover`. The id is never trusted blindly: it just adds
+ * one more OR clause the server verifies itself against that person's own
+ * plays and background pick.
+ */
 export async function getTrackCoverForViewer(
   id: string,
-  requesterTelegramId: number
+  requesterTelegramId: number,
+  profileOwnerId?: number
 ): Promise<Track | null> {
+  const params = profileOwnerId != null ? [id, requesterTelegramId, profileOwnerId] : [id, requesterTelegramId];
   const { rows } = await getPool().query<Track>(
     `SELECT ${TRACK_COLUMNS_T}
      FROM tracks t
-     WHERE t.id = $1 AND ${LIVE_T} AND ${trackCoverVisibleTo("$2", "t")}`,
-    [id, requesterTelegramId]
+     WHERE t.id = $1 AND ${LIVE_T} AND (
+       ${trackCoverVisibleTo("$2", "t")}
+       ${profileOwnerId != null ? `OR ${isProfileShowcaseCover("$3", "t.id")}` : ""}
+     )`,
+    params
   );
   return rows[0] ?? null;
 }
@@ -2844,6 +2882,10 @@ export interface ListeningStats {
    *  tracks in this rollup carry art. */
   topArtist: { name: string; cover_track_id: string | null } | null;
   totalListenedSeconds: number;
+  /** `topTrack`/`topArtist` widened to a ranked top 3 for the stats panel —
+   *  same rows, same ordering, just not cut down to one. */
+  topTracks: Array<ActivityTrack & { plays: number }>;
+  topArtists: Array<{ name: string; cover_track_id: string | null; plays: number }>;
 }
 
 export async function getListeningStats(telegramUserId: number): Promise<ListeningStats> {
@@ -2882,20 +2924,16 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
     }
   }
 
-  let topArtistName: string | null = null;
-  let topArtistCount = 0;
-  for (const [name, count] of artistCounts) {
-    if (count > topArtistCount) {
-      topArtistName = name;
-      topArtistCount = count;
-    }
-  }
-  // Rows are already ordered by play_count DESC, so the first one crediting
-  // the top artist and carrying art is their most-played covered track.
-  const artistCover = topArtistName
-    ? (rows.find((row) => row.has_cover && splitArtists(row.artist ?? "").includes(topArtistName!))
-        ?.track_id ?? null)
-    : null;
+  // Covered-track lookup shared by both the single top artist and the top-3
+  // list below: rows are already ordered by play_count DESC, so the first
+  // one crediting a given artist and carrying art is their most-played
+  // covered track.
+  const coverFor = (artist: string) =>
+    rows.find((row) => row.has_cover && splitArtists(row.artist ?? "").includes(artist))?.track_id ?? null;
+
+  const rankedArtists = [...artistCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const topArtistName = rankedArtists[0]?.[0] ?? null;
+  const artistCover = topArtistName ? coverFor(topArtistName) : null;
 
   const top = rows[0];
   return {
@@ -2910,6 +2948,18 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
       : null,
     topArtist: topArtistName ? { name: topArtistName, cover_track_id: artistCover } : null,
     totalListenedSeconds,
+    topTracks: rows.slice(0, 3).map((row) => ({
+      id: row.track_id,
+      title: row.title,
+      artist: row.artist,
+      cover_track_id: row.has_cover ? row.track_id : null,
+      plays: Number(row.play_count),
+    })),
+    topArtists: rankedArtists.slice(0, 3).map(([name, count]) => ({
+      name,
+      cover_track_id: coverFor(name),
+      plays: count,
+    })),
   };
 }
 

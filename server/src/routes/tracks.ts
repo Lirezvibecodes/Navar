@@ -198,10 +198,15 @@ export function tracksRouter(): Router {
     requireAuth,
     asyncHandler(async (req, res) => {
       const requesterId = (req as AuthedRequest).telegramUserId;
+      // `profileOf`, when the client is fetching this because it's showing on
+      // that person's profile, widens the check to what that profile already
+      // shows in text — see getTrackCoverForViewer / isProfileShowcaseCover.
+      const profileOfRaw = typeof req.query.profileOf === "string" ? Number(req.query.profileOf) : NaN;
+      const profileOf = Number.isSafeInteger(profileOfRaw) && profileOfRaw > 0 ? profileOfRaw : undefined;
       // The visibility decision happens here; the byte fetch below is scoped by
       // it rather than repeating the predicate itself. A thumbnail is a looser
       // gate than playback — see getTrackCoverForViewer.
-      const track = await getTrackCoverForViewer(req.params.id, requesterId);
+      const track = await getTrackCoverForViewer(req.params.id, requesterId, profileOf);
       if (!track) {
         res.status(404).json({ error: "Not found" });
         return;

@@ -19,6 +19,7 @@ import {
   ChevronRightIcon,
   HeadphonesIcon,
   LibraryIcon,
+  LockIcon,
   StarIcon,
   UserIcon,
 } from "../icons";
@@ -29,7 +30,7 @@ import { formatListened, personName } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
 import { confirmAction, haptic } from "../telegram";
-import type { BadgeTier, Person, Playlist } from "../types";
+import type { BadgeTier, ListeningStats, Person, Playlist } from "../types";
 
 /** The banner's own pixelated wash, drawn at its own modest size rather than
  *  a story card's full 1080×1920 — same technique as the story-share
@@ -129,6 +130,8 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   );
 
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [tierOpen, setTierOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const unfriend = async () => {
     if (!(await confirmAction(`Remove ${name} from your friends?`))) return;
@@ -165,7 +168,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   // overridden with any cover from their own library — an override on a
   // computed default, the same shape `playlists.cover_track_id` already is.
   const bgTrackId = profile?.background_track_id ?? profile?.stats?.topTrack?.cover_track_id ?? null;
-  const bannerUrl = usePixelatedBanner(bgTrackId ? api.trackCoverUrl(bgTrackId) : null);
+  const bannerUrl = usePixelatedBanner(bgTrackId ? api.trackCoverUrl(bgTrackId, userId) : null);
 
   if (loading) {
     return (
@@ -238,7 +241,9 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                 >
                   {name}
                 </span>
-                {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
+                {profile ? (
+                  <TierChip tier={profile.tier} own={isMe} onClick={() => setTierOpen(true)} />
+                ) : null}
               </div>
               <div
                 style={{
@@ -253,16 +258,17 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   <FriendsChip count={profile.friend_count} onClick={() => setFriendsOpen(true)} />
                 ) : null}
                 {stats && stats.totalListenedSeconds > 0 ? (
-                  <ListenChip seconds={stats.totalListenedSeconds} />
+                  <ListenChip seconds={stats.totalListenedSeconds} onClick={() => setStatsOpen(true)} />
                 ) : null}
               </div>
 
               {/* Favourite track and favourite artist, directly under the
                   friends/listen row and sharing its left edge — the same
                   column, one row down, rather than a separate hero-sized
-                  block of their own. Always side by side: each takes half
-                  the row and truncates its own value rather than wrapping
-                  the pair onto two lines. */}
+                  block of their own. Side by side, each hugging its own
+                  content width (not forced into an even half-and-half
+                  split) so a short pair sits close together instead of
+                  stretching a gap between them. */}
               {stats?.topTrack || stats?.topArtist ? (
                 <div style={{ display: "flex", alignItems: "stretch", marginTop: 7, minWidth: 0 }}>
                   {stats.topTrack ? (
@@ -270,6 +276,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                       label="Favourite track"
                       value={stats.topTrack.title ?? "Untitled"}
                       coverTrackId={stats.topTrack.cover_track_id}
+                      profileUserId={userId}
                     />
                   ) : null}
                   {stats.topArtist ? (
@@ -277,6 +284,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                       label="Favourite artist"
                       value={stats.topArtist.name}
                       coverTrackId={stats.topArtist.cover_track_id}
+                      profileUserId={userId}
                       divider={Boolean(stats.topTrack)}
                     />
                   ) : null}
@@ -411,6 +419,23 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         open={friendsOpen}
         onClose={() => setFriendsOpen(false)}
       />
+      {profile ? (
+        <TierSheet
+          tier={profile.tier}
+          own={isMe}
+          name={name}
+          open={tierOpen}
+          onClose={() => setTierOpen(false)}
+        />
+      ) : null}
+      {stats ? (
+        <ListenSheet
+          stats={stats}
+          profileUserId={userId}
+          open={statsOpen}
+          onClose={() => setStatsOpen(false)}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -426,12 +451,27 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
  * The tier everybody starts on is shown on your own page and nowhere else: a
  * column of identical chips down a list of people would say nothing about any
  * of them, and would bury the ones that mean something.
+ *
+ * Tapping it raises `TierSheet` — the full ladder, not just the one word this
+ * chip has room for.
  */
-function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
+function TierChip({
+  tier,
+  own,
+  onClick,
+}: {
+  tier: BadgeTier;
+  own: boolean;
+  onClick: () => void;
+}) {
   if (tier.min === 0 && !own) return null;
   return (
-    <span
-      className="nav-glass"
+    <button
+      className="nav-glass nav-press"
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
       style={{
         display: "inline-flex",
         flexShrink: 0,
@@ -447,7 +487,7 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
     >
       <StarIcon size={9} />
       {tier.label}
-    </span>
+    </button>
   );
 }
 
@@ -545,15 +585,139 @@ function FriendsSheet({
 }
 
 /**
+ * Mirrors `server/src/badges.ts`'s `BADGE_TIERS` — a static rule table, the
+ * same for everyone, so showing its thresholds here is not the same as
+ * showing anybody's actual endorsement count. That count never leaves the
+ * server (see `getUserProfile`'s own comment); unlocked/locked below is
+ * decided from `tier.min` alone. Because `tierFor` only ever moves up, a
+ * ladder rung is unlocked exactly when its threshold sits at or below the
+ * tier already on the profile — no count needed.
+ */
+const TIER_LADDER: ReadonlyArray<{ id: string; label: string; min: number }> = [
+  { id: "listener", label: "Listener", min: 0 },
+  { id: "selector", label: "Selector", min: 1 },
+  { id: "tastemaker", label: "Tastemaker", min: 5 },
+  { id: "curator", label: "Curator", min: 15 },
+];
+
+/**
+ * The full ladder a `TierChip` opens: what's been reached, and what it takes
+ * to reach what hasn't. Locked rungs sit visibly dimmer with a lock glyph in
+ * place of the star — the "darker, with an explanation" the tag panel asked
+ * for — and the endorsement mechanic itself is explained once, above the
+ * locked list, rather than repeated in every row's copy.
+ */
+function TierSheet({
+  tier,
+  own,
+  name,
+  open,
+  onClose,
+}: {
+  tier: BadgeTier;
+  own: boolean;
+  name: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const subject = own ? "You" : name;
+  const taste = own ? "your taste" : `${name}’s taste`;
+  const unlocked = TIER_LADDER.filter((t) => t.min <= tier.min);
+  const locked = TIER_LADDER.filter((t) => t.min > tier.min);
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Tiers">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 14px 16px" }}>
+        <span style={{ ...EYEBROW, fontSize: 10 }}>Unlocked</span>
+        {unlocked.map((t) => (
+          <TierRow
+            key={t.id}
+            label={t.label}
+            locked={false}
+            copy={t.min === 0 ? "Everyone starts here." : `${subject} reached this once ${t.min}+ people endorsed ${taste}.`}
+          />
+        ))}
+
+        {locked.length > 0 ? (
+          <>
+            <span style={{ ...EYEBROW, fontSize: 10, marginTop: 10 }}>Locked</span>
+            <p style={{ margin: "-2px 2px 2px", fontSize: 11.5, lineHeight: 1.5, color: "var(--color-nav-muted)" }}>
+              {own
+                ? "Somebody can endorse your taste once they've kept a track they got from you — a record of music that travelled, not a popularity count."
+                : `Somebody can endorse ${taste} once they've kept a track they got from ${name}.`}
+            </p>
+            {locked.map((t) => (
+              <TierRow key={t.id} label={t.label} locked copy={`Reached once ${t.min}+ people endorse ${taste}.`} />
+            ))}
+          </>
+        ) : (
+          <Empty
+            title="Every tier unlocked"
+            body={own ? "You've reached the top of the ladder." : `${name} has reached the top of the ladder.`}
+          />
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+function TierRow({ label, copy, locked }: { label: string; copy: string; locked: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 10,
+        padding: "10px 11px",
+        borderRadius: 12,
+        background: locked ? "rgba(255,255,255,.03)" : "rgba(255,255,255,.07)",
+        opacity: locked ? 0.55 : 1,
+      }}
+    >
+      <span
+        style={{
+          display: "flex",
+          flex: "none",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 26,
+          height: 26,
+          borderRadius: 8,
+          background: locked ? "rgba(255,255,255,.06)" : "var(--color-nav-action)",
+          color: locked ? "rgba(255,255,255,.4)" : "#0A0A0A",
+        }}
+      >
+        {locked ? <LockIcon size={12} /> : <StarIcon size={12} />}
+      </span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: locked ? "rgba(255,255,255,.55)" : "#fff" }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: "var(--color-nav-muted)", marginTop: 2 }}>
+          {copy}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Lifetime listening, worn as its own lime pill next to the tier chip rather
  * than folded into the grey meta sentence below the name — the same "earned
  * number deserves its own weight" treatment the tier chip already gets, on
  * the app's one accent colour instead of glass so it actually reads as a
  * highlight and not another line of muted text.
+ *
+ * Tapping it raises `ListenSheet` — the abbreviated number here is a summary,
+ * not the whole picture.
  */
-function ListenChip({ seconds }: { seconds: number }) {
+function ListenChip({ seconds, onClick }: { seconds: number; onClick: () => void }) {
   return (
-    <span
+    <button
+      className="nav-press"
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -570,7 +734,154 @@ function ListenChip({ seconds }: { seconds: number }) {
     >
       <HeadphonesIcon size={12} />
       {formatListened(seconds)} listened
-    </span>
+    </button>
+  );
+}
+
+/**
+ * What `ListenChip` opens: the lifetime total in full, plus the ranked top 3
+ * tracks and artists that number is made of — the same ranking `topTrack`/
+ * `topArtist` are drawn from, just not cut down to one each. Researched
+ * against how music apps close this loop (Spotify Wrapped, Last.fm's own
+ * profile): a hero number up top, then ranked lists with a play count next
+ * to each entry rather than a wall of unlabeled bars — the count is the one
+ * piece of context that makes "why is this #1" legible at a glance.
+ */
+function ListenSheet({
+  stats,
+  profileUserId,
+  open,
+  onClose,
+}: {
+  stats: ListeningStats;
+  profileUserId: number;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const hours = Math.floor(stats.totalListenedSeconds / 3600);
+  const minutes = Math.floor((stats.totalListenedSeconds % 3600) / 60);
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Listening stats">
+      <div style={{ display: "flex", flexDirection: "column", gap: 22, padding: "4px 14px 18px" }}>
+        <div style={{ textAlign: "center", padding: "8px 0 2px" }}>
+          <div
+            className="nav-numeral"
+            style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, color: "var(--color-nav-action)" }}
+          >
+            {hours > 0 ? (
+              <>
+                {hours}
+                <span style={{ fontSize: 20 }}>h</span> {minutes}
+                <span style={{ fontSize: 20 }}>m</span>
+              </>
+            ) : (
+              <>
+                {minutes}
+                <span style={{ fontSize: 20 }}>m</span>
+              </>
+            )}
+          </div>
+          <div style={{ ...EYEBROW, fontSize: 10, marginTop: 6 }}>Lifetime listening</div>
+        </div>
+
+        <StatRankSection
+          label="Top tracks"
+          items={stats.topTracks}
+          profileUserId={profileUserId}
+          renderTitle={(t) => t.title ?? "Untitled"}
+          renderSubtitle={(t) => t.artist}
+          coverOf={(t) => t.cover_track_id}
+        />
+
+        <StatRankSection
+          label="Top artists"
+          items={stats.topArtists}
+          profileUserId={profileUserId}
+          renderTitle={(a) => a.name}
+          renderSubtitle={() => null}
+          coverOf={(a) => a.cover_track_id}
+        />
+      </div>
+    </Sheet>
+  );
+}
+
+/** One ranked list inside `ListenSheet` — tracks and artists share the exact
+ *  same row shape, so the two sections are one generic component rather than
+ *  two near-identical copies. */
+function StatRankSection<T extends { plays: number }>({
+  label,
+  items,
+  profileUserId,
+  renderTitle,
+  renderSubtitle,
+  coverOf,
+}: {
+  label: string;
+  items: T[];
+  profileUserId: number;
+  renderTitle: (item: T) => string;
+  renderSubtitle: (item: T) => string | null;
+  coverOf: (item: T) => string | null;
+}) {
+  return (
+    <div>
+      <span style={{ ...EYEBROW, fontSize: 10 }}>{label}</span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+        {items.length === 0 ? (
+          <Empty title="Nothing recent" body="Keep listening and this will fill in." />
+        ) : (
+          items.map((item, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span
+                className="nav-numeral"
+                style={{ flex: "none", width: 14, fontSize: 13, textAlign: "center", color: "var(--color-nav-muted)" }}
+              >
+                {i + 1}
+              </span>
+              {coverOf(item) ? (
+                <CollectionArt
+                  name={renderTitle(item)}
+                  coverTrackId={coverOf(item)!}
+                  src={api.trackCoverUrl(coverOf(item)!, profileUserId)}
+                  size={38}
+                  radius={7}
+                />
+              ) : (
+                <span
+                  style={{
+                    display: "flex",
+                    flex: "none",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 38,
+                    height: 38,
+                    borderRadius: 7,
+                    background: "rgba(255,255,255,.08)",
+                  }}
+                >
+                  <StarIcon size={14} style={{ color: "var(--color-nav-muted)" }} />
+                </span>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="nav-clip" style={{ fontSize: 13, fontWeight: 600 }}>
+                  {renderTitle(item)}
+                </div>
+                {renderSubtitle(item) ? (
+                  <div className="nav-clip" style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}>
+                    {renderSubtitle(item)}
+                  </div>
+                ) : null}
+              </div>
+              <span style={{ flex: "none", fontSize: 11, color: "var(--color-nav-muted)" }}>
+                <Counted count={item.plays} one="play" many="plays" />
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -591,11 +902,13 @@ function FavoriteChip({
   label,
   value,
   coverTrackId,
+  profileUserId,
   divider,
 }: {
   label: string;
   value: string;
   coverTrackId?: string | null;
+  profileUserId: number;
   divider?: boolean;
 }) {
   return (
@@ -604,7 +917,10 @@ function FavoriteChip({
         display: "flex",
         alignItems: "center",
         gap: 7,
-        flex: "1 1 0",
+        // Hugs its own content instead of a forced 1 1 0 (even 50/50) split —
+        // that stretch was the gap the two chips sat behind. It can still
+        // shrink and truncate its value when the pair together overflows.
+        flex: "0 1 auto",
         minWidth: 0,
         paddingLeft: divider ? 10 : 0,
         marginLeft: divider ? 10 : 0,
@@ -612,7 +928,13 @@ function FavoriteChip({
       }}
     >
       {coverTrackId ? (
-        <CollectionArt name={value} coverTrackId={coverTrackId} size={22} radius={5} />
+        <CollectionArt
+          name={value}
+          coverTrackId={coverTrackId}
+          src={api.trackCoverUrl(coverTrackId, profileUserId)}
+          size={22}
+          radius={5}
+        />
       ) : (
         <span
           style={{
@@ -630,7 +952,9 @@ function FavoriteChip({
         </span>
       )}
       <span style={{ minWidth: 0 }}>
-        <span style={{ ...EYEBROW, display: "block", fontSize: 8 }}>{label}</span>
+        <span className="nav-clip" style={{ ...EYEBROW, display: "block", fontSize: 8 }}>
+          {label}
+        </span>
         <span
           className="nav-clip"
           style={{ display: "block", fontSize: 10.5, fontWeight: 600, marginTop: 0 }}

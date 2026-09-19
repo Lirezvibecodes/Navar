@@ -161,8 +161,16 @@ export function trackStreamUrl(id: string): string {
   return `${API_BASE}/api/tracks/${id}/stream?token=${encodeURIComponent(sessionToken ?? "")}`;
 }
 
-export function trackCoverUrl(id: string): string {
-  return `${API_BASE}/api/tracks/${id}/cover?token=${encodeURIComponent(sessionToken ?? "")}`;
+/**
+ * `profileOf`, when this cover is showing on somebody's profile, tells the
+ * server which profile asked for it — the server checks that claim itself
+ * against that person's own plays and background pick (see the backend's
+ * `isProfileShowcaseCover`), so a friend-only track can still show its
+ * picture next to text the profile already displays to anyone.
+ */
+export function trackCoverUrl(id: string, profileOf?: number): string {
+  const profileParam = profileOf != null ? `&profileOf=${profileOf}` : "";
+  return `${API_BASE}/api/tracks/${id}/cover?token=${encodeURIComponent(sessionToken ?? "")}${profileParam}`;
 }
 
 /**
