@@ -8,13 +8,17 @@ import {
   ActionButton,
   Counted,
   Empty,
+  EYEBROW,
   GhostButton,
   Screen,
   SectionHeader,
   Skeleton,
 } from "../components/ui";
 import {
+  BoltIcon,
   ChevronRightIcon,
+  HeadphonesIcon,
+  type IconProps,
   LibraryIcon,
   SettingsIcon,
   ShareIcon,
@@ -23,7 +27,7 @@ import {
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
-import { personName } from "../lib/format";
+import { formatListened, personName } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
 import type { BadgeTier, ListeningStats } from "../types";
 
@@ -187,7 +191,11 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       {isMe ? (
         <>
           <SectionHeader title="Listening" />
-          <StatsLine stats={profile?.stats ?? null} />
+          {hasStats(profile?.stats) ? (
+            <StatsGrid stats={profile!.stats!} />
+          ) : profile ? (
+            <Empty title="Nothing yet" body="Play something and your stats will land here." />
+          ) : null}
 
           <SectionHeader title="Your library" />
           <GhostButton
@@ -207,10 +215,10 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </>
       ) : (
         <>
-          {known && profile?.stats && profile.stats.totalPlays > 0 ? (
+          {known && hasStats(profile?.stats) ? (
             <>
               <SectionHeader title="Listening" />
-              <StatsLine stats={profile.stats} />
+              <StatsGrid stats={profile!.stats!} />
             </>
           ) : null}
 
@@ -337,33 +345,125 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
   );
 }
 
+/** Whether there is anything at all to draw a `StatsGrid` from. */
+function hasStats(stats: ListeningStats | null | undefined): stats is ListeningStats {
+  return !!stats && (stats.totalListenedSeconds > 0 || stats.totalPlays > 0);
+}
+
 /**
- * What this person has been into lately: how much, and the top of it.
+ * What this person has been into: how long, lately how much, and the top of
+ * it — as cards rather than a line of text, so a number people have actually
+ * earned reads like one.
  *
- * Nothing renders once there is nothing to say — a brand new account has zero
- * plays, and a stats line reading "0 plays" would be answering a question
- * nobody asked yet.
+ * The hero card is the lifetime total rather than the 90-day play count,
+ * because `plays` is retention-pruned (see `recordPlay`) and a longtime
+ * listener whose recent window happens to be quiet still deserves something
+ * to show for themselves. The recent-activity tiles only appear once there is
+ * a window to report on.
  */
-function StatsLine({ stats }: { stats: ListeningStats | null }) {
-  if (!stats || stats.totalPlays === 0) return null;
+function StatsGrid({ stats }: { stats: ListeningStats }) {
+  const hasRecent = stats.totalPlays > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingBottom: 14 }}>
+      {stats.totalListenedSeconds > 0 ? (
+        <div
+          className="nav-row-in"
+          style={
+            {
+              "--i": 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "14px 16px",
+              borderRadius: 18,
+              background: "linear-gradient(110deg, var(--color-nav-action), #89aeff)",
+              boxShadow: "0 10px 26px rgba(0,0,0,.4)",
+              color: "#0A0A0A",
+            } as React.CSSProperties
+          }
+        >
+          <span
+            style={{
+              display: "grid",
+              placeItems: "center",
+              flex: "none",
+              width: 42,
+              height: 42,
+              borderRadius: 21,
+              background: "rgba(10,10,10,.13)",
+            }}
+          >
+            <HeadphonesIcon size={19} />
+          </span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ ...EYEBROW, display: "block", color: "rgba(10,10,10,.58)" }}>
+              Lifetime listening
+            </span>
+            <span
+              className="nav-display"
+              style={{ display: "block", fontSize: 21, lineHeight: 1.2, marginTop: 2 }}
+            >
+              {formatListened(stats.totalListenedSeconds)}
+            </span>
+          </span>
+        </div>
+      ) : null}
+
+      {hasRecent ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: stats.topArtist ? "1fr 1fr" : "1fr",
+            gap: 10,
+          }}
+        >
+          <StatTile
+            icon={BoltIcon}
+            index={1}
+            value={<Counted count={stats.totalPlays} one="play" many="plays" />}
+            caption="last 90 days"
+          />
+          {stats.topArtist ? (
+            <StatTile icon={StarIcon} index={2} value={stats.topArtist} caption="most played" />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One glass tile in the `StatsGrid` — an icon, a headline value, a caption. */
+function StatTile({
+  icon: Icon,
+  index,
+  value,
+  caption,
+}: {
+  icon: (props: IconProps) => React.ReactNode;
+  index: number;
+  value: React.ReactNode;
+  caption: string;
+}) {
   return (
     <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 3,
-        padding: "0 2px 14px",
-        fontSize: 12.5,
-      }}
+      className="nav-glass nav-row-in"
+      style={
+        {
+          "--i": index,
+          display: "flex",
+          flexDirection: "column",
+          gap: 7,
+          padding: "12px 13px",
+          borderRadius: 16,
+          minWidth: 0,
+        } as React.CSSProperties
+      }
     >
-      <span>
-        <Counted count={stats.totalPlays} one="play" many="plays" /> logged
+      <Icon size={15} style={{ color: "var(--color-nav-action)" }} />
+      <span className="nav-clip" style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>
+        {value}
       </span>
-      {stats.topArtist ? (
-        <span style={{ color: "var(--color-nav-muted)" }}>
-          Most played: {stats.topArtist}
-        </span>
-      ) : null}
+      <span style={{ fontSize: 11, color: "var(--color-nav-muted)" }}>{caption}</span>
     </div>
   );
 }

@@ -2805,34 +2805,44 @@ export async function recordPlay(
 }
 
 /**
- * A rollup of the plays table, not a lifetime total — see {@link recordPlay}
- * for why `plays` itself only covers the retention window. Good enough for
- * "what have you been into lately"; a lifetime count belongs on
- * `total_listened_seconds` instead.
+ * `totalPlays`/`topTrack`/`topArtist` are a rollup of the `plays` table, not a
+ * lifetime total — see {@link recordPlay} for why `plays` itself only covers
+ * the retention window. `totalListenedSeconds` rides along from `users`
+ * instead, so a longtime listener whose recent window is quiet still has
+ * something to show for themselves.
  */
 export interface ListeningStats {
   totalPlays: number;
   topTrack: ActivityTrack | null;
   topArtist: string | null;
+  totalListenedSeconds: number;
 }
 
 export async function getListeningStats(telegramUserId: number): Promise<ListeningStats> {
-  const { rows } = await getPool().query<{
-    track_id: string;
-    title: string | null;
-    artist: string | null;
-    has_cover: boolean;
-    play_count: string;
-  }>(
-    `SELECT t.id AS track_id, t.title, t.artist, ${HAS_COVER_T} AS has_cover,
-       COUNT(*)::int AS play_count
-     FROM plays p
-     JOIN tracks t ON t.id = p.track_id
-     WHERE p.telegram_user_id = $1 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
-     GROUP BY t.id
-     ORDER BY play_count DESC`,
-    [telegramUserId]
-  );
+  const [{ rows }, totalListenedSeconds] = await Promise.all([
+    getPool().query<{
+      track_id: string;
+      title: string | null;
+      artist: string | null;
+      has_cover: boolean;
+      play_count: string;
+    }>(
+      `SELECT t.id AS track_id, t.title, t.artist, ${HAS_COVER_T} AS has_cover,
+         COUNT(*)::int AS play_count
+       FROM plays p
+       JOIN tracks t ON t.id = p.track_id
+       WHERE p.telegram_user_id = $1 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
+       GROUP BY t.id
+       ORDER BY play_count DESC`,
+      [telegramUserId]
+    ),
+    getPool()
+      .query<{ total_listened_seconds: string }>(
+        `SELECT total_listened_seconds FROM users WHERE telegram_user_id = $1`,
+        [telegramUserId]
+      )
+      .then((r) => Number(r.rows[0]?.total_listened_seconds ?? 0)),
+  ]);
 
   let totalPlays = 0;
   const artistCounts = new Map<string, number>();
@@ -2865,6 +2875,7 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
         }
       : null,
     topArtist,
+    totalListenedSeconds,
   };
 }
 

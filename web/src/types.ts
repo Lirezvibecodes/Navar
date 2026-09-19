@@ -202,6 +202,7 @@ export interface ListeningStats {
   totalPlays: number;
   topTrack: ActivityTrack | null;
   topArtist: string | null;
+  totalListenedSeconds: number;
 }
 
 /**

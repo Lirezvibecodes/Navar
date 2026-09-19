@@ -18,6 +18,13 @@ export function formatRemaining(
   return `-${formatDuration(Math.max(0, duration - position))}`;
 }
 
+/** A lifetime listening total as something a person reads: `3h 42m`, `42m`. */
+export function formatListened(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
 /** "20m", "3h", "2d" — activity rows and nothing longer-winded than that. */
 export function formatAge(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
