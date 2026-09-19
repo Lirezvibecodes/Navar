@@ -51,6 +51,15 @@ export interface Navigation {
   push: (view: View) => void;
   pop: () => void;
   openPlayer: () => void;
+  /**
+   * What kind of navigation just mounted the screen reading this. A screen
+   * that keeps its own choice of chip or sort order — beyond what `Screen`'s
+   * `scrollKey` already remembers for scroll position — uses this to tell a
+   * genuine return ("pop": show what was left) apart from an arrival that
+   * carries its own intent ("push": a pushed filter should win; "tab": a
+   * root tab reset to a clean start).
+   */
+  direction: "push" | "pop" | "tab";
 }
 
 /**
@@ -110,8 +119,8 @@ function Shell({ me }: { me: Me }) {
   }, []);
 
   const nav = useMemo<Navigation>(
-    () => ({ push, pop, openPlayer: () => setPlayerOpen(true) }),
-    [push, pop]
+    () => ({ push, pop, openPlayer: () => setPlayerOpen(true), direction }),
+    [push, pop, direction]
   );
 
   // Telegram's back button is the only back affordance. It pops the player

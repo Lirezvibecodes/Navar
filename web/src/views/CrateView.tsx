@@ -21,6 +21,7 @@ import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
+import { usePersistedState } from "../lib/persist";
 import { haptic } from "../telegram";
 import type { Track } from "../types";
 import type { CrateFilter } from "../view";
@@ -66,8 +67,16 @@ export function CrateView({
   const { current, isPlaying, playFrom, queueNext, queueLast } = usePlayer();
   const { errorToast, undoToast, setToastLift } = useToast();
 
-  const [tab, setTab] = useState<CrateFilter>(filter);
-  const [sort, setSort] = useState<Sort>("recent");
+  // `filter` carries real intent when it was just pushed — the Favourites
+  // shortcut, say — so it has to win on a push. Only a pop, coming back from
+  // a track opened while on some other chip, should restore the chip that
+  // was actually showing instead of snapping back to whatever was pushed.
+  const [tab, setTab] = usePersistedState<CrateFilter>(
+    "crate:tab",
+    filter,
+    nav.direction === "pop"
+  );
+  const [sort, setSort] = usePersistedState<Sort>("crate:sort", "recent");
   const [searching, setSearching] = useState(autoSearch);
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);

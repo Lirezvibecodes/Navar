@@ -22,6 +22,7 @@ import {
 import { useToast } from "../context/ToastContext";
 import { personName } from "../lib/format";
 import { haptic } from "../telegram";
+import { usePersistedState } from "../lib/persist";
 import type { View } from "../view";
 
 /**
@@ -38,7 +39,14 @@ import type { View } from "../view";
 export function LibraryView({ nav }: { nav: Navigation }) {
   const { tracks, playlists, followedPlaylists, loading, putPlaylist } = useLibrary();
   const { errorToast } = useToast();
-  const [tab, setTab] = useState<"all" | "albums" | "artists">("all");
+  // Remembered the same way the screen's own scroll position is (below):
+  // pushing an album from the Albums chip and pressing back should still show
+  // Albums, not reset to the first chip the way a plain useState would on the
+  // remount every navigation performs.
+  const [tab, setTab] = usePersistedState<"all" | "albums" | "artists">(
+    "library:tab",
+    "all"
+  );
   const [naming, setNaming] = useState(false);
 
   const albums = useMemo(() => albumsOf(tracks), [tracks]);
