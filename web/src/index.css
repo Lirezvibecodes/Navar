@@ -1031,7 +1031,11 @@ button {
   }
 }
 .nav-queue-confirm {
-  animation: nav-queue-confirm var(--dur-settle) var(--ease-settle);
+  /* forwards holds the keyframe's own 100% (opacity: 0) once it ends —
+     without it the element snaps back to its un-animated default (fully
+     opaque, since nothing sets opacity outside the animation) the instant
+     the pulse finishes, which read as the glow never actually turning off. */
+  animation: nav-queue-confirm var(--dur-settle) var(--ease-settle) forwards;
 }
 
 /* The play/pause glyph. Both glyphs are stacked and cross-faded rather than

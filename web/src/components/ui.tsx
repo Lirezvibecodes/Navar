@@ -1464,6 +1464,11 @@ export function SwipeQueueConfirm({ confirmTick }: { confirmTick: number }) {
         position: "absolute",
         inset: 0,
         borderRadius: "inherit",
+        // The animation's own 100% keyframe (plus fill-mode: forwards on the
+        // class) is what actually holds this at 0 once the pulse ends — this
+        // is just the same value as a base, so there's nothing to flash to
+        // before the animation has attached on the very first paint.
+        opacity: 0,
         background: "rgba(var(--color-nav-action-rgb), .18)",
         // Inset, not an outer halo — the row wrapper this sits inside clips
         // with overflow: hidden (that's what keeps the swipe reveal from
