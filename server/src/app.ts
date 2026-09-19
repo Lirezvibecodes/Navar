@@ -1,5 +1,6 @@
 import path from "path";
 import express, { Express } from "express";
+import compression from "compression";
 import type { Telegraf } from "telegraf";
 import { authRouter } from "./routes/auth";
 import { tracksRouter } from "./routes/tracks";
@@ -30,6 +31,12 @@ export function createApp(bot: Telegraf | null): Express {
   // client writes, and a limiter keyed on a value the caller chooses is not a
   // limiter. At 1 it reads the entry Render's proxy appended.
   app.set("trust proxy", 1);
+
+  // gzips every text response — the JS/CSS bundle, the JSON API — on the fly.
+  // compression's default filter already skips content-types that are already
+  // compressed (JPEGs, the audio/video streams), so this only ever does work
+  // where it pays off.
+  app.use(compression());
 
   // Render captures stdout as the service's only log stream, so without this
   // there is no record of what actually reached the server — which makes it
