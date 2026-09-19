@@ -7,11 +7,12 @@ import { NameSheet } from "../components/NameSheet";
 import { CoverPicker } from "./PlaylistView";
 import { AccentPicker } from "../context/ThemeContext";
 import { GhostButton, Screen, SectionHeader, Sheet, SheetDivider, Toggle } from "../components/ui";
-import { ImageIcon } from "../icons";
+import { EditIcon, ImageIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { haptic } from "../telegram";
+import { bannerLayerStyle, usePixelatedBanner } from "./ProfileView";
 
 /**
  * Everything about you that isn't for other people to look at: your name,
@@ -44,6 +45,12 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
     () => (me ? api.getProfile(me.id) : Promise.reject(new Error("Not signed in"))),
     ttl.profile
   );
+
+  // Same computed-default-with-override `ProfileView` shows on this same
+  // person's header, so the banner behind your picture here is the exact
+  // banner everyone else already sees on your page.
+  const bgTrackId = profile?.background_track_id ?? profile?.stats?.topTrack?.cover_track_id ?? null;
+  const bannerUrl = usePixelatedBanner(bgTrackId ? api.trackCoverUrl(bgTrackId) : null);
 
   const rename = async (typed: string) => {
     if (!me) return;
@@ -127,16 +134,22 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
 
   return (
     <Screen>
+      {/* The same header banner your profile shows everyone else, with the
+          picture and its own controls sitting on top of it rather than a
+          plain stack above a separate "change header" row below. */}
       <div
-        className="nav-rise"
+        className="nav-rise nav-profile-banner"
         style={{
+          margin: "calc(-1 * (var(--nav-topbar-h) + var(--nav-top-inset) + 8px)) -14px 0",
+          padding: "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 22px) 16px 20px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           gap: 9,
-          padding: "10px 0 4px",
         }}
       >
+        {bannerUrl ? <div aria-hidden style={bannerLayerStyle(bannerUrl)} /> : null}
+
         <button
           className="nav-press"
           aria-label="Change your photo"
@@ -145,7 +158,7 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
             haptic.tap();
             fileRef.current?.click();
           }}
-          style={{ borderRadius: "50%" }}
+          style={{ position: "relative", zIndex: 1, borderRadius: "50%" }}
         >
           <Avatar
             userId={me.id}
@@ -154,7 +167,29 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
             size={76}
             bust={avatarBust}
           />
+          {/* The avatar itself was the only "change your picture" affordance
+              — nothing on it said so. This badge is that hint. */}
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              right: -2,
+              bottom: -2,
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "var(--color-nav-action)",
+              color: "#0A0A0A",
+              border: "2.5px solid #030303",
+            }}
+          >
+            <EditIcon size={11} />
+          </span>
         </button>
+
         {/* Tapping the name is the whole rename affordance — a control saying
             so would be louder than the thing it controls. */}
         <button
@@ -163,16 +198,37 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
             haptic.tap();
             setRenaming(true);
           }}
-          style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.015em" }}
+          style={{ position: "relative", zIndex: 1, fontSize: 16, fontWeight: 600, letterSpacing: "-0.015em" }}
         >
           {me.handle}
         </button>
-      </div>
 
-      <SectionHeader title="Profile" />
-      <GhostButton icon={ImageIcon} onClick={() => setPickingBg(true)}>
-        Change header background
-      </GhostButton>
+        <button
+          className="nav-glass nav-press"
+          onClick={() => {
+            haptic.tap();
+            setPickingBg(true);
+          }}
+          style={{
+            position: "absolute",
+            zIndex: 1,
+            right: 14,
+            bottom: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 30,
+            padding: "0 12px 0 10px",
+            borderRadius: 15,
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "#fff",
+          }}
+        >
+          <ImageIcon size={13} />
+          Change header
+        </button>
+      </div>
 
       <SectionHeader title="Privacy" />
       <Toggle

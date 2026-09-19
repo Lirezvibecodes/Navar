@@ -580,6 +580,7 @@ body {
   --dur-focal: 460ms; /* the bar becoming the player */
   --dur-tab: 340ms; /* one tab opening while another closes */
   --dur-settle: 380ms; /* a dragged row easing back to rest after release */
+  --dur-remove: 360ms; /* a swiped-to-remove row leaving before the gap closes */
 }
 
 /* Every control gets the same press response. Telegram supplies the haptic;

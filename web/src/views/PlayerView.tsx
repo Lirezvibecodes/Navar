@@ -23,9 +23,7 @@ import {
   useSwipeRemove,
 } from "../components/ui";
 import {
-  ArrowUpIcon,
   ChevronDownIcon,
-  ChevronUpIcon,
   DotsIcon,
   DragIcon,
   HeartIcon,
@@ -1152,14 +1150,7 @@ function QueuePane({
                 onLift={() => setLifted(i)}
                 onMenu={() => onMenu(track)}
                 onPlay={() => onPlayUpNext(i)}
-                moves={{
-                  isFirst: i === 0,
-                  isLast: i === upNext.length - 1,
-                  toTop: () => onMove(i, 0),
-                  up: () => onMove(i, i - 1),
-                  down: () => onMove(i, i + 1),
-                  remove: () => onRemove(i),
-                }}
+                moves={{ remove: () => onRemove(i) }}
               />
             ))}
           </div>
@@ -1277,10 +1268,15 @@ function QueueRow({
   onQueueNext?: () => void;
   onQueueLast?: () => void;
 }) {
-  const [movesOpen, setMovesOpen] = useState(false);
   const canSwipeRemove = !!moves;
   const canSwipeQueue = !moves && !!(onQueueNext || onQueueLast);
-  const swipeRemove = useSwipeRemove(() => moves?.remove());
+  // Swiping past the threshold and releasing doesn't remove the track on the
+  // spot — it starts this row sliding out, and only once that's finished
+  // (see the transitionend below) does the track actually leave the queue.
+  // An instant removal read as the row just vanishing; nothing told you what
+  // had happened to it.
+  const [exiting, setExiting] = useState(false);
+  const swipeRemove = useSwipeRemove(() => setExiting(true));
   const swipeQueue = useSwipeQueue(
     () => (onQueueLast ?? onQueueNext)?.(),
     () => (onQueueNext ?? onQueueLast)?.()
@@ -1339,6 +1335,11 @@ function QueueRow({
 
       <div
         ref={canSwipeRemove ? swipeRemove.ref : canSwipeQueue ? swipeQueue.ref : undefined}
+        onTransitionEnd={(e) => {
+          // Only the transform leaving is "the row is gone" — opacity ends
+          // around the same time and would otherwise fire this a second time.
+          if (exiting && e.propertyName === "transform") moves?.remove();
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -1346,15 +1347,19 @@ function QueueRow({
           minHeight: 52,
           borderRadius: 10,
           background: lifted ? "rgba(255,255,255,.07)" : undefined,
-          transform: lifted
-            ? "scale(1.02)"
-            : canSwipeRemove && swipeRemove.dragX
-              ? `translateX(${swipeRemove.dragX}px)`
-              : canSwipeQueue && swipeQueue.dragX
-                ? `translateX(${swipeQueue.dragX}px)`
-                : undefined,
-          transition:
-            (canSwipeRemove && swipeRemove.dragging()) || (canSwipeQueue && swipeQueue.dragging())
+          opacity: exiting ? 0 : 1,
+          transform: exiting
+            ? "translateX(-100%)"
+            : lifted
+              ? "scale(1.02)"
+              : canSwipeRemove && swipeRemove.dragX
+                ? `translateX(${swipeRemove.dragX}px)`
+                : canSwipeQueue && swipeQueue.dragX
+                  ? `translateX(${swipeQueue.dragX}px)`
+                  : undefined,
+          transition: exiting
+            ? "transform var(--dur-remove) var(--ease-in), opacity var(--dur-remove) var(--ease-in)"
+            : (canSwipeRemove && swipeRemove.dragging()) || (canSwipeQueue && swipeQueue.dragging())
               ? "background-color var(--dur-state) var(--ease)"
               // Releasing eases back to rest over --dur-settle instead of
               // snapping — same reasoning as TrackRow's own swipe.
@@ -1365,13 +1370,12 @@ function QueueRow({
       {moves ? (
         <button
           className="nav-press"
-          aria-label="Reorder — long press to lift, or use the menu"
+          aria-label="Reorder — long press to lift"
           data-own-drag
           onPointerDown={(e) => {
             e.stopPropagation();
             onLift?.();
           }}
-          onClick={() => setMovesOpen(true)}
           style={{
             width: 28,
             height: 44,
@@ -1470,61 +1474,12 @@ function QueueRow({
         <DotsIcon size={15} />
       </button>
       </div>
-
-      {moves ? (
-        <Sheet
-          open={movesOpen}
-          onClose={() => setMovesOpen(false)}
-          title={trackTitle(track)}
-        >
-          <SheetItem
-            icon={ArrowUpIcon}
-            label="Move to top"
-            disabled={moves.isFirst}
-            onClick={() => {
-              moves.toTop();
-              setMovesOpen(false);
-            }}
-          />
-          <SheetItem
-            icon={ChevronUpIcon}
-            label="Move up"
-            disabled={moves.isFirst}
-            onClick={() => {
-              moves.up();
-              setMovesOpen(false);
-            }}
-          />
-          <SheetItem
-            icon={ChevronDownIcon}
-            label="Move down"
-            disabled={moves.isLast}
-            onClick={() => {
-              moves.down();
-              setMovesOpen(false);
-            }}
-          />
-          <SheetItem
-            icon={TrashIcon}
-            label="Remove from queue"
-            destructive
-            onClick={() => {
-              moves.remove();
-              setMovesOpen(false);
-            }}
-          />
-        </Sheet>
-      ) : null}
     </div>
   );
 }
 
-/** What a queued row can do to its own position. */
+/** What a queued row can do to its own position — just leaving it now, since
+ *  reordering happens by long-press-drag, not through a menu. */
 interface QueueMoves {
-  isFirst: boolean;
-  isLast: boolean;
-  toTop: () => void;
-  up: () => void;
-  down: () => void;
   remove: () => void;
 }

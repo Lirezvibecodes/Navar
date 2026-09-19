@@ -1136,12 +1136,13 @@ export function useLongPress(onLongPress: () => void, ms = 420) {
  * open as the row has actually been dragged: the same "this button tracks
  * your thumb, then the next one starts" reveal iOS's own swipe actions use,
  * rather than a label that flips at an invisible line partway through the
- * drag. See SwipeQueueReveal.
+ * drag. "Play next" is the shorter swipe — it's the one you reach for more
+ * often — and "Add to queue" is the further one. See SwipeQueueReveal.
  */
-const QUEUE_CHIP_PX = 108;
 const NEXT_CHIP_PX = 96;
-const SWIPE_QUEUE_PX = QUEUE_CHIP_PX;
-const SWIPE_NEXT_PX = QUEUE_CHIP_PX + NEXT_CHIP_PX;
+const QUEUE_CHIP_PX = 108;
+const SWIPE_NEXT_PX = NEXT_CHIP_PX;
+const SWIPE_QUEUE_PX = NEXT_CHIP_PX + QUEUE_CHIP_PX;
 
 export type SwipeQueueStage = "none" | "queue" | "next";
 
@@ -1183,8 +1184,8 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
   actions.current = { onQueueLast, onQueueNext };
 
   const stageFor = (dx: number): SwipeQueueStage => {
-    if (dx >= SWIPE_NEXT_PX) return "next";
     if (dx >= SWIPE_QUEUE_PX) return "queue";
+    if (dx >= SWIPE_NEXT_PX) return "next";
     return "none";
   };
 
@@ -1236,7 +1237,7 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
       // The only preventDefault that actually stops the native scroll — see
       // the doc comment above.
       e.preventDefault();
-      const clamped = Math.max(0, Math.min(dx, SWIPE_NEXT_PX + 24));
+      const clamped = Math.max(0, Math.min(dx, SWIPE_QUEUE_PX + 24));
       const next = stageFor(clamped);
       if (next !== stage.current) {
         stage.current = next;
@@ -1278,16 +1279,20 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
  * The reveal behind a right-swipe-to-queue row — see useSwipeQueue. Sits
  * behind the row and only shows through the gap the swipe opens up.
  *
- * Two chips, "Add to queue" then "Play next", each exactly as wide as the
- * drag distance its own threshold represents: dragging opens "Add to queue"
- * first, and only once that chip has reached its own full width does
- * continuing the drag start opening "Play next" next to it — so the two
- * actions read as stops along one gesture, with their own width telling you
- * how much further there is to go, rather than a label that flips once at an
- * invisible line. Both chips use the app's own accent colour (the user's
- * chosen theme, not a second colour invented for this) and glow more of it
- * the further open they are, brightest right as each reaches its own full
- * width.
+ * Two chips, "Play next" then "Add to queue", each exactly as wide as the
+ * drag distance its own threshold represents: dragging opens "Play next"
+ * first (the shorter, more-reached-for swipe), and only once that chip has
+ * reached its own full width does continuing the drag start opening "Add to
+ * queue" next to it — so the two actions read as stops along one gesture,
+ * with their own width telling you how much further there is to go, rather
+ * than a label that flips once at an invisible line. Both chips use the
+ * app's own accent colour (the user's chosen theme, not a second colour
+ * invented for this) and glow more of it the further open they are,
+ * brightest right as each reaches its own full width.
+ *
+ * Once the drag pushes past "Play next" into "Add to queue" territory,
+ * "Play next" is no longer what releasing will do — so it dims steeply
+ * rather than staying lit beside the chip that's actually armed now.
  *
  * `position: absolute` and non-interactive on purpose: this sits behind a
  * non-positioned, in-flow row, and a positioned box paints — and hit-tests —
@@ -1304,7 +1309,8 @@ export function SwipeQueueReveal({
 }) {
   const settle = dragging
     ? undefined
-    : "width var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease), box-shadow var(--dur-settle) var(--ease)";
+    : "width var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease), box-shadow var(--dur-settle) var(--ease), opacity var(--dur-settle) var(--ease)";
+  const queueProgress = Math.max(0, Math.min((dragX - NEXT_CHIP_PX) / QUEUE_CHIP_PX, 1));
   return (
     <div
       aria-hidden
@@ -1317,17 +1323,20 @@ export function SwipeQueueReveal({
       }}
     >
       <SwipeChip
-        icon={QueueAddIcon}
-        label="Add to queue"
-        width={Math.max(0, Math.min(dragX, QUEUE_CHIP_PX))}
-        progress={Math.max(0, Math.min(dragX / QUEUE_CHIP_PX, 1))}
+        icon={PlayNextIcon}
+        label="Play next"
+        width={Math.max(0, Math.min(dragX, NEXT_CHIP_PX))}
+        progress={Math.max(0, Math.min(dragX / NEXT_CHIP_PX, 1))}
+        // Fades hard once "Add to queue" starts taking over the gesture —
+        // by the time that chip is fully open, this one is barely there.
+        opacity={1 - 0.85 * queueProgress}
         transition={settle}
       />
       <SwipeChip
-        icon={PlayNextIcon}
-        label="Play next"
-        width={Math.max(0, Math.min(dragX - QUEUE_CHIP_PX, NEXT_CHIP_PX))}
-        progress={Math.max(0, Math.min((dragX - QUEUE_CHIP_PX) / NEXT_CHIP_PX, 1))}
+        icon={QueueAddIcon}
+        label="Add to queue"
+        width={Math.max(0, Math.min(dragX - NEXT_CHIP_PX, QUEUE_CHIP_PX))}
+        progress={queueProgress}
         transition={settle}
       />
     </div>
@@ -1339,6 +1348,7 @@ function SwipeChip({
   label,
   width,
   progress,
+  opacity = 1,
   transition,
 }: {
   icon: React.ComponentType<IconProps>;
@@ -1346,11 +1356,17 @@ function SwipeChip({
   width: number;
   /** 0 at this chip's own left edge, 1 once it is fully open — drives the glow. */
   progress: number;
+  opacity?: number;
   transition: string | undefined;
 }) {
   return (
     <div
       style={{
+        // border-box, not the default content-box: at width 0 this chip must
+        // occupy zero space. With content-box its own paddingLeft still added
+        // 14px of visible, coloured box outside that "zero" width — a sliver
+        // stuck to the left edge of every queueable row, even fully at rest.
+        boxSizing: "border-box",
         width,
         flex: "none",
         height: "100%",
@@ -1363,6 +1379,7 @@ function SwipeChip({
         fontWeight: 600,
         whiteSpace: "nowrap",
         color: "#0A0A0A",
+        opacity,
         background: `rgba(var(--color-nav-action-rgb), ${(0.4 + 0.55 * progress).toFixed(2)})`,
         boxShadow: `0 0 ${Math.round(18 * progress)}px rgba(var(--color-nav-action-rgb), ${(0.6 * progress).toFixed(2)})`,
         transition,

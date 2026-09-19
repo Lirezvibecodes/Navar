@@ -28,7 +28,7 @@ import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { formatListened, personName } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
-import { haptic } from "../telegram";
+import { confirmAction, haptic } from "../telegram";
 import type { BadgeTier, Person, Playlist } from "../types";
 
 /** The banner's own pixelated wash, drawn at its own modest size rather than
@@ -42,7 +42,7 @@ const BANNER_H = 220;
  * cover changes. There is exactly one owner and one viewer of it at a time,
  * so nothing here needs to persist past the component that asked for it.
  */
-function usePixelatedBanner(coverUrl: string | null): string | null {
+export function usePixelatedBanner(coverUrl: string | null): string | null {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -76,6 +76,31 @@ function usePixelatedBanner(coverUrl: string | null): string | null {
 }
 
 /**
+ * The dark scrim + pixelated cover behind a profile header — `ProfileView`
+ * and the Settings screen that edits the same background both paint one of
+ * these into an absolutely-positioned, `aria-hidden` layer.
+ *
+ * The page underneath is never a flat colour — `.nav-screen-bg` is a noise
+ * texture under two tinted radial gradients — so a scrim that ends on an
+ * opaque, colour-matched pixel still shows a seam the moment the real
+ * background differs from the guess by even a shade. `.nav-profile-banner`'s
+ * own CSS fallback (shown with no chosen cover) never had this problem
+ * because it fades to fully transparent instead of to a matched colour; this
+ * masks the whole layer — image and scrim together — the same way, so
+ * whatever is actually behind it shows through on its own terms.
+ */
+export function bannerLayerStyle(bannerUrl: string): React.CSSProperties {
+  const fade = "linear-gradient(180deg, #000 0%, #000 78%, transparent 100%)";
+  return {
+    position: "absolute",
+    inset: 0,
+    background: `linear-gradient(180deg, rgba(3,3,3,.55), rgba(3,3,3,.74) 55%, rgba(3,3,3,.9) 82%, rgba(3,3,3,.96)), url(${bannerUrl}) center/cover no-repeat`,
+    WebkitMaskImage: fade,
+    maskImage: fade,
+  };
+}
+
+/**
  * One person's page — yours or somebody else's.
  *
  * There is one screen rather than two because the difference between them is
@@ -106,6 +131,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const [friendsOpen, setFriendsOpen] = useState(false);
 
   const unfriend = async () => {
+    if (!(await confirmAction(`Remove ${name} from your friends?`))) return;
     try {
       await api.removeFriend(userId);
       // Their page, your friend list and the feed all said you were connected.
@@ -187,21 +213,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             flatter and stronger than the story card's own bottom-third
             gradient, because a name and two favourites sit across this
             banner's full height and all of it has to stay legible. */}
-        {bannerUrl ? (
-          <div
-            aria-hidden
-            style={{
-              position: "absolute",
-              inset: 0,
-              // Reaches fully-opaque rgba(3,3,3,1) by the bottom edge — the
-              // exact rgb() of `.nav-screen-bg`'s own base color — so the
-              // banner's last pixel and the page's first pixel underneath it
-              // are colorimetrically identical. A blend instead of a cut,
-              // with no new color introduced.
-              background: `linear-gradient(180deg, rgba(3,3,3,.6), rgba(3,3,3,.75) 55%, rgba(3,3,3,1)), url(${bannerUrl}) center/cover no-repeat`,
-            }}
-          />
-        ) : null}
+        {bannerUrl ? <div aria-hidden style={bannerLayerStyle(bannerUrl)} /> : null}
 
         <div style={{ position: "relative", zIndex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -217,7 +229,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   className="nav-clip nav-display"
                   style={{
                     display: "block",
-                    flex: "1 1 auto",
+                    flex: "0 1 auto",
                     minWidth: 0,
                     fontSize: 25,
                     lineHeight: 1.15,
@@ -244,32 +256,31 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   <ListenChip seconds={stats.totalListenedSeconds} />
                 ) : null}
               </div>
+
+              {/* Favourite track and favourite artist, directly under the
+                  friends/listen row and sharing its left edge — the same
+                  column, one row down, rather than a separate hero-sized
+                  block of their own. */}
+              {stats?.topTrack || stats?.topArtist ? (
+                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                  {stats.topTrack ? (
+                    <FavoriteChip
+                      label="Favourite track"
+                      value={stats.topTrack.title ?? "Untitled"}
+                      coverTrackId={stats.topTrack.cover_track_id}
+                    />
+                  ) : null}
+                  {stats.topArtist ? (
+                    <FavoriteChip
+                      label="Favourite artist"
+                      value={stats.topArtist.name}
+                      coverTrackId={stats.topArtist.cover_track_id}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
-
-          {/* Favourite track and favourite artist, folded into the header
-              itself now rather than living in a stats grid below the fold —
-              the one thing worth a hero spot doesn't need a whole section to
-              say it. */}
-          {stats?.topTrack || stats?.topArtist ? (
-            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-              {stats.topTrack ? (
-                <FavoriteChip
-                  label="Favourite track"
-                  value={stats.topTrack.title ?? "Untitled"}
-                  coverTrackId={stats.topTrack.cover_track_id}
-                />
-              ) : null}
-              {stats.topArtist ? (
-                <FavoriteChip
-                  label="Favourite artist"
-                  value={stats.topArtist.name}
-                  coverTrackId={stats.topArtist.cover_track_id}
-                  round
-                />
-              ) : null}
-            </div>
-          ) : null}
 
           {!isMe ? (
             <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
@@ -422,16 +433,16 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
         display: "inline-flex",
         flexShrink: 0,
         alignItems: "center",
-        gap: 5,
-        height: 24,
-        padding: "0 11px",
-        borderRadius: 12,
-        fontSize: 11,
+        gap: 3,
+        height: 18,
+        padding: "0 7px",
+        borderRadius: 9,
+        fontSize: 9,
         fontWeight: 600,
         color: "#fff",
       }}
     >
-      <StarIcon size={11} />
+      <StarIcon size={9} />
       {tier.label}
     </span>
   );
@@ -563,22 +574,18 @@ function ListenChip({ seconds }: { seconds: number }) {
 /**
  * A favourite, worn as a small glass pill inside the banner itself — cover
  * art (or a star, when even the artist's own tracks carry none) beside a
- * small-caps label and the value. This is what the stats grid's most-played
- * tiles used to say below the fold; folding them into the header is what the
- * reference asked for directly.
+ * small-caps label and the value. Both the track and the artist get the same
+ * square cover, like every other cover art in the app — an artist has no
+ * more claim to a round portrait here than a playlist or an album does.
  */
 function FavoriteChip({
   label,
   value,
   coverTrackId,
-  round,
 }: {
   label: string;
   value: string;
   coverTrackId?: string | null;
-  /** Artists get a round portrait, like the app's own avatars; a track's
-   *  cover stays square, like every other cover art in the app. */
-  round?: boolean;
 }) {
   return (
     <span
@@ -586,15 +593,15 @@ function FavoriteChip({
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 8,
-        padding: "6px 12px 6px 6px",
-        borderRadius: 14,
+        gap: 6,
+        padding: "3px 9px 3px 3px",
+        borderRadius: 11,
         maxWidth: "100%",
         minWidth: 0,
       }}
     >
       {coverTrackId ? (
-        <CollectionArt name={value} coverTrackId={coverTrackId} size={28} radius={7} round={round} />
+        <CollectionArt name={value} coverTrackId={coverTrackId} size={20} radius={5} />
       ) : (
         <span
           style={{
@@ -602,20 +609,20 @@ function FavoriteChip({
             flex: "none",
             alignItems: "center",
             justifyContent: "center",
-            width: 28,
-            height: 28,
-            borderRadius: round ? "50%" : 7,
+            width: 20,
+            height: 20,
+            borderRadius: 5,
             background: "rgba(255,255,255,.12)",
           }}
         >
-          <StarIcon size={13} style={{ color: "var(--color-nav-action)" }} />
+          <StarIcon size={10} style={{ color: "var(--color-nav-action)" }} />
         </span>
       )}
       <span style={{ minWidth: 0 }}>
-        <span style={{ ...EYEBROW, display: "block", fontSize: 9.5 }}>{label}</span>
+        <span style={{ ...EYEBROW, display: "block", fontSize: 8 }}>{label}</span>
         <span
           className="nav-clip"
-          style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginTop: 1, maxWidth: 140 }}
+          style={{ display: "block", fontSize: 10.5, fontWeight: 600, marginTop: 0, maxWidth: 100 }}
         >
           {value}
         </span>

@@ -66,6 +66,9 @@ export interface TelegramWebApp {
   enableClosingConfirmation: () => void;
   disableClosingConfirmation: () => void;
 
+  /** Bot API 6.2+. Native "are you sure?" popup — no sheet to build. */
+  showConfirm?: (message: string, callback?: (confirmed: boolean) => void) => void;
+
   BackButton: {
     isVisible: boolean;
     show: () => void;
@@ -265,6 +268,32 @@ export function setClosingConfirmation(enabled: boolean): void {
   call("6.2", (t) =>
     enabled ? t.enableClosingConfirmation() : t.disableClosingConfirmation()
   );
+}
+
+// --- Confirm ------------------------------------------------------------
+
+/**
+ * "Are you sure?" for the handful of actions in the app that cannot be undone
+ * with a toast — Telegram's own native popup rather than a `Sheet` built to
+ * ask one yes/no question. Resolves `false` outside Telegram, or on a client
+ * too old for it, so a caller always gets an answer rather than a hang; on
+ * the web (no Telegram host at all) it falls back to `window.confirm`.
+ */
+export function confirmAction(message: string): Promise<boolean> {
+  const tg = getTelegramWebApp();
+  const showConfirm = tg?.showConfirm;
+  if (!tg || !showConfirm) return Promise.resolve(window.confirm(message));
+  return new Promise((resolve) => {
+    try {
+      if (!tg.isVersionAtLeast("6.2")) {
+        resolve(window.confirm(message));
+        return;
+      }
+      showConfirm(message, (confirmed) => resolve(confirmed));
+    } catch {
+      resolve(window.confirm(message));
+    }
+  });
 }
 
 // --- Back button ------------------------------------------------------------
