@@ -113,13 +113,14 @@ interface PlayerApi {
   clearQueue: () => void;
 
   /**
-   * Jump straight to a track sitting further down `upNext`. Whatever was
-   * ahead of it is treated as skipped, not as something to circle back to —
-   * the same way tapping track 5 in a playlist doesn't leave 1–4 waiting.
+   * Jump straight to a track sitting further down `upNext`. Only that track
+   * leaves the queue — everything else stays put in its own order, the same
+   * way tapping a track in Spotify's or Apple Music's queue doesn't clear out
+   * whatever else was waiting.
    */
   playFromUpNext: (index: number) => void;
   /** Same, for a track further down `contextNext`. */
-  playFromContextNext: (index: number) => void;
+  playFromContextNext: (track: Track) => void;
 
   setShuffle: (on: boolean) => void;
   cycleRepeat: () => void;
@@ -167,10 +168,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [sleepAt, setSleepAt] = useState<number | null>(null);
 
-  const contextNext = useMemo(
-    () => (cursor >= 0 ? order.slice(cursor + 1) : []),
-    [order, cursor]
-  );
+  // A track already sitting in the explicit queue doesn't also show up here —
+  // it would otherwise appear twice, once as something you queued and once as
+  // "coming up anyway", which reads as the app not knowing its own queue.
+  const contextNext = useMemo(() => {
+    const rest = cursor >= 0 ? order.slice(cursor + 1) : [];
+    if (upNext.length === 0) return rest;
+    const queued = new Set(upNext.map((t) => t.id));
+    return rest.filter((t) => !queued.has(t.id));
+  }, [order, cursor, upNext]);
 
   // --- Loading a track ------------------------------------------------------
 
@@ -360,17 +366,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     (index: number) => {
       const track = upNext[index];
       if (!track) return;
-      setUpNext(upNext.slice(index + 1));
+      // Only the tapped track leaves — everything else waiting in the queue
+      // stays right where it was.
+      setUpNext(upNext.filter((_, i) => i !== index));
       load(track, true);
     },
     [upNext, load]
   );
 
   const playFromContextNext = useCallback(
-    (index: number) => {
-      const absolute = cursor + 1 + index;
-      const track = order[absolute];
-      if (!track) return;
+    (track: Track) => {
+      // contextNext is order.slice(cursor + 1) with anything already in
+      // upNext filtered out, so its own index no longer lines up with a
+      // position in order — find the track itself, past the cursor.
+      const absolute = order.findIndex((t, i) => i > cursor && t.id === track.id);
+      if (absolute === -1) return;
       setCursor(absolute);
       load(track, true);
     },
