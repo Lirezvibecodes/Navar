@@ -36,6 +36,10 @@ export function CollectionView({
     );
     if (kind === "artist") {
       match.sort((a, b) => trackTitle(a).localeCompare(trackTitle(b)));
+    } else {
+      // `tracks` comes back newest-first (see LibraryContext); an album needs
+      // the opposite so it reads start-to-end in the order it was built.
+      match.sort((a, b) => a.created_at.localeCompare(b.created_at));
     }
     return match;
   }, [tracks, kind, name]);

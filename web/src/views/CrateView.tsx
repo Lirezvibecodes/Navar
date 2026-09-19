@@ -63,7 +63,7 @@ export function CrateView({
 }) {
   const { tracks, loading, owns, setFavorite, dropTracks, putTrack, playlists } =
     useLibrary();
-  const { current, isPlaying, playFrom, setShuffle, queueNext, queueLast } = usePlayer();
+  const { current, isPlaying, playFrom, queueNext, queueLast } = usePlayer();
   const { errorToast, undoToast, setToastLift } = useToast();
 
   const [tab, setTab] = useState<CrateFilter>(filter);
@@ -178,7 +178,7 @@ export function CrateView({
   return (
     <>
       <Screen>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
+        <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
           <ChipRow>
             <Chip
               label="All"
@@ -204,7 +204,7 @@ export function CrateView({
         </div>
 
         {searching ? (
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <TextField
               ref={searchRef}
               value={query}
@@ -224,7 +224,7 @@ export function CrateView({
             />
           </div>
         ) : (
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <ActionButton
               onClick={() => rows.length > 0 && playFrom(source)}
               disabled={rows.length === 0}
@@ -237,8 +237,7 @@ export function CrateView({
               width={44}
               onClick={() => {
                 if (rows.length === 0) return;
-                setShuffle(true);
-                playFrom(source);
+                playFrom(source, undefined, true);
               }}
             />
             <GhostButton

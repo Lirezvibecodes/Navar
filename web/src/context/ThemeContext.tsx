@@ -89,6 +89,7 @@ export function AccentPicker({
               boxShadow: active
                 ? "0 0 0 2px var(--color-nav-bg), 0 0 0 4px rgba(255,255,255,.7)"
                 : "0 0 0 2px var(--color-nav-bg), 0 0 0 3px rgba(255,255,255,.12)",
+              transition: "box-shadow var(--dur-tap) var(--ease-in)",
             }}
           />
         );

@@ -252,6 +252,11 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         />
       </div>
 
+      <div
+        key={pane}
+        className="nav-fade"
+        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
       {pane === "player" ? (
         <div
           className="nav-scroll"
@@ -520,6 +525,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           onMenu={(track) => setMenu({ track })}
         />
       )}
+      </div>
 
       <Segments
         pane={pane}
@@ -1117,6 +1123,7 @@ function QueuePane({
               <QueueRow
                 key={`${track.id}-${i}`}
                 track={track}
+                index={i}
                 lifted={lifted === i}
                 onLift={() => setLifted(i)}
                 onMenu={() => onMenu(track)}
@@ -1141,6 +1148,7 @@ function QueuePane({
             <QueueRow
               key={`${track.id}-ctx-${i}`}
               track={track}
+              index={i}
               onMenu={() => onMenu(track)}
             />
           ))}
@@ -1213,6 +1221,7 @@ function QueueRow({
   onLift,
   onMenu,
   moves,
+  index,
 }: {
   track: Track;
   playing?: boolean;
@@ -1221,6 +1230,9 @@ function QueueRow({
   onMenu: () => void;
   /** The reorder actions, when this row is one that can be reordered. */
   moves?: QueueMoves;
+  /** Stagger position for the entrance animation; omitted for the single
+   *  "Now playing" row, which has nothing to stagger against. */
+  index?: number;
 }) {
   const [movesOpen, setMovesOpen] = useState(false);
   const canSwipe = !!moves;
@@ -1228,11 +1240,15 @@ function QueueRow({
 
   return (
     <div
-      style={{
-        position: "relative",
-        borderRadius: 10,
-        overflow: canSwipe ? "hidden" : undefined,
-      }}
+      className={index == null ? undefined : "nav-row-in"}
+      style={
+        {
+          "--i": index,
+          position: "relative",
+          borderRadius: 10,
+          overflow: canSwipe ? "hidden" : undefined,
+        } as React.CSSProperties
+      }
     >
       {canSwipe ? (
         // Sits behind the row and only shows through the gap the leftward

@@ -3344,7 +3344,7 @@ export interface UserProfile {
    * `listFriends` already keeps to a person and their own friends only.
    */
   friend_count: number | null;
-  /** Their listening, on the same friends-or-self rule as `friend_count`. */
+  /** Their listening. Visible to anyone who can open the profile. */
   stats: ListeningStats | null;
   /** Who the viewer and this person both know, when they are not yet friends. */
   mutual_friends: PersonSummary[];
@@ -3377,12 +3377,18 @@ export async function getUserProfile(
   const endorsed = Boolean(row.endorsed);
   const state = row.state as FriendshipState;
   const isSelf = viewerTelegramId === targetTelegramId;
-  const canSeeStats = isSelf || state === "friends";
+  // Friend count stays a friends-or-self secret — who someone knows is the
+  // kind of thing a stranger browsing a profile shouldn't get for free.
+  // Listening stats aren't: they're what a profile is *for*, and gating them
+  // behind a friend request just left every stranger's profile looking empty.
+  const canSeeFriendCount = isSelf || state === "friends";
 
   const [playlists, friendCount, stats, mutualFriends] = await Promise.all([
     listPlaylistsVisibleTo(targetTelegramId, viewerTelegramId),
-    canSeeStats ? listFriends(targetTelegramId).then((f) => f.length) : Promise.resolve(null),
-    canSeeStats ? getListeningStats(targetTelegramId) : Promise.resolve(null),
+    canSeeFriendCount
+      ? listFriends(targetTelegramId).then((f) => f.length)
+      : Promise.resolve(null),
+    getListeningStats(targetTelegramId),
     !isSelf && state !== "friends"
       ? mutualFriendsOf(viewerTelegramId, targetTelegramId, MUTUAL_FRIENDS_ON_PROFILE_LIMIT)
       : Promise.resolve([]),

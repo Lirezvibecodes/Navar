@@ -3,6 +3,7 @@ import { HomeIcon, LibraryIcon, SocialIcon } from "../icons";
 import type { IconProps } from "../icons";
 import type { RootTab } from "../view";
 import { haptic } from "../telegram";
+import { setTabOrigin } from "../lib/tabOrigin";
 
 /**
  * Home · Library · Social.
@@ -85,8 +86,9 @@ export function BottomNav({
             aria-current={on ? "page" : undefined}
             className="nav-press nav-tab"
             style={{ pointerEvents: "auto" }}
-            onClick={() => {
+            onClick={(e) => {
               haptic.select();
+              setTabOrigin(e.currentTarget);
               onSelect(id);
             }}
           >

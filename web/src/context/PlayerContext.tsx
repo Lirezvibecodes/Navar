@@ -91,8 +91,15 @@ interface PlayerApi {
   /** Epoch ms at which playback stops, or null. */
   sleepAt: number | null;
 
-  /** Start a source at one of its tracks. Replaces the context, keeps upNext. */
-  playFrom: (source: PlaybackContextSource, track?: Track) => void;
+  /**
+   * Start a source at one of its tracks. Replaces the context, keeps upNext.
+   *
+   * `shuffleOverride` decides the order this call plays in *and* becomes the
+   * new shuffle state — pass it when the shuffle toggle and the play action
+   * happen together (the Shuffle button), so the order is never built from a
+   * `shuffle` flag that hasn't re-rendered yet.
+   */
+  playFrom: (source: PlaybackContextSource, track?: Track, shuffleOverride?: boolean) => void;
   toggle: () => void;
   next: () => void;
   prev: () => void;
@@ -262,8 +269,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // --- Public actions -------------------------------------------------------
 
   const playFrom = useCallback(
-    (nextSource: PlaybackContextSource, track?: Track) => {
-      const playOrder = shuffle ? shuffled(nextSource.tracks) : nextSource.tracks;
+    (nextSource: PlaybackContextSource, track?: Track, shuffleOverride?: boolean) => {
+      const useShuffle = shuffleOverride ?? shuffle;
+      if (shuffleOverride !== undefined) setShuffleState(shuffleOverride);
+      const playOrder = useShuffle ? shuffled(nextSource.tracks) : nextSource.tracks;
       const start = track
         ? playOrder.findIndex((t) => t.id === track.id)
         : 0;

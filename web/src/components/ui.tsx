@@ -336,6 +336,7 @@ export function Chip({
         boxShadow: active
           ? "0 6px 22px rgba(var(--color-nav-action-rgb),.42), 0 2px 8px rgba(var(--color-nav-action-rgb),.3)"
           : undefined,
+        transition: "background-color var(--dur-state) var(--ease), color var(--dur-state) var(--ease), box-shadow var(--dur-state) var(--ease)",
       }}
     >
       {Icon ? <Icon size={14} style={{ flex: "none" }} /> : null}
@@ -1162,9 +1163,20 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
       const dx = e.clientX - s.x;
       const dy = e.clientY - s.y;
       if (deciding.current) {
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        const adx = Math.abs(dx);
+        const ady = Math.abs(dy);
+        if (Math.max(adx, ady) < 10) return;
+        // A thumb presses down and settles before it commits to a direction,
+        // so the first sample past 10px is often a near-tie between the two
+        // axes rather than a real vertical scroll. Deciding off that tie is
+        // what made this fire on maybe one swipe in a hundred: a gesture that
+        // read a few px more vertical at that instant was locked out for the
+        // rest of the drag. Waiting for one axis to actually pull ahead
+        // (capped so a genuinely diagonal drag still resolves) is what tells
+        // a swipe from a scroll.
+        if (adx - ady < 6 && Math.max(adx, ady) < 22) return;
         deciding.current = false;
-        if (Math.abs(dy) >= Math.abs(dx) || dx <= 0) {
+        if (ady >= adx || dx <= 0) {
           start.current = null;
           return;
         }

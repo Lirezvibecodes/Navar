@@ -694,6 +694,24 @@ button {
    mounted for 300ms means holding two screens' worth of data and two sets of
    fetches alive to animate something the incoming screen already covers. */
 
+/* Switching bottom-nav tabs is a lateral move, not a drill-in, so it gets its
+   own transition rather than borrowing push's "arriving from deeper" slide.
+   The incoming screen grows out of the tab that was actually tapped —
+   --nav-tab-origin-x is the tapped button's centre, written by BottomNav via
+   lib/tabOrigin.ts — instead of sliding in from a fixed edge. Transform and
+   opacity only, same as everywhere else in this block, so it stays cheap on
+   the tab switch, the single most frequent navigation in the app. */
+@keyframes nav-tab-morph-in {
+  from {
+    transform: scale(0.92) translate3d(0, 10px, 0);
+    opacity: 0;
+  }
+}
+.nav-view-tab {
+  transform-origin: var(--nav-tab-origin-x, 50%) 100%;
+  animation: nav-tab-morph-in var(--dur-view) var(--ease) both;
+}
+
 /* --- The focal moment -------------------------------------------------------
 
    The Now Playing bar becoming the full player. The player mounts with its

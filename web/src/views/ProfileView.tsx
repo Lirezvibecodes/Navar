@@ -1,6 +1,7 @@
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton } from "./SocialView";
+import { PlaylistCard } from "./HomeView";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
@@ -16,7 +17,6 @@ import {
 } from "../components/ui";
 import {
   BoltIcon,
-  ChevronRightIcon,
   HeadphonesIcon,
   type IconProps,
   LibraryIcon,
@@ -29,7 +29,7 @@ import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { formatListened, personName } from "../lib/format";
 import { haptic, shareLink } from "../telegram";
-import type { BadgeTier, ListeningStats } from "../types";
+import type { ActivityTrack, BadgeTier, ListeningStats } from "../types";
 
 /**
  * One person's page — yours or somebody else's.
@@ -109,32 +109,51 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const person = profile?.person ?? null;
   const name = personName(isMe ? me : person);
   const known = profile?.state === "friends";
-  const shared = !isMe && !known ? (profile?.playlists ?? []) : [];
+  // The backend already scopes this to what the viewer may see — public
+  // playlists from a stranger, public-and-friends ones from a friend — so
+  // showing it regardless of `known` is just trusting that scoping instead
+  // of throwing away half of it here.
+  const shared = !isMe ? (profile?.playlists ?? []) : [];
 
   return (
     <Screen>
+      {/* Spotify's profile carries itself on scale and restraint rather than a
+          banner: one oversized avatar, the name set as large as the screen
+          allows, a small uppercase meta line beneath it. Nothing here is a new
+          colour or material — the wash behind it is the same dark screen
+          background every view already sits on. */}
       <div
         className="nav-rise"
         style={{
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 9,
-          padding: "10px 0 4px",
+          gap: 14,
+          padding: "26px 0 6px",
         }}
       >
         <Avatar
           userId={userId}
           username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
           hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
-          size={76}
+          size={120}
         />
-        <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.015em" }}>
+        <span
+          className="nav-clip"
+          style={{
+            display: "block",
+            maxWidth: "100%",
+            fontSize: 27,
+            fontWeight: 700,
+            letterSpacing: "-0.02em",
+            textAlign: "center",
+          }}
+        >
           {name}
         </span>
         {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
         {isMe ? (
-          <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
+          <span style={{ ...EYEBROW, textAlign: "center" }}>
             <Counted count={tracks.length} one="track" /> ·{" "}
             <Counted count={playlists.length} one="playlist" />
             {profile?.friend_count != null ? (
@@ -145,7 +164,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             ) : null}
           </span>
         ) : profile?.friend_count != null ? (
-          <span style={{ fontSize: 11.5, color: "var(--color-nav-muted)" }}>
+          <span style={{ ...EYEBROW, textAlign: "center" }}>
             <Counted count={profile.friend_count} one="friend" many="friends" />
           </span>
         ) : null}
@@ -215,7 +234,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </>
       ) : (
         <>
-          {known && hasStats(profile?.stats) ? (
+          {hasStats(profile?.stats) ? (
             <>
               <SectionHeader title="Listening" />
               <StatsGrid stats={profile!.stats!} />
@@ -240,63 +259,26 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             </>
           ) : null}
 
-          {/* What somebody you are not connected to has published to anyone.
-              A friend gets the dedicated screen above instead, which is the
-              same list with room to breathe. */}
+          {/* Whatever of theirs the viewer is allowed to open — public
+              playlists from anyone, plus friends-only ones once you are
+              actually friends. "Their Library" above is the fuller screen for
+              a friend; this is the same set of playlists, right here. */}
           {shared.length > 0 ? (
             <>
-              <SectionHeader title="Shared with everyone" />
-              {shared.map((playlist, i) => (
-                <button
-                  key={playlist.id}
-                  className="nav-press nav-row-in"
-                  onClick={() => {
-                    haptic.tap();
-                    nav.push({ type: "playlist", id: playlist.id, name: playlist.name });
-                  }}
-                  style={
-                    {
-                      "--i": i,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 11,
-                      width: "100%",
-                      minHeight: 58,
-                      textAlign: "left",
-                    } as React.CSSProperties
-                  }
-                >
-                  <CollectionArt
-                    name={playlist.name}
-                    coverTrackId={playlist.cover_track_id}
-                    src={api.playlistArtworkUrl(playlist)}
-                    size={44}
-                    radius={9}
+              <SectionHeader title={known ? "Playlists" : "Shared with everyone"} />
+              <div className="nav-shelf nav-shelf-bleed" style={{ gap: 12 }}>
+                {shared.map((playlist, i) => (
+                  <PlaylistCard
+                    key={playlist.id}
+                    playlist={playlist}
+                    subtitle={<Counted count={playlist.track_count ?? 0} one="track" />}
+                    index={i}
+                    onOpen={() =>
+                      nav.push({ type: "playlist", id: playlist.id, name: playlist.name })
+                    }
                   />
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span
-                      className="nav-clip"
-                      style={{ display: "block", fontSize: 13, fontWeight: 600 }}
-                    >
-                      {playlist.name}
-                    </span>
-                    <span
-                      style={{
-                        display: "block",
-                        fontSize: 11,
-                        color: "var(--color-nav-muted)",
-                        marginTop: 2,
-                      }}
-                    >
-                      <Counted count={playlist.track_count ?? 0} one="track" />
-                    </span>
-                  </span>
-                  <ChevronRightIcon
-                    size={15}
-                    style={{ color: "var(--color-nav-faint)", flex: "none" }}
-                  />
-                </button>
-              ))}
+                ))}
+              </div>
             </>
           ) : !known ? (
             <Empty
@@ -428,6 +410,55 @@ function StatsGrid({ stats }: { stats: ListeningStats }) {
           ) : null}
         </div>
       ) : null}
+
+      {stats.topTrack ? <TopTrackTile track={stats.topTrack} index={3} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The one stat that isn't a number — the actual track behind "most played",
+ * with its own art. The plays/artist tiles above say how much and who; this
+ * says what, which is the part a number can't carry on its own.
+ */
+function TopTrackTile({ track, index }: { track: ActivityTrack; index: number }) {
+  return (
+    <div
+      className="nav-glass nav-row-in"
+      style={
+        {
+          "--i": index,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 13px",
+          borderRadius: 16,
+        } as React.CSSProperties
+      }
+    >
+      <CollectionArt
+        name={track.title ?? "Untitled"}
+        coverTrackId={track.cover_track_id}
+        size={42}
+        radius={10}
+      />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ ...EYEBROW, display: "block" }}>Most played track</span>
+        <span
+          className="nav-clip"
+          style={{ display: "block", fontSize: 13, fontWeight: 600, marginTop: 2 }}
+        >
+          {track.title ?? "Untitled"}
+        </span>
+        {track.artist ? (
+          <span
+            className="nav-clip"
+            style={{ display: "block", fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
+          >
+            {track.artist}
+          </span>
+        ) : null}
+      </span>
     </div>
   );
 }

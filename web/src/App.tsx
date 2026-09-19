@@ -28,6 +28,7 @@ import { PlayerView } from "./views/PlayerView";
 import { SettingsView } from "./views/SettingsView";
 import { SharedView } from "./views/SharedView";
 import { hideSplash } from "./lib/splash";
+import { tabOriginX } from "./lib/tabOrigin";
 import { getTelegramWebApp, initTelegramPlatform, setBackButton } from "./telegram";
 import type { Me } from "./types";
 import type { RootTab, View } from "./view";
@@ -76,7 +77,7 @@ const TITLES: Record<View["type"], string> = {
 
 function Shell({ me }: { me: Me }) {
   const [stack, setStack] = useState<View[]>([{ type: "home" }]);
-  const [direction, setDirection] = useState<"push" | "pop">("push");
+  const [direction, setDirection] = useState<"push" | "pop" | "tab">("push");
   const [playerOpen, setPlayerOpen] = useState(false);
   const [searchOnOpen, setSearchOnOpen] = useState(false);
   // Bumped on every navigation so the incoming screen remounts and replays its
@@ -104,7 +105,7 @@ function Shell({ me }: { me: Me }) {
 
   const selectTab = useCallback((tab: RootTab) => {
     setSeq((n) => n + 1);
-    setDirection("push");
+    setDirection("tab");
     setStack([{ type: tab } as View]);
   }, []);
 
@@ -213,8 +214,22 @@ function Shell({ me }: { me: Me }) {
 
       <div
         key={seq}
-        className={direction === "push" ? "nav-view-push" : "nav-view-pop"}
-        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+        className={
+          direction === "push"
+            ? "nav-view-push"
+            : direction === "pop"
+              ? "nav-view-pop"
+              : "nav-view-tab"
+        }
+        style={
+          {
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            "--nav-tab-origin-x": direction === "tab" ? (tabOriginX() ?? "50%") : undefined,
+          } as React.CSSProperties
+        }
       >
         {body()}
       </div>

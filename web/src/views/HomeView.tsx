@@ -243,7 +243,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
  */
 const CARD = 138;
 
-function PlaylistCard({
+export function PlaylistCard({
   playlist,
   subtitle,
   index,

@@ -68,7 +68,7 @@ export function TrackListScreen({
   actions?: ReactNode;
 }) {
   const { owns, setFavorite } = useLibrary();
-  const { current, isPlaying, playFrom, setShuffle, queueNext, queueLast } = usePlayer();
+  const { current, isPlaying, playFrom, queueNext, queueLast } = usePlayer();
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);
 
   const source = useMemo(
@@ -133,8 +133,7 @@ export function TrackListScreen({
             width={44}
             onClick={() => {
               if (tracks.length === 0) return;
-              setShuffle(true);
-              playFrom(source);
+              playFrom(source, undefined, true);
             }}
           />
           {actions}
