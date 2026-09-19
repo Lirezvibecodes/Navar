@@ -38,6 +38,11 @@ import type { BadgeTier, ListeningStats, Person, Playlist } from "../types";
 const BANNER_W = 480;
 const BANNER_H = 220;
 
+/** How far above the banner's own bottom edge its wash starts dissolving —
+ *  see the comment on the banner box in `ProfileView` for why this is 120px
+ *  of borrowed padding rather than the 28px Settings' compact header uses. */
+const BANNER_FADE = 120;
+
 /**
  * A wash of whichever cover the header is showing, recomputed whenever that
  * cover changes. There is exactly one owner and one viewer of it at a time,
@@ -98,12 +103,17 @@ export function usePixelatedBanner(coverUrl: string | null): string | null {
  * actual content, sometimes finishing the dissolve while a chip is still
  * sitting on it. Pinning to the bottom instead means the scrim stays at full
  * strength behind every row of real content — wherever that content ends —
- * and only ever dissolves within the padding below it, which is exactly the
- * blank margin this resolves into.
+ * and only ever dissolves within the padding below it.
+ *
+ * `fadeDistance` defaults to Settings' own compact 28px. `ProfileView` passes
+ * a much larger one and grows its own padding-bottom (with a compensating
+ * negative margin) to match, because 28px only ever reads as a hard cut, not
+ * a resolve — there just isn't enough room in it for the eye to see the scrim
+ * thinning rather than stopping. A longer distance gives the same thinning
+ * somewhere to actually happen.
  */
-export function bannerLayerStyle(bannerUrl: string): React.CSSProperties {
-  const fade =
-    "linear-gradient(180deg, #000 0%, #000 calc(100% - 28px), transparent 100%)";
+export function bannerLayerStyle(bannerUrl: string, fadeDistance = 28): React.CSSProperties {
+  const fade = `linear-gradient(180deg, #000 0%, #000 calc(100% - ${fadeDistance}px), transparent 100%)`;
   return {
     position: "absolute",
     inset: 0,
@@ -214,17 +224,22 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           by the bar itself, so it doesn't count as breathing room). Equal
           padding on both sides of the content is what makes the header read
           as centred in its box instead of pinned to the top with a slab of
-          leftover space underneath — and it hands `bannerLayerStyle` a
-          bottom margin exactly as tall as its own fixed fade band, so the
-          wash finishes dissolving precisely in the gap meant for it. */}
+          leftover space underneath.
+
+          The bottom padding is bigger than that visible 28px by BANNER_FADE
+          — this box's own rendered background (and the wash it carries)
+          extends `BANNER_FADE` past where the header stops taking up layout
+          space, so its fade has real physical distance to dissolve through
+          instead of the curt 28px band that only ever read as a hard cut. A
+          matching negative margin pulls the next section back up by exactly
+          that borrowed amount, so none of it shows as extra gap. */}
       <div
         className="nav-rise nav-profile-banner"
         style={{
-          margin:
-            "calc(-1 * (var(--nav-topbar-h) + var(--nav-top-inset) + 8px)) -14px 0",
-          padding:
-            "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px 28px",
-        }}
+          margin: `calc(-1 * (var(--nav-topbar-h) + var(--nav-top-inset) + 8px)) -14px -${BANNER_FADE - 28}px`,
+          padding: `calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px ${28 + BANNER_FADE}px`,
+          "--nav-banner-fade": `${BANNER_FADE}px`,
+        } as React.CSSProperties}
       >
         {/* A pixelated wash of the header's chosen track, under everything
             else — same technique as the story-share background, at the
@@ -237,7 +252,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             flatter and stronger than the story card's own bottom-third
             gradient, because a name and two favourites sit across this
             banner's full height and all of it has to stay legible. */}
-        {bannerUrl ? <div aria-hidden style={bannerLayerStyle(bannerUrl)} /> : null}
+        {bannerUrl ? <div aria-hidden style={bannerLayerStyle(bannerUrl, BANNER_FADE)} /> : null}
 
         <div style={{ position: "relative", zIndex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -347,91 +362,101 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </div>
       </div>
 
-      {isMe ? (
-        <>
-          <SectionHeader
-            title="Playlists"
-            action="Manage"
-            onAction={() => nav.push({ type: "library" })}
-          />
-          {ownPlaylists.length > 0 ? (
-            <>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {ownPlaylists.map((playlist, i) => (
-                  <PlaylistRow
-                    key={playlist.id}
-                    playlist={playlist}
-                    subtitle={<Counted count={playlist.track_count ?? 0} one="track" />}
-                    index={i}
-                    onOpen={() =>
-                      nav.push({ type: "playlist", id: playlist.id, name: playlist.name })
-                    }
-                  />
-                ))}
-              </div>
-              {playlists.length > ownPlaylists.length ? (
-                <GhostButton
-                  height={38}
-                  onClick={() => nav.push({ type: "library" })}
-                  label="See all playlists"
-                >
-                  See all playlists
-                </GhostButton>
-              ) : null}
-            </>
-          ) : (
-            <Empty title="No playlists yet" body="Anything you make from The Crate shows up here." />
-          )}
-        </>
-      ) : (
-        <>
-          {!known && (profile?.mutual_friends.length ?? 0) > 0 ? (
-            <>
-              <SectionHeader title="Friends in common" />
-              <div className="nav-shelf" style={{ gap: 12 }}>
-                {profile!.mutual_friends.map((friend, i) => (
-                  <PersonTile
-                    key={friend.telegram_user_id}
-                    person={friend}
-                    index={i}
-                    onOpen={() =>
-                      nav.push({ type: "profile", userId: Number(friend.telegram_user_id) })
-                    }
-                  />
-                ))}
-              </div>
-            </>
-          ) : null}
-
-          {/* Whatever of theirs the viewer is allowed to open — public
-              playlists from anyone, plus friends-only ones once you are
-              actually friends. "Their Library" above is the fuller screen for
-              a friend; this is the same set of playlists, right here. */}
-          {shared.length > 0 ? (
-            <>
-              <SectionHeader title={known ? "Playlists" : "Shared with everyone"} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {shared.map((playlist, i) => (
-                  <PlaylistRow
-                    key={playlist.id}
-                    playlist={playlist}
-                    subtitle={personName(person)}
-                    index={i}
-                    onOpen={() =>
-                      nav.push({ type: "playlist", id: playlist.id, name: playlist.name })
-                    }
-                  />
-                ))}
-              </div>
-            </>
-          ) : !known ? (
-            <Empty
-              title="Not connected yet"
-              body="Send a request. Once they accept, anything they share with friends shows up for you."
+      {/* The banner's own box now paints well past where it stops taking up
+          layout space (see `BANNER_FADE`), so its wash physically overlaps
+          the top of whatever comes next. Positioned content always paints
+          after plain in-flow content at the same stacking level regardless
+          of source order, which would otherwise put that overlapping wash
+          *over* this section instead of behind it — the same reason the
+          banner's own content wrapper above needs its `zIndex: 1`. This one
+          needs it for the same reason, one level down. */}
+      <div style={{ position: "relative", zIndex: 1 }}>
+        {isMe ? (
+          <>
+            <SectionHeader
+              title="Playlists"
+              action="Manage"
+              onAction={() => nav.push({ type: "library" })}
             />
-          ) : null}
-        </>
-      )}
+            {ownPlaylists.length > 0 ? (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {ownPlaylists.map((playlist, i) => (
+                    <PlaylistRow
+                      key={playlist.id}
+                      playlist={playlist}
+                      subtitle={<Counted count={playlist.track_count ?? 0} one="track" />}
+                      index={i}
+                      onOpen={() =>
+                        nav.push({ type: "playlist", id: playlist.id, name: playlist.name })
+                      }
+                    />
+                  ))}
+                </div>
+                {playlists.length > ownPlaylists.length ? (
+                  <GhostButton
+                    height={38}
+                    onClick={() => nav.push({ type: "library" })}
+                    label="See all playlists"
+                  >
+                    See all playlists
+                  </GhostButton>
+                ) : null}
+              </>
+            ) : (
+              <Empty title="No playlists yet" body="Anything you make from The Crate shows up here." />
+            )}
+          </>
+        ) : (
+          <>
+            {!known && (profile?.mutual_friends.length ?? 0) > 0 ? (
+              <>
+                <SectionHeader title="Friends in common" />
+                <div className="nav-shelf" style={{ gap: 12 }}>
+                  {profile!.mutual_friends.map((friend, i) => (
+                    <PersonTile
+                      key={friend.telegram_user_id}
+                      person={friend}
+                      index={i}
+                      onOpen={() =>
+                        nav.push({ type: "profile", userId: Number(friend.telegram_user_id) })
+                      }
+                    />
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {/* Whatever of theirs the viewer is allowed to open — public
+                playlists from anyone, plus friends-only ones once you are
+                actually friends. "Their Library" above is the fuller screen for
+                a friend; this is the same set of playlists, right here. */}
+            {shared.length > 0 ? (
+              <>
+                <SectionHeader title={known ? "Playlists" : "Shared with everyone"} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {shared.map((playlist, i) => (
+                    <PlaylistRow
+                      key={playlist.id}
+                      playlist={playlist}
+                      subtitle={personName(person)}
+                      index={i}
+                      onOpen={() =>
+                        nav.push({ type: "playlist", id: playlist.id, name: playlist.name })
+                      }
+                    />
+                  ))}
+                </div>
+              </>
+            ) : !known ? (
+              <Empty
+                title="Not connected yet"
+                body="Send a request. Once they accept, anything they share with friends shows up for you."
+              />
+            ) : null}
+          </>
+        )}
+      </div>
 
       <FriendsSheet
         nav={nav}
