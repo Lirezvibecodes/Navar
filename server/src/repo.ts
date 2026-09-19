@@ -429,6 +429,32 @@ export async function getTrackForListener(
   return rows[0] ?? null;
 }
 
+/**
+ * A thumbnail is not the track. `trackVisibleTo` gates playback, lyrics,
+ * saving and sharing — real access to the file — and rightly requires the
+ * track to sit somewhere the viewer has been let into. A cover image carries
+ * none of that: it is metadata a friend's activity row already names in text
+ * (title, artist, whose it is), so a viewer who may see that *person* may see
+ * the picture too, own playlist or not.
+ */
+function trackCoverVisibleTo(viewer: string, track: string): string {
+  return `(${trackVisibleTo(viewer, track)} OR ${canSeePerson(viewer, `${track}.owner_telegram_id`)})`;
+}
+
+/** The `/cover` route's own lookup — everywhere else keeps using getTrackForListener. */
+export async function getTrackCoverForViewer(
+  id: string,
+  requesterTelegramId: number
+): Promise<Track | null> {
+  const { rows } = await getPool().query<Track>(
+    `SELECT ${TRACK_COLUMNS_T}
+     FROM tracks t
+     WHERE t.id = $1 AND ${LIVE_T} AND ${trackCoverVisibleTo("$2", "t")}`,
+    [id, requesterTelegramId]
+  );
+  return rows[0] ?? null;
+}
+
 export interface SavedTrack {
   track: Track;
   /**
@@ -2912,8 +2938,10 @@ async function listRecentSaves(
        ${personColumns("o", "from")},
        ts.created_at,
        t.id AS track_id, t.title, t.artist,
-       CASE WHEN ${HAS_COVER_T} AND ${trackVisibleTo("$1", "t")} THEN t.id END
-         AS cover_track_id
+       -- t.owner_telegram_id is always ts.saver_id for a saved copy, and the
+       -- WHERE below already requires canSeePerson($1, ts.saver_id) — so
+       -- disclosing the cover here names nobody the row doesn't already name.
+       CASE WHEN ${HAS_COVER_T} THEN t.id END AS cover_track_id
      FROM track_saves ts
      JOIN users s ON s.telegram_user_id = ts.saver_id
      JOIN tracks t ON t.id = ts.saved_track_id

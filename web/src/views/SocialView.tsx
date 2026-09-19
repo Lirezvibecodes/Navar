@@ -13,7 +13,14 @@ import {
   Skeleton,
   TextField,
 } from "../components/ui";
-import { UserCheckIcon, UserPlusIcon } from "../icons";
+import {
+  DownloadIcon,
+  HeadphonesIcon,
+  ShareIcon,
+  UserCheckIcon,
+  UserPlusIcon,
+} from "../icons";
+import type { IconProps } from "../icons";
 import { useToast } from "../context/ToastContext";
 import {
   cached,
@@ -320,6 +327,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
                 key={row.person.telegram_user_id}
                 person={row.person}
                 line={row.track ? trackTitle(row.track) : undefined}
+                live
                 index={i}
                 onOpen={() => openProfile(row.person.telegram_user_id)}
               />
@@ -414,6 +422,22 @@ export function SocialView({ nav }: { nav: Navigation }) {
 }
 
 /**
+ * What kind of thing happened, as a glyph on the art's corner rather than
+ * only as a verb in the caption below it — the feed used to read as one
+ * undifferentiated wall of text, and a save and a share are not the same
+ * shape of event. `shared` gets the tab's own accent, unused everywhere else
+ * in the app, so this is the one place that color was always meant for.
+ */
+const KIND_GLYPH: Record<
+  ActivityItem["kind"],
+  { icon: (props: IconProps) => React.ReactNode; background: string }
+> = {
+  listening: { icon: HeadphonesIcon, background: "var(--color-nav-action)" },
+  shared: { icon: ShareIcon, background: "var(--color-nav-social)" },
+  saved: { icon: DownloadIcon, background: "var(--color-nav-art)" },
+};
+
+/**
  * One thing that happened.
  *
  * A save carries two people — whoever kept the track and whoever they got it
@@ -437,6 +461,7 @@ function ActivityRow({
       : "Something";
   const verb = item.kind === "shared" ? "shared a playlist" : "saved a track";
   const credit = item.from ? " · from " + personName(item.from) : "";
+  const kind = KIND_GLYPH[item.kind];
 
   return (
     <button
@@ -457,13 +482,31 @@ function ActivityRow({
         } as React.CSSProperties
       }
     >
-      <CollectionArt
-        name={title}
-        coverTrackId={item.playlist?.cover_track_id ?? item.track?.cover_track_id}
-        src={item.playlist ? api.playlistArtworkUrl(item.playlist) : null}
-        size={42}
-        radius={9}
-      />
+      <div style={{ position: "relative", flex: "none" }}>
+        <CollectionArt
+          name={title}
+          coverTrackId={item.playlist?.cover_track_id ?? item.track?.cover_track_id}
+          src={item.playlist ? api.playlistArtworkUrl(item.playlist) : null}
+          size={42}
+          radius={9}
+        />
+        <span
+          className="nav-uploader-badge"
+          style={{
+            position: "absolute",
+            right: -4,
+            bottom: -4,
+            width: 18,
+            height: 18,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: kind.background,
+          }}
+        >
+          <kind.icon size={10} style={{ color: "#0A0A0A" }} />
+        </span>
+      </div>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           className="nav-clip"

@@ -7,6 +7,7 @@ import {
   getPerson,
   getTrack,
   getTrackCover,
+  getTrackCoverForViewer,
   getTrackForListener,
   listTracks,
   restoreTrack,
@@ -198,8 +199,9 @@ export function tracksRouter(): Router {
     asyncHandler(async (req, res) => {
       const requesterId = (req as AuthedRequest).telegramUserId;
       // The visibility decision happens here; the byte fetch below is scoped by
-      // it rather than repeating the predicate itself.
-      const track = await getTrackForListener(req.params.id, requesterId);
+      // it rather than repeating the predicate itself. A thumbnail is a looser
+      // gate than playback — see getTrackCoverForViewer.
+      const track = await getTrackCoverForViewer(req.params.id, requesterId);
       if (!track) {
         res.status(404).json({ error: "Not found" });
         return;

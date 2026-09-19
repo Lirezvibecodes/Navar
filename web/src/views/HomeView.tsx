@@ -157,6 +157,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
                 key={row.person.telegram_user_id}
                 person={row.person}
                 line={trackTitle(row.track)}
+                live
                 index={i}
                 onOpen={() =>
                   nav.push({

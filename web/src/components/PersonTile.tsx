@@ -15,19 +15,28 @@ import { haptic } from "../telegram";
 export function PersonTile({
   person,
   line,
+  live,
   index,
   onOpen,
 }: {
   person: Person;
   /** Whatever they are doing — usually a track title. Empty renders nothing. */
   line?: string;
+  /** A track is playing right now, not just was. Draws the lime corner dot. */
+  live?: boolean;
   index: number;
   onOpen: () => void;
 }) {
   return (
     <button
       className="nav-press nav-row-in"
-      aria-label={line ? personName(person) + ", " + line : personName(person)}
+      aria-label={
+        live
+          ? personName(person) + ", listening now" + (line ? " to " + line : "")
+          : line
+            ? personName(person) + ", " + line
+            : personName(person)
+      }
       onClick={() => {
         haptic.tap();
         onOpen();
@@ -42,13 +51,28 @@ export function PersonTile({
       }
     >
       <div style={{ display: "flex", justifyContent: "center" }}>
-        <Avatar
-          userId={person.telegram_user_id}
-          username={person.handle ?? person.username}
-          hasAvatar={person.has_avatar}
-          size={52}
-          ring
-        />
+        <div style={{ position: "relative", width: 52, height: 52 }}>
+          <Avatar
+            userId={person.telegram_user_id}
+            username={person.handle ?? person.username}
+            hasAvatar={person.has_avatar}
+            size={52}
+            ring
+          />
+          {live ? (
+            <span
+              className="nav-uploader-badge"
+              style={{
+                position: "absolute",
+                right: 1,
+                bottom: 1,
+                width: 12,
+                height: 12,
+                background: "var(--color-nav-action)",
+              }}
+            />
+          ) : null}
+        </div>
       </div>
       <span
         className="nav-clip"
