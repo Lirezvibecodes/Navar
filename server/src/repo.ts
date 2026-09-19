@@ -1659,7 +1659,7 @@ export async function setProfileBackground(
        AND ($2::uuid IS NULL OR EXISTS (
          SELECT 1 FROM tracks t
          WHERE t.id = $2::uuid AND t.owner_telegram_id = $1
-           AND ${LIVE_T} AND t.cover_image IS NOT NULL
+           AND ${LIVE_T} AND ${HAS_COVER_T}
        ))`,
     [telegramUserId, trackId]
   );
@@ -2838,7 +2838,11 @@ export async function recordPlay(
 export interface ListeningStats {
   totalPlays: number;
   topTrack: ActivityTrack | null;
-  topArtist: string | null;
+  /** `cover_track_id` is whichever of the artist's own tracks has art — not
+   *  necessarily `topTrack` itself, since the most-played track and the
+   *  first covered one by that artist can differ. Null when none of their
+   *  tracks in this rollup carry art. */
+  topArtist: { name: string; cover_track_id: string | null } | null;
   totalListenedSeconds: number;
 }
 
@@ -2878,14 +2882,20 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
     }
   }
 
-  let topArtist: string | null = null;
+  let topArtistName: string | null = null;
   let topArtistCount = 0;
   for (const [name, count] of artistCounts) {
     if (count > topArtistCount) {
-      topArtist = name;
+      topArtistName = name;
       topArtistCount = count;
     }
   }
+  // Rows are already ordered by play_count DESC, so the first one crediting
+  // the top artist and carrying art is their most-played covered track.
+  const artistCover = topArtistName
+    ? (rows.find((row) => row.has_cover && splitArtists(row.artist ?? "").includes(topArtistName!))
+        ?.track_id ?? null)
+    : null;
 
   const top = rows[0];
   return {
@@ -2898,7 +2908,7 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
           cover_track_id: top.has_cover ? top.track_id : null,
         }
       : null,
-    topArtist,
+    topArtist: topArtistName ? { name: topArtistName, cover_track_id: artistCover } : null,
     totalListenedSeconds,
   };
 }
@@ -3399,7 +3409,7 @@ export async function getUserProfile(
        t.id AS background_track_id
      FROM users u
      LEFT JOIN tracks t
-       ON t.id = u.background_track_id AND ${LIVE_T} AND t.cover_image IS NOT NULL
+       ON t.id = u.background_track_id AND ${LIVE_T} AND ${HAS_COVER_T}
      WHERE u.telegram_user_id = $2`,
     [viewerTelegramId, targetTelegramId]
   );

@@ -201,7 +201,9 @@ export interface Suggestion extends Person {
 export interface ListeningStats {
   totalPlays: number;
   topTrack: ActivityTrack | null;
-  topArtist: string | null;
+  /** `cover_track_id` is whichever of the artist's own tracks has art — not
+   *  necessarily `topTrack` itself. Null when none of their tracks do. */
+  topArtist: { name: string; cover_track_id: string | null } | null;
   totalListenedSeconds: number;
 }
 

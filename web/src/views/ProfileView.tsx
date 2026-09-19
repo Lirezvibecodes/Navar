@@ -19,10 +19,10 @@ import {
 } from "../components/ui";
 import {
   ChevronRightIcon,
+  HeadphonesIcon,
   ImageIcon,
   LibraryIcon,
   SettingsIcon,
-  ShareIcon,
   StarIcon,
 } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
@@ -31,8 +31,8 @@ import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { formatListened, personName } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
-import { haptic, shareLink } from "../telegram";
-import type { ActivityTrack, BadgeTier, Playlist } from "../types";
+import { haptic } from "../telegram";
+import type { BadgeTier, Playlist } from "../types";
 
 /** The banner's own pixelated wash, drawn at its own modest size rather than
  *  a story card's full 1080×1920 — same technique as the story-share
@@ -62,7 +62,12 @@ function usePixelatedBanner(coverUrl: string | null): string | null {
       canvas.height = BANNER_H;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      drawPixelatedWash(ctx, img, BANNER_W, BANNER_H);
+      // Finer, softer blocks than the story card's own wash (pixelW 54/blur
+      // 8): that card is a shared-to-story image where the mosaic itself is
+      // the point, but a banner sits behind readable text on every visit, so
+      // it stays a soft wash rather than a chunky mosaic — more, smaller
+      // source blocks plus a heavier blur.
+      drawPixelatedWash(ctx, img, BANNER_W, BANNER_H, 110, 16);
       if (!cancelled) setDataUrl(canvas.toDataURL("image/jpeg", 0.85));
     })();
     return () => {
@@ -77,16 +82,16 @@ function usePixelatedBanner(coverUrl: string | null): string | null {
  * One person's page — yours or somebody else's.
  *
  * There is one screen rather than two because the difference between them is
- * only which affordances are live: your own page offers an invite link and
- * counts drawn from the library already in memory, and someone else's offers
- * the relationship. Everything else — where you stand, what they have earned,
+ * only which affordances are live: your own page offers a background picker
+ * and counts drawn from the library already in memory, and someone else's
+ * offers the relationship. Everything else — where you stand, what they have earned,
  * and whatever of theirs you are allowed to open — arrives in a single call
  * that is already scoped to you, so nothing on this page decides who may see
  * what.
  */
 export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }) {
   const { me, tracks, playlists } = useLibrary();
-  const { toast, errorToast } = useToast();
+  const { errorToast } = useToast();
 
   const isMe = me?.id === userId;
   // Cached per person, so stepping back out of somebody's page and into it
@@ -102,15 +107,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   );
 
   const [pickingBg, setPickingBg] = useState(false);
-
-  const invite = async () => {
-    try {
-      const link = await api.friendInviteLink();
-      if (!shareLink(link, "Add me on Navaar")) toast(link);
-    } catch (err) {
-      errorToast(err, "Could not make an invite link");
-    }
-  };
 
   const unfriend = async () => {
     try {
@@ -186,19 +182,17 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const shared = !isMe ? (profile?.playlists ?? []) : [];
   const ownPlaylists = isMe ? playlists.slice(0, 3) : [];
 
-  // The meta line under the name: friends and lifetime listening, joined into
-  // one sentence rather than a row of separate chips. Your own track and
-  // playlist counts used to live here too; they're one scroll away in the
-  // Playlists section below, so saying them twice just crowded the line the
-  // header now also spends on favourites.
+  // The meta line under the name: just friends now. Lifetime listening moved
+  // into its own lime ListenChip beside the tier — a number this good is a
+  // stat worth wearing, not a clause buried in a grey sentence. Your own
+  // track and playlist counts used to live here too; they're one scroll away
+  // in the Playlists section below, so saying them twice just crowded a line
+  // the header now also spends on favourites.
   const metaParts: React.ReactNode[] = [];
   if (profile?.friend_count != null) {
     metaParts.push(
       <Counted key="friends" count={profile.friend_count} one="friend" many="friends" />
     );
-  }
-  if (stats && stats.totalListenedSeconds > 0) {
-    metaParts.push(<span key="listened">{formatListened(stats.totalListenedSeconds)} listened</span>);
   }
 
   return (
@@ -269,6 +263,9 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                 }}
               >
                 {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
+                {stats && stats.totalListenedSeconds > 0 ? (
+                  <ListenChip seconds={stats.totalListenedSeconds} />
+                ) : null}
                 {metaParts.length > 0 ? (
                   <span style={{ fontSize: 12, color: "rgba(255,255,255,.68)" }}>
                     {metaParts.reduce<React.ReactNode[]>(
@@ -291,11 +288,16 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                 <FavoriteChip
                   label="Favourite track"
                   value={stats.topTrack.title ?? "Untitled"}
-                  track={stats.topTrack}
+                  coverTrackId={stats.topTrack.cover_track_id}
                 />
               ) : null}
               {stats.topArtist ? (
-                <FavoriteChip label="Favourite artist" value={stats.topArtist} />
+                <FavoriteChip
+                  label="Favourite artist"
+                  value={stats.topArtist.name}
+                  coverTrackId={stats.topArtist.cover_track_id}
+                  round
+                />
               ) : null}
             </div>
           ) : null}
@@ -303,9 +305,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
             {isMe ? (
               <>
-                <GhostButton icon={ShareIcon} width={172} onClick={() => void invite()}>
-                  Invite a friend
-                </GhostButton>
                 <GhostButton
                   label="Change background"
                   icon={ImageIcon}
@@ -501,20 +500,54 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
 }
 
 /**
+ * Lifetime listening, worn as its own lime pill next to the tier chip rather
+ * than folded into the grey meta sentence below the name — the same "earned
+ * number deserves its own weight" treatment the tier chip already gets, on
+ * the app's one accent colour instead of glass so it actually reads as a
+ * highlight and not another line of muted text.
+ */
+function ListenChip({ seconds }: { seconds: number }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        height: 24,
+        padding: "0 11px 0 9px",
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#0A0A0A",
+        background: "var(--color-nav-action)",
+        boxShadow: "0 4px 14px rgba(var(--color-nav-action-rgb),.35)",
+      }}
+    >
+      <HeadphonesIcon size={12} />
+      {formatListened(seconds)} listened
+    </span>
+  );
+}
+
+/**
  * A favourite, worn as a small glass pill inside the banner itself — cover
- * art (or a star, for the artist, who has none) beside a small-caps label
- * and the value. This is what the stats grid's most-played tiles used to say
- * below the fold; folding them into the header is what the reference asked
- * for directly.
+ * art (or a star, when even the artist's own tracks carry none) beside a
+ * small-caps label and the value. This is what the stats grid's most-played
+ * tiles used to say below the fold; folding them into the header is what the
+ * reference asked for directly.
  */
 function FavoriteChip({
   label,
   value,
-  track,
+  coverTrackId,
+  round,
 }: {
   label: string;
   value: string;
-  track?: ActivityTrack | null;
+  coverTrackId?: string | null;
+  /** Artists get a round portrait, like the app's own avatars; a track's
+   *  cover stays square, like every other cover art in the app. */
+  round?: boolean;
 }) {
   return (
     <span
@@ -529,8 +562,8 @@ function FavoriteChip({
         minWidth: 0,
       }}
     >
-      {track ? (
-        <CollectionArt name={value} coverTrackId={track.cover_track_id} size={28} radius={7} />
+      {coverTrackId ? (
+        <CollectionArt name={value} coverTrackId={coverTrackId} size={28} radius={7} round={round} />
       ) : (
         <span
           style={{
@@ -540,7 +573,7 @@ function FavoriteChip({
             justifyContent: "center",
             width: 28,
             height: 28,
-            borderRadius: 7,
+            borderRadius: round ? "50%" : 7,
             background: "rgba(255,255,255,.12)",
           }}
         >
