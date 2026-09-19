@@ -18,6 +18,7 @@ import {
   RoundButton,
   Sheet,
   SheetItem,
+  SwipeQueueReveal,
   useSwipeQueue,
   useSwipeRemove,
 } from "../components/ui";
@@ -32,9 +33,7 @@ import {
   NextIcon,
   PauseIcon,
   PlayIcon,
-  PlayNextIcon,
   PrevIcon,
-  QueueAddIcon,
   RepeatIcon,
   ShuffleIcon,
   TrashIcon,
@@ -1083,7 +1082,7 @@ function QueuePane({
   onClear: () => void;
   onMenu: (track: Track) => void;
   onPlayUpNext: (index: number) => void;
-  onPlayContextNext: (index: number) => void;
+  onPlayContextNext: (track: Track) => void;
   /** Swipe right on a "Next from" row — it isn't in the explicit queue yet. */
   onQueueNext: (track: Track) => void;
   onQueueLast: (track: Track) => void;
@@ -1172,20 +1171,17 @@ function QueuePane({
           <QueueHeading label={`Next from: ${contextLabel ?? "here"}`} />
           {contextNext.slice(0, QUEUE_PREVIEW).map((track, i) => (
             <QueueRow
-              // Keyed by distance from the end of contextNext, not from the
-              // start: tapping a row (or just advancing) drops everything up
-              // to and including it, which shifts the *start* of this list
-              // but never its end. Keying by `i` shifted every remaining
-              // row's key too and made React remount the whole rest of the
-              // list — visually indistinguishable from the queue getting
-              // reshuffled, even though the underlying order never changed.
-              // Distance from the end is the one thing that stays fixed for
-              // a given track across that shift.
-              key={`ctx-${contextNext.length - 1 - i}`}
+              // Keyed by id, not position: this list now also drops a track
+              // the moment it's swiped into the explicit queue above, which
+              // can vacate any slot, not just the front. Keying by `i` (or by
+              // distance from the end, which only ever worked for a
+              // front-truncation) would shift every other row's key too and
+              // make React remount the rest of the list on every dequeue.
+              key={`ctx-${track.id}`}
               track={track}
               index={i}
               onMenu={() => onMenu(track)}
-              onPlay={() => onPlayContextNext(i)}
+              onPlay={() => onPlayContextNext(track)}
               onQueueNext={() => onQueueNext(track)}
               onQueueLast={() => onQueueLast(track)}
             />
@@ -1289,9 +1285,6 @@ function QueueRow({
     () => (onQueueLast ?? onQueueNext)?.(),
     () => (onQueueNext ?? onQueueLast)?.()
   );
-  const queueReveal = canSwipeQueue ? swipeQueue.stage : "none";
-  const queueRevealBg = canSwipeQueue ? `rgb(${swipeQueue.revealRgb})` : undefined;
-  const queueRevealOpacity = canSwipeQueue ? swipeQueue.revealOpacity : 0;
 
   return (
     <div
@@ -1337,37 +1330,11 @@ function QueueRow({
         </div>
       ) : null}
 
+      {/* Same "play next" / "add to queue" actions TrackRow's own swipe
+          offers — see SwipeQueueReveal for the visual and why it needs
+          pointer-events: none. */}
       {canSwipeQueue ? (
-        // Same idea, rightward: a "Next from: X" row isn't in the explicit
-        // queue yet, so swiping it right offers the same play-next/add-to-
-        // queue pair TrackRow's swipe already does elsewhere in the app. The
-        // color tracks drag distance continuously (see useSwipeQueue) instead
-        // of snapping at the threshold, so the two actions read as one
-        // gesture sliding between them rather than a coin flip at release.
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            paddingLeft: 14,
-            gap: 6,
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: "#0A0A0A",
-            background: queueRevealBg,
-            opacity: queueRevealOpacity,
-            transition: swipeQueue.dragging()
-              ? undefined
-              : "opacity var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease)",
-            // Same reasoning as the remove reveal above.
-            pointerEvents: "none",
-          }}
-        >
-          {queueReveal === "next" ? <PlayNextIcon size={15} /> : <QueueAddIcon size={15} />}
-          {queueReveal === "next" ? "Play next" : "Add to queue"}
-        </div>
+        <SwipeQueueReveal dragX={swipeQueue.dragX} dragging={swipeQueue.dragging()} />
       ) : null}
 
       <div

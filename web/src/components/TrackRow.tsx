@@ -2,11 +2,11 @@ import { useState } from "react";
 import type { Track } from "../types";
 import { Cover } from "./PixelArt";
 import { Avatar } from "./Avatar";
-import { CheckIcon, DotsIcon, HeartIcon, PlayNextIcon, QueueAddIcon } from "../icons";
+import { CheckIcon, DotsIcon, HeartIcon } from "../icons";
 import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/format";
 import { haptic } from "../telegram";
 import { useLibrary } from "../context/LibraryContext";
-import { useLongPress, useSwipeQueue } from "./ui";
+import { SwipeQueueReveal, useLongPress, useSwipeQueue } from "./ui";
 
 /**
  * One track, everywhere a track appears in a list.
@@ -103,13 +103,6 @@ export function TrackRow({
   const uploader = trackUploader(track, me?.id);
   const tag = uploader && !uploader.you ? uploader : null;
 
-  const revealStage = canSwipe ? swipe.stage : "none";
-  // The label swaps at the threshold (it names one of two discrete actions),
-  // but the color behind it and the reveal's own visibility both track the
-  // raw drag distance — see useSwipeQueue.
-  const revealBg = canSwipe ? `rgb(${swipe.revealRgb})` : undefined;
-  const revealOpacity = canSwipe ? swipe.revealOpacity : 0;
-
   return (
     <div
       className="nav-row-in"
@@ -123,42 +116,10 @@ export function TrackRow({
         } as React.CSSProperties
       }
     >
-      {canSwipe ? (
-        // Sits behind the row and only shows through the gap the swipe opens
-        // up — the same "play next" / "add to queue" actions TrackMenu already
-        // offers, just reachable a beat faster from the row itself.
-        //
-        // "Behind" needs pointer-events: none to actually be true: this div is
-        // positioned and the row below it is not, and a positioned box paints
-        // — and hit-tests — above a non-positioned in-flow sibling regardless
-        // of DOM order. Without this, the row is basically always covered
-        // (onQueueNext/onQueueLast are passed everywhere a track list shows
-        // up), and only whichever bit of the row happens to win the browser's
-        // own tie-breaking takes taps at all.
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            paddingLeft: 14,
-            gap: 6,
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: "#0A0A0A",
-            background: revealBg,
-            opacity: revealOpacity,
-            transition: swipe.dragging()
-              ? undefined
-              : "opacity var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease)",
-            pointerEvents: "none",
-          }}
-        >
-          {revealStage === "next" ? <PlayNextIcon size={15} /> : <QueueAddIcon size={15} />}
-          {revealStage === "next" ? "Play next" : "Add to queue"}
-        </div>
-      ) : null}
+      {/* The same "play next" / "add to queue" actions TrackMenu already
+          offers, just reachable a beat faster from the row itself — see
+          SwipeQueueReveal for the visual and why it needs pointer-events: none. */}
+      {canSwipe ? <SwipeQueueReveal dragX={swipe.dragX} dragging={swipe.dragging()} /> : null}
 
       <div
         ref={canSwipe ? swipe.ref : undefined}

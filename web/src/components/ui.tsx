@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { haptic } from "../telegram";
-import { ArrowRightIcon, type IconProps } from "../icons";
+import { ArrowRightIcon, PlayNextIcon, QueueAddIcon, type IconProps } from "../icons";
 import { backdropCss, type Palette } from "../lib/palette";
 
 /**
@@ -1129,17 +1129,21 @@ export function useLongPress(onLongPress: () => void, ms = 420) {
   };
 }
 
-const SWIPE_QUEUE_PX = 44;
-const SWIPE_NEXT_PX = 104;
+/**
+ * Width of each action chip in the swipe-to-queue reveal — wide enough for
+ * icon + label at the size TrackRow/QueueRow use them at. The two swipe
+ * thresholds below are exactly these widths, so a chip is only ever as far
+ * open as the row has actually been dragged: the same "this button tracks
+ * your thumb, then the next one starts" reveal iOS's own swipe actions use,
+ * rather than a label that flips at an invisible line partway through the
+ * drag. See SwipeQueueReveal.
+ */
+const QUEUE_CHIP_PX = 108;
+const NEXT_CHIP_PX = 96;
+const SWIPE_QUEUE_PX = QUEUE_CHIP_PX;
+const SWIPE_NEXT_PX = QUEUE_CHIP_PX + NEXT_CHIP_PX;
 
 export type SwipeQueueStage = "none" | "queue" | "next";
-
-// Mirrors --color-nav-action and --color-nav-social. Read as plain numbers
-// because the reveal color below is interpolated per pixel of drag, which a
-// CSS transition can't do from a threshold-based class swap.
-const QUEUE_RGB: [number, number, number] = [198, 242, 74];
-const NEXT_RGB: [number, number, number] = [137, 174, 255];
-const mixChannel = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
 
 /**
  * Swipe right on a row to queue it, without needing the ⋯ menu.
@@ -1260,15 +1264,6 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     };
   }, []);
 
-  // The reveal fades and shifts color continuously with drag distance, rather
-  // than snapping at each threshold, so the row visibly reads as sliding
-  // between two different destinations instead of just lighting up once.
-  const revealOpacity = dragX <= 0 ? 0 : Math.min(dragX / SWIPE_QUEUE_PX, 1);
-  const progress = Math.max(0, Math.min(dragX / SWIPE_NEXT_PX, 1));
-  const revealRgb = [0, 1, 2]
-    .map((i) => mixChannel(QUEUE_RGB[i], NEXT_RGB[i], progress))
-    .join(", ");
-
   return {
     /** Attach to the row element the gesture drags. */
     ref,
@@ -1276,15 +1271,107 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     stage: stageFor(dragX),
     /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
     dragging: () => active.current,
-    /** "r, g, b" — blends from --color-nav-action toward --color-nav-social as
-     *  the drag approaches the "play next" threshold. Interpolate the values,
-     *  not just pick one at the end, so the two thresholds read as one
-     *  continuous gesture rather than a coin flip at release. */
-    revealRgb,
-    /** 0 at rest, ramping to 1 by the first threshold, so a stray few px of
-     *  motion doesn't flash the reveal on and off. */
-    revealOpacity,
   };
+}
+
+/**
+ * The reveal behind a right-swipe-to-queue row — see useSwipeQueue. Sits
+ * behind the row and only shows through the gap the swipe opens up.
+ *
+ * Two chips, "Add to queue" then "Play next", each exactly as wide as the
+ * drag distance its own threshold represents: dragging opens "Add to queue"
+ * first, and only once that chip has reached its own full width does
+ * continuing the drag start opening "Play next" next to it — so the two
+ * actions read as stops along one gesture, with their own width telling you
+ * how much further there is to go, rather than a label that flips once at an
+ * invisible line. Both chips use the app's own accent colour (the user's
+ * chosen theme, not a second colour invented for this) and glow more of it
+ * the further open they are, brightest right as each reaches its own full
+ * width.
+ *
+ * `position: absolute` and non-interactive on purpose: this sits behind a
+ * non-positioned, in-flow row, and a positioned box paints — and hit-tests —
+ * above a non-positioned sibling regardless of DOM order. Without
+ * pointer-events: none here, this invisible-at-rest layer would take every
+ * tap, drag-handle press and ⋯ press meant for the row in front of it.
+ */
+export function SwipeQueueReveal({
+  dragX,
+  dragging,
+}: {
+  dragX: number;
+  dragging: boolean;
+}) {
+  const settle = dragging
+    ? undefined
+    : "width var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease), box-shadow var(--dur-settle) var(--ease)";
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        pointerEvents: "none",
+      }}
+    >
+      <SwipeChip
+        icon={QueueAddIcon}
+        label="Add to queue"
+        width={Math.max(0, Math.min(dragX, QUEUE_CHIP_PX))}
+        progress={Math.max(0, Math.min(dragX / QUEUE_CHIP_PX, 1))}
+        transition={settle}
+      />
+      <SwipeChip
+        icon={PlayNextIcon}
+        label="Play next"
+        width={Math.max(0, Math.min(dragX - QUEUE_CHIP_PX, NEXT_CHIP_PX))}
+        progress={Math.max(0, Math.min((dragX - QUEUE_CHIP_PX) / NEXT_CHIP_PX, 1))}
+        transition={settle}
+      />
+    </div>
+  );
+}
+
+function SwipeChip({
+  icon: Icon,
+  label,
+  width,
+  progress,
+  transition,
+}: {
+  icon: React.ComponentType<IconProps>;
+  label: string;
+  width: number;
+  /** 0 at this chip's own left edge, 1 once it is fully open — drives the glow. */
+  progress: number;
+  transition: string | undefined;
+}) {
+  return (
+    <div
+      style={{
+        width,
+        flex: "none",
+        height: "100%",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        paddingLeft: 14,
+        fontSize: 11.5,
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+        color: "#0A0A0A",
+        background: `rgba(var(--color-nav-action-rgb), ${(0.4 + 0.55 * progress).toFixed(2)})`,
+        boxShadow: `0 0 ${Math.round(18 * progress)}px rgba(var(--color-nav-action-rgb), ${(0.6 * progress).toFixed(2)})`,
+        transition,
+      }}
+    >
+      <Icon size={15} />
+      {label}
+    </div>
+  );
 }
 
 const SWIPE_REMOVE_PX = 64;
