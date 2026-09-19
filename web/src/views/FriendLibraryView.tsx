@@ -52,7 +52,7 @@ export function FriendLibraryView({
   const handle = person ? personName(person) : "Their Library";
 
   return (
-    <Screen>
+    <Screen scrollKey={`friendLibrary:${friendId}`}>
       <div
         className="nav-rise"
         style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 4 }}

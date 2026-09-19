@@ -78,7 +78,11 @@ export function TrackListScreen({
 
   return (
     <>
-      <Screen>
+      {/* sourceKey already names this exact playlist/album/artist/friend's
+          library uniquely, so it doubles as the scroll position's key —
+          coming back here from a track's menu or a friend's library lands
+          exactly where the list was left, not back at the top. */}
+      <Screen scrollKey={sourceKey}>
         <div
           className="nav-rise"
           style={{ display: "flex", alignItems: "center", gap: 14, paddingTop: 4 }}

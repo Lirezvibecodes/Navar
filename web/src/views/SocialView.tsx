@@ -242,7 +242,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
   const searching = query.trim().replace(/^@+/, "").length >= 2;
 
   return (
-    <Screen>
+    <Screen scrollKey="social">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
         <TextField
           value={query}

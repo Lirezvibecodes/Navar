@@ -187,7 +187,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const ownPlaylists = isMe ? playlists.slice(0, 3) : [];
 
   return (
-    <Screen>
+    <Screen scrollKey={`profile:${userId}`}>
       {/* One cohesive banner rather than a centred stack: avatar beside the
           name, the stats folded into the same line instead of a separate
           gradient card further down — the shape the reference asked for,

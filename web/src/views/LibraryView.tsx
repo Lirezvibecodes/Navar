@@ -68,7 +68,7 @@ export function LibraryView({ nav }: { nav: Navigation }) {
   }
 
   return (
-    <Screen>
+    <Screen scrollKey="library">
       <FavouritesTile count={favorites} onOpen={() => nav.push({ type: "crate", filter: "favorites" })} />
 
       <ChipRow>

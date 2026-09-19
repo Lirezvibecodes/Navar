@@ -177,7 +177,10 @@ export function CrateView({
 
   return (
     <>
-      <Screen>
+      {/* Keyed on the tab rather than a fixed "crate" — All, Unsorted and
+          Favourites are three different lists, and switching between them
+          is itself a scroll to remember, not just leaving the screen. */}
+      <Screen scrollKey={`crate:${tab}`}>
         <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
           <ChipRow>
             <Chip

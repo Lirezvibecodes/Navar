@@ -133,7 +133,7 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
   if (!me) return null;
 
   return (
-    <Screen>
+    <Screen scrollKey="settings">
       {/* The same header banner your profile shows everyone else, with the
           picture and its own controls sitting on top of it rather than a
           plain stack above a separate "change header" row below. */}
