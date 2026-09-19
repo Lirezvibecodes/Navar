@@ -1083,25 +1083,43 @@ export function SheetItem({
  * long-press in the app has a visible alternative somewhere — a Select button,
  * a Move up in the overflow menu — because a hidden gesture is not a control.
  * This exists to make the shortcut available, not to be the only way in.
+ *
+ * A hold that moves is a drag, not a long-press, so real movement past a few
+ * px cancels the timer. This matters more than it looks: the row this sits on
+ * (see useSwipeQueue) claims its own swipe by preventing the browser's native
+ * scroll from starting, which used to also incidentally abort this timer via
+ * the pointercancel that scroll-takeover produced. Now that the swipe holds
+ * onto the gesture properly, nothing else was clearing this timer, so a swipe
+ * held past `ms` fired a long-press in the middle of it and dropped the row
+ * into selection mode. Watching movement directly, instead of relying on a
+ * side effect of the browser losing the gesture, is correct either way.
  */
 export function useLongPress(onLongPress: () => void, ms = 420) {
   const timer = useRef<number | null>(null);
   const fired = useRef(false);
+  const start = useRef<{ x: number; y: number } | null>(null);
 
   const clear = () => {
     if (timer.current != null) window.clearTimeout(timer.current);
     timer.current = null;
+    start.current = null;
   };
 
   return {
-    onPointerDown: () => {
+    onPointerDown: (e: React.PointerEvent) => {
       fired.current = false;
       clear();
+      start.current = { x: e.clientX, y: e.clientY };
       timer.current = window.setTimeout(() => {
         fired.current = true;
         haptic.press();
         onLongPress();
       }, ms);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const s = start.current;
+      if (!s) return;
+      if (Math.abs(e.clientX - s.x) > 10 || Math.abs(e.clientY - s.y) > 10) clear();
     },
     onPointerUp: clear,
     onPointerLeave: clear,

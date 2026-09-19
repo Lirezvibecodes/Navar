@@ -18,6 +18,7 @@ import {
   RoundButton,
   Sheet,
   SheetItem,
+  useSwipeQueue,
   useSwipeRemove,
 } from "../components/ui";
 import {
@@ -31,7 +32,9 @@ import {
   NextIcon,
   PauseIcon,
   PlayIcon,
+  PlayNextIcon,
   PrevIcon,
+  QueueAddIcon,
   RepeatIcon,
   ShuffleIcon,
   TrashIcon,
@@ -99,6 +102,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     clearQueue,
     playFromUpNext,
     playFromContextNext,
+    queueNext,
+    queueLast,
     setShuffle,
     cycleRepeat,
     setSleepMinutes,
@@ -527,6 +532,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           onMenu={(track) => setMenu({ track })}
           onPlayUpNext={playFromUpNext}
           onPlayContextNext={playFromContextNext}
+          onQueueNext={queueNext}
+          onQueueLast={queueLast}
         />
       )}
       </div>
@@ -1064,6 +1071,8 @@ function QueuePane({
   onMenu,
   onPlayUpNext,
   onPlayContextNext,
+  onQueueNext,
+  onQueueLast,
 }: {
   current: Track;
   upNext: Track[];
@@ -1075,6 +1084,9 @@ function QueuePane({
   onMenu: (track: Track) => void;
   onPlayUpNext: (index: number) => void;
   onPlayContextNext: (index: number) => void;
+  /** Swipe right on a "Next from" row — it isn't in the explicit queue yet. */
+  onQueueNext: (track: Track) => void;
+  onQueueLast: (track: Track) => void;
 }) {
   const [lifted, setLifted] = useState<number | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
@@ -1129,7 +1141,12 @@ function QueuePane({
           >
             {upNext.map((track, i) => (
               <QueueRow
-                key={`${track.id}-${i}`}
+                // Just the id, not the index: queueNext/queueLast already
+                // dedupe upNext by id, so this is already a stable identity,
+                // and keying it also by position made every row after the one
+                // just removed or reordered remount — replaying the entrance
+                // animation for the whole rest of the list on every action.
+                key={track.id}
                 track={track}
                 index={i}
                 lifted={lifted === i}
@@ -1155,11 +1172,22 @@ function QueuePane({
           <QueueHeading label={`Next from: ${contextLabel ?? "here"}`} />
           {contextNext.slice(0, QUEUE_PREVIEW).map((track, i) => (
             <QueueRow
-              key={`${track.id}-ctx-${i}`}
+              // Keyed by distance from the end of contextNext, not from the
+              // start: tapping a row (or just advancing) drops everything up
+              // to and including it, which shifts the *start* of this list
+              // but never its end. Keying by `i` shifted every remaining
+              // row's key too and made React remount the whole rest of the
+              // list — visually indistinguishable from the queue getting
+              // reshuffled, even though the underlying order never changed.
+              // Distance from the end is the one thing that stays fixed for
+              // a given track across that shift.
+              key={`ctx-${contextNext.length - 1 - i}`}
               track={track}
               index={i}
               onMenu={() => onMenu(track)}
               onPlay={() => onPlayContextNext(i)}
+              onQueueNext={() => onQueueNext(track)}
+              onQueueLast={() => onQueueLast(track)}
             />
           ))}
           {/* The list is a preview, not the queue. Without this line a playlist
@@ -1233,6 +1261,8 @@ function QueueRow({
   onPlay,
   moves,
   index,
+  onQueueNext,
+  onQueueLast,
 }: {
   track: Track;
   playing?: boolean;
@@ -1246,10 +1276,20 @@ function QueueRow({
   /** Stagger position for the entrance animation; omitted for the single
    *  "Now playing" row, which has nothing to stagger against. */
   index?: number;
+  /** Swipe right to queue — only for a row that isn't already in the queue
+   *  (moves is set exactly when it is), same as TrackRow elsewhere. */
+  onQueueNext?: () => void;
+  onQueueLast?: () => void;
 }) {
   const [movesOpen, setMovesOpen] = useState(false);
-  const canSwipe = !!moves;
-  const swipe = useSwipeRemove(() => moves?.remove());
+  const canSwipeRemove = !!moves;
+  const canSwipeQueue = !moves && !!(onQueueNext || onQueueLast);
+  const swipeRemove = useSwipeRemove(() => moves?.remove());
+  const swipeQueue = useSwipeQueue(
+    () => (onQueueLast ?? onQueueNext)?.(),
+    () => (onQueueNext ?? onQueueLast)?.()
+  );
+  const queueReveal = canSwipeQueue ? swipeQueue.stage : "none";
 
   return (
     <div
@@ -1259,11 +1299,11 @@ function QueueRow({
           "--i": index,
           position: "relative",
           borderRadius: 10,
-          overflow: canSwipe ? "hidden" : undefined,
+          overflow: canSwipeRemove || canSwipeQueue ? "hidden" : undefined,
         } as React.CSSProperties
       }
     >
-      {canSwipe ? (
+      {canSwipeRemove ? (
         // Sits behind the row and only shows through the gap the leftward
         // swipe opens up — the same remove the ⋯ sheet already offers, just
         // reachable a beat faster from the row itself.
@@ -1281,7 +1321,7 @@ function QueueRow({
             fontWeight: 600,
             color: "#0A0A0A",
             background: "var(--color-nav-danger)",
-            opacity: swipe.armed ? 1 : 0,
+            opacity: swipeRemove.armed ? 1 : 0,
             transition: "opacity var(--dur-tap) var(--ease)",
           }}
         >
@@ -1290,8 +1330,34 @@ function QueueRow({
         </div>
       ) : null}
 
+      {canSwipeQueue ? (
+        // Same idea, rightward: a "Next from: X" row isn't in the explicit
+        // queue yet, so swiping it right offers the same play-next/add-to-
+        // queue pair TrackRow's swipe already does elsewhere in the app.
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            paddingLeft: 14,
+            gap: 6,
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "#0A0A0A",
+            background: "var(--color-nav-action)",
+            opacity: queueReveal === "none" ? 0 : 1,
+            transition: "opacity var(--dur-tap) var(--ease)",
+          }}
+        >
+          {queueReveal === "next" ? <PlayNextIcon size={15} /> : <QueueAddIcon size={15} />}
+          {queueReveal === "next" ? "Play next" : "Add to queue"}
+        </div>
+      ) : null}
+
       <div
-        ref={canSwipe ? swipe.ref : undefined}
+        ref={canSwipeRemove ? swipeRemove.ref : canSwipeQueue ? swipeQueue.ref : undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -1301,14 +1367,16 @@ function QueueRow({
           background: lifted ? "rgba(255,255,255,.07)" : undefined,
           transform: lifted
             ? "scale(1.02)"
-            : canSwipe && swipe.dragX
-              ? `translateX(${swipe.dragX}px)`
-              : undefined,
+            : canSwipeRemove && swipeRemove.dragX
+              ? `translateX(${swipeRemove.dragX}px)`
+              : canSwipeQueue && swipeQueue.dragX
+                ? `translateX(${swipeQueue.dragX}px)`
+                : undefined,
           transition:
-            canSwipe && swipe.dragging()
+            (canSwipeRemove && swipeRemove.dragging()) || (canSwipeQueue && swipeQueue.dragging())
               ? "background-color var(--dur-state) var(--ease)"
               : "background-color var(--dur-state) var(--ease), transform var(--dur-tap) var(--ease)",
-          touchAction: canSwipe ? "pan-y" : undefined,
+          touchAction: canSwipeRemove || canSwipeQueue ? "pan-y" : undefined,
         }}
       >
       {moves ? (
