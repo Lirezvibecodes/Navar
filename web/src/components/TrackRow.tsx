@@ -142,7 +142,7 @@ export function TrackRow({
               // Releasing eases back to rest over --dur-settle rather than
               // snapping — the row was dragged there, so it should visibly
               // travel back, not teleport.
-              : "background-color var(--dur-state) var(--ease), transform var(--dur-settle) var(--ease)",
+              : "background-color var(--dur-state) var(--ease), transform var(--dur-settle) var(--ease-settle)",
           touchAction: canSwipe ? "pan-y" : undefined,
         }}
       >

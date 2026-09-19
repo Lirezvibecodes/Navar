@@ -1309,7 +1309,10 @@ export function SwipeQueueReveal({
 }) {
   const settle = dragging
     ? undefined
-    : "width var(--dur-settle) var(--ease), background-color var(--dur-settle) var(--ease), box-shadow var(--dur-settle) var(--ease), opacity var(--dur-settle) var(--ease)";
+    : "width var(--dur-settle) var(--ease-settle), background-color var(--dur-settle) var(--ease-settle), box-shadow var(--dur-settle) var(--ease-settle), opacity var(--dur-settle) var(--ease-settle)";
+  // The touchmove clamp lets dragX overshoot SWIPE_QUEUE_PX by 24px (a bit of
+  // rubber-band "give" once both chips are already fully open). progress is
+  // still capped at 1 here so the glow doesn't overshoot with it.
   const queueProgress = Math.max(0, Math.min((dragX - NEXT_CHIP_PX) / QUEUE_CHIP_PX, 1));
   return (
     <div
@@ -1333,7 +1336,13 @@ export function SwipeQueueReveal({
       <SwipeChip
         icon={QueueAddIcon}
         label="Add to queue"
-        width={Math.max(0, Math.min(dragX - NEXT_CHIP_PX, QUEUE_CHIP_PX))}
+        // No upper clamp: this is the chip nearest the row's dragged edge, so
+        // it's the one that has to absorb the 24px of overscroll "give" above
+        // — capping it at QUEUE_CHIP_PX left the row's edge sliding on past
+        // the colour for those last pixels, a visible gap that read as the
+        // colour "not following" and the bare row butting up against it.
+        width={Math.max(0, dragX - NEXT_CHIP_PX)}
+        fullWidth={QUEUE_CHIP_PX}
         progress={queueProgress}
         transition={settle}
       />
@@ -1341,6 +1350,7 @@ export function SwipeQueueReveal({
         icon={PlayNextIcon}
         label="Play next"
         width={Math.max(0, Math.min(dragX, NEXT_CHIP_PX))}
+        fullWidth={NEXT_CHIP_PX}
         progress={Math.max(0, Math.min(dragX / NEXT_CHIP_PX, 1))}
         // Fades hard once "Add to queue" starts taking over the gesture —
         // by the time that chip is fully open, this one is barely there.
@@ -1355,6 +1365,7 @@ function SwipeChip({
   icon: Icon,
   label,
   width,
+  fullWidth,
   progress,
   opacity = 1,
   transition,
@@ -1362,6 +1373,8 @@ function SwipeChip({
   icon: React.ComponentType<IconProps>;
   label: string;
   width: number;
+  /** This chip's own nominal fully-open width — what the label centers within. */
+  fullWidth: number;
   /** 0 at this chip's own left edge, 1 once it is fully open — drives the glow. */
   progress: number;
   opacity?: number;
@@ -1387,13 +1400,21 @@ function SwipeChip({
         transition,
       }}
     >
+      {/* Fixed at this chip's own full width and clipped by the parent's
+          (possibly narrower, animating) width above — not shrink-to-fit —
+          so the icon+label sit centered once the chip is fully open, instead
+          of pinned to the left with the extra space left dangling on the
+          right. Left-anchored inside that fixed width still means the
+          content only scrolls into view partway through the drag, same as
+          before; it just lands centered rather than off to one side. */}
       <div
         style={{
-          display: "inline-flex",
+          width: fullWidth,
+          display: "flex",
           alignItems: "center",
+          justifyContent: "center",
           gap: 6,
           height: "100%",
-          paddingLeft: 14,
           fontSize: 11.5,
           fontWeight: 600,
           whiteSpace: "nowrap",

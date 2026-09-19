@@ -573,13 +573,17 @@ body {
 :root {
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  /* Gentler than --ease: that curve snaps almost all its distance in the
+     first frames, which reads as abrupt on a row easing back to rest.
+     This one spreads the deceleration out for a softer, smoother settle. */
+  --ease-settle: cubic-bezier(0.33, 1, 0.68, 1);
 
   --dur-tap: 90ms; /* the press itself */
   --dur-state: 200ms; /* a control changing what it means */
   --dur-view: 300ms; /* a screen replacing another */
   --dur-focal: 460ms; /* the bar becoming the player */
   --dur-tab: 340ms; /* one tab opening while another closes */
-  --dur-settle: 380ms; /* a dragged row easing back to rest after release */
+  --dur-settle: 480ms; /* a dragged row easing back to rest after release */
   --dur-remove: 360ms; /* a swiped-to-remove row leaving before the gap closes */
 }
 

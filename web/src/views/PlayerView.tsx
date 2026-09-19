@@ -1313,7 +1313,7 @@ function QueueRow({
             color: "#0A0A0A",
             background: "var(--color-nav-danger)",
             opacity: swipeRemove.armed ? 1 : 0,
-            transition: swipeRemove.dragging() ? undefined : "opacity var(--dur-settle) var(--ease)",
+            transition: swipeRemove.dragging() ? undefined : "opacity var(--dur-settle) var(--ease-settle)",
             // Absolutely-positioned, so it paints above the (non-positioned,
             // in-flow) content row below regardless of DOM order — without
             // this every tap, drag-handle press and ⋯ press on this row hits
@@ -1363,7 +1363,7 @@ function QueueRow({
               ? "background-color var(--dur-state) var(--ease)"
               // Releasing eases back to rest over --dur-settle instead of
               // snapping — same reasoning as TrackRow's own swipe.
-              : "background-color var(--dur-state) var(--ease), transform var(--dur-settle) var(--ease)",
+              : "background-color var(--dur-state) var(--ease), transform var(--dur-settle) var(--ease-settle)",
           touchAction: canSwipeRemove || canSwipeQueue ? "pan-y" : undefined,
         }}
       >
