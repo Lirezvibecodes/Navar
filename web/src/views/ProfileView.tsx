@@ -273,7 +273,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                 <div style={{ display: "flex", alignItems: "stretch", marginTop: 7, minWidth: 0 }}>
                   {stats.topTrack ? (
                     <FavoriteChip
-                      label="Favourite track"
+                      label="Top track"
                       value={stats.topTrack.title ?? "Untitled"}
                       coverTrackId={stats.topTrack.cover_track_id}
                       profileUserId={userId}
@@ -281,7 +281,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   ) : null}
                   {stats.topArtist ? (
                     <FavoriteChip
-                      label="Favourite artist"
+                      label="Top artist"
                       value={stats.topArtist.name}
                       coverTrackId={stats.topArtist.cover_track_id}
                       profileUserId={userId}
