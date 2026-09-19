@@ -41,7 +41,7 @@ export function authRouter(): Router {
         // the one thing the client must handle before it can draw anything
         // else: there is no sensible way to render a person with no name.
         handle,
-        // Whether their listening is shown to friends. Off for anybody who has
+        // Whether their listening is shown to friends. On for anybody who has
         // never said otherwise, and carried here so the switch on the profile
         // screen renders in the right position without a request of its own.
         listening_public: listeningPublic,

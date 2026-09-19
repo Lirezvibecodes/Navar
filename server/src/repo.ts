@@ -22,8 +22,10 @@ export type Lang = "en" | "fa";
  *
  * The listening switch rides along for the same reason and at the same price —
  * a subquery on a primary key — rather than becoming a settings endpoint the
- * app would have to call before it could draw a switch. Absent means off:
- * somebody who has never touched it has no listen_status row at all.
+ * app would have to call before it could draw a switch. Absent means on:
+ * somebody who has never touched it has no listen_status row at all, and the
+ * product's default is open, matching the column default a first play would
+ * create the row with.
  *
  * `telegramLanguageCode` seeds `language` the first time this row is ever
  * touched, and only then — `COALESCE(users.language, ...)` leaves an existing
@@ -59,13 +61,13 @@ export async function ensureUser(
        language = COALESCE(users.language, EXCLUDED.language)
      RETURNING handle, accent_color, language, language_confirmed,
        COALESCE((SELECT ls.is_public FROM listen_status ls
-                 WHERE ls.telegram_user_id = users.telegram_user_id), false)
+                 WHERE ls.telegram_user_id = users.telegram_user_id), true)
          AS listening_public`,
     [telegramUserId, username ?? null, seedLanguage]
   );
   return {
     handle: rows[0]?.handle ?? null,
-    listeningPublic: rows[0]?.listening_public ?? false,
+    listeningPublic: rows[0]?.listening_public ?? true,
     accentColor: rows[0]?.accent_color ?? "lime",
     language: rows[0]?.language ?? null,
     languageConfirmed: rows[0]?.language_confirmed ?? false,
