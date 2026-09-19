@@ -352,13 +352,32 @@ body {
 /* A person's page. The same grain-over-gradient recipe as .nav-hero-band, but
    fading down into the screen's own near-black wash rather than a solid band
    — a face is a social colour in this palette (see Avatar), so the wash is
-   periwinkle only, never lime, and it dissolves before it becomes a card. */
+   periwinkle only, never lime, and it dissolves before it becomes a card.
+
+   The last stop is pinned 28px above the box's own bottom edge rather than a
+   percentage of its height, and holds its colour flat until then. A
+   percentage fades relative to the *whole* box, most of which is dead space
+   reserved for the floating TopBar, so on a taller header (a friend's action
+   row, a wrapped chip) the same percentage used to land mid-content instead
+   of past it — the wash would already be gone behind the last favourite chip
+   while it was still solid behind the avatar above it. Pinning to the bottom
+   means it stays flat behind every row of real content, however tall the
+   header gets, and only dissolves in the 28px of padding below — the same
+   28px `ProfileView` now leaves there — so it always resolves into the
+   screen's own wash in that one reserved gap rather than partway through
+   whatever is sitting on top of it. */
 .nav-profile-banner {
   position: relative;
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E")
       repeat,
-    linear-gradient(180deg, rgba(137, 174, 255, 0.4), rgba(137, 174, 255, 0.14) 46%, rgba(3, 3, 3, 0) 84%);
+    linear-gradient(
+      180deg,
+      rgba(137, 174, 255, 0.4),
+      rgba(137, 174, 255, 0.14) 46%,
+      rgba(137, 174, 255, 0.14) calc(100% - 28px),
+      rgba(3, 3, 3, 0) 100%
+    );
 }
 
 /* The top bar.

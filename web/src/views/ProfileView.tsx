@@ -89,9 +89,21 @@ export function usePixelatedBanner(coverUrl: string | null): string | null {
  * because it fades to fully transparent instead of to a matched colour; this
  * masks the whole layer — image and scrim together — the same way, so
  * whatever is actually behind it shows through on its own terms.
+ *
+ * The fade is pinned to a fixed distance from the layer's own bottom edge
+ * rather than a percentage of its height. A percentage measures from the top
+ * of the box — which is mostly dead space reserved for the floating TopBar —
+ * so as the header grows (a friend's action row, wrapped chips, a second
+ * favourite) the same percentage lands at a different point relative to the
+ * actual content, sometimes finishing the dissolve while a chip is still
+ * sitting on it. Pinning to the bottom instead means the scrim stays at full
+ * strength behind every row of real content — wherever that content ends —
+ * and only ever dissolves within the padding below it, which is exactly the
+ * blank margin this resolves into.
  */
 export function bannerLayerStyle(bannerUrl: string): React.CSSProperties {
-  const fade = "linear-gradient(180deg, #000 0%, #000 78%, transparent 100%)";
+  const fade =
+    "linear-gradient(180deg, #000 0%, #000 calc(100% - 28px), transparent 100%)";
   return {
     position: "absolute",
     inset: 0,
@@ -195,14 +207,23 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           name, the stats folded into the same line instead of a separate
           gradient card further down — the shape the reference asked for,
           bled to the screen's true top/edges so it sits behind the floating,
-          blurring TopBar the way that bar already documents content doing. */}
+          blurring TopBar the way that bar already documents content doing.
+
+          Top and bottom padding are the same 28px once the TopBar's own
+          reserved space is set aside (that space is invisible, painted over
+          by the bar itself, so it doesn't count as breathing room). Equal
+          padding on both sides of the content is what makes the header read
+          as centred in its box instead of pinned to the top with a slab of
+          leftover space underneath — and it hands `bannerLayerStyle` a
+          bottom margin exactly as tall as its own fixed fade band, so the
+          wash finishes dissolving precisely in the gap meant for it. */}
       <div
         className="nav-rise nav-profile-banner"
         style={{
           margin:
             "calc(-1 * (var(--nav-topbar-h) + var(--nav-top-inset) + 8px)) -14px 0",
           padding:
-            "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px 18px",
+            "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px 28px",
         }}
       >
         {/* A pixelated wash of the header's chosen track, under everything
