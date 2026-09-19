@@ -97,6 +97,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     removeFromQueue,
     moveInQueue,
     clearQueue,
+    playFromUpNext,
+    playFromContextNext,
     setShuffle,
     cycleRepeat,
     setSleepMinutes,
@@ -523,6 +525,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           onMove={moveInQueue}
           onClear={clearQueue}
           onMenu={(track) => setMenu({ track })}
+          onPlayUpNext={playFromUpNext}
+          onPlayContextNext={playFromContextNext}
         />
       )}
       </div>
@@ -1058,6 +1062,8 @@ function QueuePane({
   onMove,
   onClear,
   onMenu,
+  onPlayUpNext,
+  onPlayContextNext,
 }: {
   current: Track;
   upNext: Track[];
@@ -1067,6 +1073,8 @@ function QueuePane({
   onMove: (from: number, to: number) => void;
   onClear: () => void;
   onMenu: (track: Track) => void;
+  onPlayUpNext: (index: number) => void;
+  onPlayContextNext: (index: number) => void;
 }) {
   const [lifted, setLifted] = useState<number | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
@@ -1127,6 +1135,7 @@ function QueuePane({
                 lifted={lifted === i}
                 onLift={() => setLifted(i)}
                 onMenu={() => onMenu(track)}
+                onPlay={() => onPlayUpNext(i)}
                 moves={{
                   isFirst: i === 0,
                   isLast: i === upNext.length - 1,
@@ -1150,6 +1159,7 @@ function QueuePane({
               track={track}
               index={i}
               onMenu={() => onMenu(track)}
+              onPlay={() => onPlayContextNext(i)}
             />
           ))}
           {/* The list is a preview, not the queue. Without this line a playlist
@@ -1220,6 +1230,7 @@ function QueueRow({
   lifted,
   onLift,
   onMenu,
+  onPlay,
   moves,
   index,
 }: {
@@ -1228,6 +1239,8 @@ function QueueRow({
   lifted?: boolean;
   onLift?: () => void;
   onMenu: () => void;
+  /** Jump to this track. Omitted for "Now playing" — it's already playing. */
+  onPlay?: () => void;
   /** The reorder actions, when this row is one that can be reordered. */
   moves?: QueueMoves;
   /** Stagger position for the entrance animation; omitted for the single
@@ -1278,15 +1291,7 @@ function QueueRow({
       ) : null}
 
       <div
-        {...(canSwipe
-          ? {
-              onPointerDown: swipe.onPointerDown,
-              onPointerMove: swipe.onPointerMove,
-              onPointerUp: swipe.onPointerUp,
-              onPointerCancel: swipe.onPointerCancel,
-              onPointerLeave: swipe.onPointerLeave,
-            }
-          : {})}
+        ref={canSwipe ? swipe.ref : undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -1330,26 +1335,66 @@ function QueueRow({
         </button>
       ) : null}
 
-      <Cover trackId={track.id} hasCover={track.has_cover} size={36} radius={8} />
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          className="nav-clip"
+      {onPlay ? (
+        <button
+          className="nav-press"
+          onClick={() => {
+            haptic.tap();
+            onPlay();
+          }}
           style={{
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: playing ? "var(--color-nav-action)" : "#fff",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flex: 1,
+            minWidth: 0,
+            height: 52,
+            textAlign: "left",
           }}
         >
-          {trackTitle(track)}
-        </div>
-        <div
-          className="nav-clip"
-          style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
-        >
-          {trackArtist(track)}
-        </div>
-      </div>
+          <Cover trackId={track.id} hasCover={track.has_cover} size={36} radius={8} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              className="nav-clip"
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: playing ? "var(--color-nav-action)" : "#fff",
+              }}
+            >
+              {trackTitle(track)}
+            </div>
+            <div
+              className="nav-clip"
+              style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
+            >
+              {trackArtist(track)}
+            </div>
+          </div>
+        </button>
+      ) : (
+        <>
+          <Cover trackId={track.id} hasCover={track.has_cover} size={36} radius={8} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              className="nav-clip"
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: playing ? "var(--color-nav-action)" : "#fff",
+              }}
+            >
+              {trackTitle(track)}
+            </div>
+            <div
+              className="nav-clip"
+              style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
+            >
+              {trackArtist(track)}
+            </div>
+          </div>
+        </>
+      )}
 
       <span
         className="nav-numeral"

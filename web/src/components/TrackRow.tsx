@@ -154,15 +154,7 @@ export function TrackRow({
       ) : null}
 
       <div
-        {...(canSwipe
-          ? {
-              onPointerDown: swipe.onPointerDown,
-              onPointerMove: swipe.onPointerMove,
-              onPointerUp: swipe.onPointerUp,
-              onPointerCancel: swipe.onPointerCancel,
-              onPointerLeave: swipe.onPointerLeave,
-            }
-          : {})}
+        ref={canSwipe ? swipe.ref : undefined}
         style={{
           display: "flex",
           alignItems: "center",

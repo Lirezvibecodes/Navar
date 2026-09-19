@@ -1127,13 +1127,31 @@ export type SwipeQueueStage = "none" | "queue" | "next";
  * The axis is decided once, in the first ~10px of movement, and never
  * revisited: a vertical scroll that drifts sideways must stay a scroll for
  * its whole gesture, not lock into a swipe partway through it.
+ *
+ * Bound with a native, non-passive `touchmove` listener on `ref` rather than
+ * React's `onPointerMove`/`preventDefault` — which is why this used to fire
+ * on roughly one swipe in a hundred. `touch-action: pan-y` on the row leaves
+ * the WebView free to start its own vertical scroll the moment a touch shows
+ * the smallest vertical wobble, and a thumb's horizontal swipe is never
+ * entirely without one. Once the browser commits to that scroll it sends
+ * this gesture a `pointercancel` and no `preventDefault` after the fact
+ * undoes it — calling `preventDefault` on a *pointer* event never had the
+ * authority to stop that native pan in the first place, only a `touchmove`
+ * listener registered as non-passive does. The 1% that used to work were the
+ * swipes straight enough that the browser's own scroll recognizer never got
+ * interested to begin with. See useDragToDismiss in PlayerView, which hit
+ * the same wall first.
  */
 export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
   const [dragX, setDragX] = useState(0);
   const start = useRef<{ x: number; y: number } | null>(null);
   const deciding = useRef(false);
   const active = useRef(false);
   const stage = useRef<SwipeQueueStage>("none");
+  // Latest callbacks without re-binding the listeners on every render.
+  const actions = useRef({ onQueueLast, onQueueNext });
+  actions.current = { onQueueLast, onQueueNext };
 
   const stageFor = (dx: number): SwipeQueueStage => {
     if (dx >= SWIPE_NEXT_PX) return "next";
@@ -1149,19 +1167,24 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
     setDragX(0);
   };
 
-  return {
-    dragX,
-    stage: stageFor(dragX),
-    onPointerDown: (e: React.PointerEvent) => {
-      start.current = { x: e.clientX, y: e.clientY };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      start.current = { x: t.clientX, y: t.clientY };
       deciding.current = true;
       active.current = false;
-    },
-    onPointerMove: (e: React.PointerEvent) => {
+    };
+
+    const onMove = (e: TouchEvent) => {
       const s = start.current;
       if (!s) return;
-      const dx = e.clientX - s.x;
-      const dy = e.clientY - s.y;
+      const t = e.touches[0];
+      const dx = t.clientX - s.x;
+      const dy = t.clientY - s.y;
       if (deciding.current) {
         const adx = Math.abs(dx);
         const ady = Math.abs(dy);
@@ -1169,11 +1192,9 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
         // A thumb presses down and settles before it commits to a direction,
         // so the first sample past 10px is often a near-tie between the two
         // axes rather than a real vertical scroll. Deciding off that tie is
-        // what made this fire on maybe one swipe in a hundred: a gesture that
-        // read a few px more vertical at that instant was locked out for the
-        // rest of the drag. Waiting for one axis to actually pull ahead
-        // (capped so a genuinely diagonal drag still resolves) is what tells
-        // a swipe from a scroll.
+        // what made this lock out a genuine swipe for the rest of the drag.
+        // Waiting for one axis to actually pull ahead (capped so a genuinely
+        // diagonal drag still resolves) is what tells a swipe from a scroll.
         if (adx - ady < 6 && Math.max(adx, ady) < 22) return;
         deciding.current = false;
         if (ady >= adx || dx <= 0) {
@@ -1181,9 +1202,10 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
           return;
         }
         active.current = true;
-        e.currentTarget.setPointerCapture(e.pointerId);
       }
       if (!active.current) return;
+      // The only preventDefault that actually stops the native scroll — see
+      // the doc comment above.
       e.preventDefault();
       const clamped = Math.max(0, Math.min(dx, SWIPE_NEXT_PX + 24));
       const next = stageFor(clamped);
@@ -1192,17 +1214,32 @@ export function useSwipeQueue(onQueueLast: () => void, onQueueNext: () => void) 
         haptic.select();
       }
       setDragX(clamped);
-    },
-    onPointerUp: () => {
+    };
+
+    const onEnd = () => {
       const finished = stage.current;
-      if (finished === "next") onQueueNext();
-      else if (finished === "queue") onQueueLast();
       reset();
-    },
-    onPointerCancel: reset,
-    onPointerLeave: () => {
-      if (active.current) reset();
-    },
+      if (finished === "next") actions.current.onQueueNext();
+      else if (finished === "queue") actions.current.onQueueLast();
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchcancel", reset);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", reset);
+    };
+  }, []);
+
+  return {
+    /** Attach to the row element the gesture drags. */
+    ref,
+    dragX,
+    stage: stageFor(dragX),
     /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
     dragging: () => active.current,
   };
@@ -1215,13 +1252,18 @@ const SWIPE_REMOVE_PX = 64;
  * One threshold, the opposite direction: the track is already queued, so the
  * gesture that adds a track to a queue and the gesture that removes one
  * already in it can never be mistaken for each other.
+ *
+ * Same native-listener fix as useSwipeQueue, for the same reason.
  */
 export function useSwipeRemove(onRemove: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
   const [dragX, setDragX] = useState(0);
   const start = useRef<{ x: number; y: number } | null>(null);
   const deciding = useRef(false);
   const active = useRef(false);
   const armed = useRef(false);
+  const onRemoveRef = useRef(onRemove);
+  onRemoveRef.current = onRemove;
 
   const reset = () => {
     start.current = null;
@@ -1231,19 +1273,24 @@ export function useSwipeRemove(onRemove: () => void) {
     setDragX(0);
   };
 
-  return {
-    dragX,
-    armed: dragX <= -SWIPE_REMOVE_PX,
-    onPointerDown: (e: React.PointerEvent) => {
-      start.current = { x: e.clientX, y: e.clientY };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      start.current = { x: t.clientX, y: t.clientY };
       deciding.current = true;
       active.current = false;
-    },
-    onPointerMove: (e: React.PointerEvent) => {
+    };
+
+    const onMove = (e: TouchEvent) => {
       const s = start.current;
       if (!s) return;
-      const dx = e.clientX - s.x;
-      const dy = e.clientY - s.y;
+      const t = e.touches[0];
+      const dx = t.clientX - s.x;
+      const dy = t.clientY - s.y;
       if (deciding.current) {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         deciding.current = false;
@@ -1252,7 +1299,6 @@ export function useSwipeRemove(onRemove: () => void) {
           return;
         }
         active.current = true;
-        e.currentTarget.setPointerCapture(e.pointerId);
       }
       if (!active.current) return;
       e.preventDefault();
@@ -1263,16 +1309,31 @@ export function useSwipeRemove(onRemove: () => void) {
         haptic.select();
       }
       setDragX(clamped);
-    },
-    onPointerUp: () => {
+    };
+
+    const onEnd = () => {
       const shouldRemove = armed.current;
       reset();
-      if (shouldRemove) onRemove();
-    },
-    onPointerCancel: reset,
-    onPointerLeave: () => {
-      if (active.current) reset();
-    },
+      if (shouldRemove) onRemoveRef.current();
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchcancel", reset);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", reset);
+    };
+  }, []);
+
+  return {
+    /** Attach to the row element the gesture drags. */
+    ref,
+    dragX,
+    armed: dragX <= -SWIPE_REMOVE_PX,
     /** True mid-drag, so the tap handler can stand down the same way long-press's does. */
     dragging: () => active.current,
   };

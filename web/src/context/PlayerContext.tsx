@@ -112,6 +112,15 @@ interface PlayerApi {
   moveInQueue: (from: number, to: number) => void;
   clearQueue: () => void;
 
+  /**
+   * Jump straight to a track sitting further down `upNext`. Whatever was
+   * ahead of it is treated as skipped, not as something to circle back to —
+   * the same way tapping track 5 in a playlist doesn't leave 1–4 waiting.
+   */
+  playFromUpNext: (index: number) => void;
+  /** Same, for a track further down `contextNext`. */
+  playFromContextNext: (index: number) => void;
+
   setShuffle: (on: boolean) => void;
   cycleRepeat: () => void;
   setSleepMinutes: (minutes: number | null) => void;
@@ -346,6 +355,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearQueue = useCallback(() => setUpNext([]), []);
+
+  const playFromUpNext = useCallback(
+    (index: number) => {
+      const track = upNext[index];
+      if (!track) return;
+      setUpNext(upNext.slice(index + 1));
+      load(track, true);
+    },
+    [upNext, load]
+  );
+
+  const playFromContextNext = useCallback(
+    (index: number) => {
+      const absolute = cursor + 1 + index;
+      const track = order[absolute];
+      if (!track) return;
+      setCursor(absolute);
+      load(track, true);
+    },
+    [cursor, order, load]
+  );
 
   const setShuffle = useCallback(
     (on: boolean) => {
@@ -662,6 +692,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       removeFromQueue,
       moveInQueue,
       clearQueue,
+      playFromUpNext,
+      playFromContextNext,
       setShuffle,
       cycleRepeat,
       setSleepMinutes,
@@ -690,6 +722,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       removeFromQueue,
       moveInQueue,
       clearQueue,
+      playFromUpNext,
+      playFromContextNext,
       setShuffle,
       cycleRepeat,
       setSleepMinutes,
