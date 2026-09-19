@@ -1,7 +1,7 @@
 import type { Me } from "../types";
 import { Avatar } from "./Avatar";
 import { RoundButton } from "./ui";
-import { SearchIcon } from "../icons";
+import { SearchIcon, SettingsIcon } from "../icons";
 import { haptic } from "../telegram";
 
 /**
@@ -26,6 +26,8 @@ export function TopBar({
   me,
   onSearch,
   onProfile,
+  ownProfile = false,
+  onSettings,
 }: {
   title: string;
   /**
@@ -38,6 +40,13 @@ export function TopBar({
   me: Me | null;
   onSearch?: () => void;
   onProfile: () => void;
+  /**
+   * True while the screen already IS the viewer's own profile — the avatar
+   * shortcut to "your profile" would just reopen the page underneath it, so
+   * it is replaced with a shortcut to Settings instead.
+   */
+  ownProfile?: boolean;
+  onSettings?: () => void;
 }) {
   return (
     <header className="nav-topbar">
@@ -68,21 +77,25 @@ export function TopBar({
         <RoundButton icon={SearchIcon} label="Search" onClick={onSearch} />
       ) : null}
 
-      <button
-        aria-label="Your profile"
-        className="nav-press"
-        onClick={() => {
-          haptic.tap();
-          onProfile();
-        }}
-        style={{ flex: "none", display: "flex", borderRadius: "50%" }}
-      >
-        <Avatar
-          userId={me?.id ?? 0}
-          username={me?.handle ?? me?.username ?? me?.first_name}
-          size={34}
-        />
-      </button>
+      {ownProfile ? (
+        <RoundButton icon={SettingsIcon} label="Settings" onClick={() => onSettings?.()} />
+      ) : (
+        <button
+          aria-label="Your profile"
+          className="nav-press"
+          onClick={() => {
+            haptic.tap();
+            onProfile();
+          }}
+          style={{ flex: "none", display: "flex", borderRadius: "50%" }}
+        >
+          <Avatar
+            userId={me?.id ?? 0}
+            username={me?.handle ?? me?.username ?? me?.first_name}
+            size={34}
+          />
+        </button>
+      )}
     </header>
   );
 }

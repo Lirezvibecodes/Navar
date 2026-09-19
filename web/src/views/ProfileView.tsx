@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
-import { AddFriendButton } from "./SocialView";
-import { CoverPicker } from "./PlaylistView";
+import { AddFriendButton, PersonRow } from "./SocialView";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
@@ -14,16 +13,14 @@ import {
   Screen,
   SectionHeader,
   Sheet,
-  SheetDivider,
   Skeleton,
 } from "../components/ui";
 import {
   ChevronRightIcon,
   HeadphonesIcon,
-  ImageIcon,
   LibraryIcon,
-  SettingsIcon,
   StarIcon,
+  UserIcon,
 } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
@@ -32,7 +29,7 @@ import { formatListened, personName } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
 import { haptic } from "../telegram";
-import type { BadgeTier, Playlist } from "../types";
+import type { BadgeTier, Person, Playlist } from "../types";
 
 /** The banner's own pixelated wash, drawn at its own modest size rather than
  *  a story card's full 1080×1920 — same technique as the story-share
@@ -90,7 +87,7 @@ function usePixelatedBanner(coverUrl: string | null): string | null {
  * what.
  */
 export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }) {
-  const { me, tracks, playlists } = useLibrary();
+  const { me, playlists } = useLibrary();
   const { errorToast } = useToast();
 
   const isMe = me?.id === userId;
@@ -106,7 +103,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     ttl.profile
   );
 
-  const [pickingBg, setPickingBg] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
 
   const unfriend = async () => {
     try {
@@ -138,25 +135,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     }
   };
 
-  /**
-   * Pin a track's cover as the header's background, or null to go back to a
-   * wash of the most-played track — the same override-on-a-computed-default
-   * shape a playlist's own cover already is. Mirrors `PlaylistView`'s
-   * `chooseCover`: close the sheet, update optimistically, revert on failure.
-   */
-  const chooseBackground = async (trackId: string | null) => {
-    if (!profile) return;
-    const before = profile;
-    setPickingBg(false);
-    setProfile({ ...profile, background_track_id: trackId });
-    try {
-      await api.setProfileBackground(trackId);
-    } catch (err) {
-      setProfile(before);
-      errorToast(err, "Could not change your background");
-    }
-  };
-
   // The header's photo defaults to the owner's most-played track and can be
   // overridden with any cover from their own library — an override on a
   // computed default, the same shape `playlists.cover_track_id` already is.
@@ -181,19 +159,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   // of throwing away half of it here.
   const shared = !isMe ? (profile?.playlists ?? []) : [];
   const ownPlaylists = isMe ? playlists.slice(0, 3) : [];
-
-  // The meta line under the name: just friends now. Lifetime listening moved
-  // into its own lime ListenChip beside the tier — a number this good is a
-  // stat worth wearing, not a clause buried in a grey sentence. Your own
-  // track and playlist counts used to live here too; they're one scroll away
-  // in the Playlists section below, so saying them twice just crowded a line
-  // the header now also spends on favourites.
-  const metaParts: React.ReactNode[] = [];
-  if (profile?.friend_count != null) {
-    metaParts.push(
-      <Counted key="friends" count={profile.friend_count} one="friend" many="friends" />
-    );
-  }
 
   return (
     <Screen>
@@ -228,7 +193,12 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             style={{
               position: "absolute",
               inset: 0,
-              background: `linear-gradient(180deg, rgba(3,3,3,.6), rgba(3,3,3,.7) 50%, rgba(3,3,3,.9)), url(${bannerUrl}) center/cover no-repeat`,
+              // Reaches fully-opaque rgba(3,3,3,1) by the bottom edge — the
+              // exact rgb() of `.nav-screen-bg`'s own base color — so the
+              // banner's last pixel and the page's first pixel underneath it
+              // are colorimetrically identical. A blend instead of a cut,
+              // with no new color introduced.
+              background: `linear-gradient(180deg, rgba(3,3,3,.6), rgba(3,3,3,.75) 55%, rgba(3,3,3,1)), url(${bannerUrl}) center/cover no-repeat`,
             }}
           />
         ) : null}
@@ -242,17 +212,22 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
               size={84}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span
-                className="nav-clip nav-display"
-                style={{
-                  display: "block",
-                  fontSize: 25,
-                  lineHeight: 1.15,
-                  letterSpacing: "-0.01em",
-                }}
-              >
-                {name}
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span
+                  className="nav-clip nav-display"
+                  style={{
+                    display: "block",
+                    flex: "1 1 auto",
+                    minWidth: 0,
+                    fontSize: 25,
+                    lineHeight: 1.15,
+                    letterSpacing: "-0.01em",
+                  }}
+                >
+                  {name}
+                </span>
+                {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
+              </div>
               <div
                 style={{
                   display: "flex",
@@ -262,17 +237,11 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   flexWrap: "wrap",
                 }}
               >
-                {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
+                {profile?.friend_count != null ? (
+                  <FriendsChip count={profile.friend_count} onClick={() => setFriendsOpen(true)} />
+                ) : null}
                 {stats && stats.totalListenedSeconds > 0 ? (
                   <ListenChip seconds={stats.totalListenedSeconds} />
-                ) : null}
-                {metaParts.length > 0 ? (
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,.68)" }}>
-                    {metaParts.reduce<React.ReactNode[]>(
-                      (acc, part, i) => (i === 0 ? [part] : [...acc, " · ", part]),
-                      []
-                    )}
-                  </span>
                 ) : null}
               </div>
             </div>
@@ -302,55 +271,36 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             </div>
           ) : null}
 
-          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            {isMe ? (
-              <>
-                <GhostButton
-                  label="Change background"
-                  icon={ImageIcon}
-                  width={38}
-                  height={38}
-                  onClick={() => setPickingBg(true)}
-                />
-                <GhostButton
-                  label="Settings"
-                  icon={SettingsIcon}
-                  width={38}
-                  height={38}
-                  onClick={() => nav.push({ type: "settings" })}
-                />
-              </>
-            ) : (
-              <>
-                {known ? (
-                  <>
-                    <GhostButton
-                      icon={LibraryIcon}
-                      onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
-                    >
-                      Their Library
-                    </GhostButton>
-                    <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
-                  </>
-                ) : profile?.state === "pending_out" ? (
-                  <GhostButton disabled onClick={() => undefined}>
-                    Requested
+          {!isMe ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              {known ? (
+                <>
+                  <GhostButton
+                    icon={LibraryIcon}
+                    onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
+                  >
+                    Their Library
                   </GhostButton>
-                ) : (
-                  <AddFriendButton userId={userId} />
-                )}
-                {profile?.can_endorse ? (
-                  <GhostButton icon={StarIcon} onClick={() => void endorse()}>
-                    Endorse
-                  </GhostButton>
-                ) : profile?.endorsed ? (
-                  <GhostButton icon={StarIcon} disabled onClick={() => undefined}>
-                    Endorsed
-                  </GhostButton>
-                ) : null}
-              </>
-            )}
-          </div>
+                  <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
+                </>
+              ) : profile?.state === "pending_out" ? (
+                <GhostButton disabled onClick={() => undefined}>
+                  Requested
+                </GhostButton>
+              ) : (
+                <AddFriendButton userId={userId} />
+              )}
+              {profile?.can_endorse ? (
+                <GhostButton icon={StarIcon} onClick={() => void endorse()}>
+                  Endorse
+                </GhostButton>
+              ) : profile?.endorsed ? (
+                <GhostButton icon={StarIcon} disabled onClick={() => undefined}>
+                  Endorsed
+                </GhostButton>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -440,26 +390,13 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </>
       )}
 
-      {isMe ? (
-        <Sheet open={pickingBg} onClose={() => setPickingBg(false)} title="Profile background">
-          <div style={{ padding: "2px 12px 10px" }}>
-            <GhostButton
-              height={34}
-              disabled={!profile?.background_track_id}
-              onClick={() => void chooseBackground(null)}
-            >
-              Use most-played track
-            </GhostButton>
-          </div>
-          <SheetDivider />
-          <CoverPicker
-            tracks={tracks}
-            chosen={profile?.background_track_id ?? null}
-            onPick={(trackId) => void chooseBackground(trackId)}
-            emptyBody="None of your tracks carry cover art yet. Forward one that does, and it can stand for your header."
-          />
-        </Sheet>
-      ) : null}
+      <FriendsSheet
+        nav={nav}
+        userId={userId}
+        name={name}
+        open={friendsOpen}
+        onClose={() => setFriendsOpen(false)}
+      />
     </Screen>
   );
 }
@@ -483,6 +420,7 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
       className="nav-glass"
       style={{
         display: "inline-flex",
+        flexShrink: 0,
         alignItems: "center",
         gap: 5,
         height: 24,
@@ -496,6 +434,99 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
       <StarIcon size={11} />
       {tier.label}
     </span>
+  );
+}
+
+/**
+ * Who somebody knows, worn beside the tier chip and in the exact spot the
+ * tag used to sit — bolder than the tier chip it replaces there (800 weight,
+ * solid glass rather than a thin outline) because unlike the tier this one
+ * opens something: tapping it raises `FriendsSheet`. It only ever renders
+ * when the profile response actually carried a `friend_count`, which is the
+ * same self-or-friend visibility rule the backend's `/:id/friends` route
+ * re-checks before answering, so there is nothing to gate here beyond that.
+ */
+function FriendsChip({ count, onClick }: { count: number; onClick: () => void }) {
+  return (
+    <button
+      className="nav-glass nav-press"
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        height: 24,
+        padding: "0 10px 0 9px",
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 800,
+        color: "#fff",
+      }}
+    >
+      <UserIcon size={11} />
+      <Counted count={count} one="friend" many="friends" />
+    </button>
+  );
+}
+
+/**
+ * The list a `FriendsChip` opens — same rows as the Social tab's own friends
+ * list (`PersonRow`, exported from `SocialView`), fetched fresh on every
+ * open rather than cached, since it's somebody else's list rather than the
+ * viewer's own and isn't worth a cache key of its own.
+ */
+function FriendsSheet({
+  nav,
+  userId,
+  name,
+  open,
+  onClose,
+}: {
+  nav: Navigation;
+  userId: number;
+  name: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [friends, setFriends] = useState<Person[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setFriends(null);
+    void api.listUserFriends(userId).then((list) => {
+      if (!cancelled) setFriends(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, userId]);
+
+  return (
+    <Sheet open={open} onClose={onClose} title={`${name}'s friends`}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "2px 12px 10px" }}>
+        {friends === null ? (
+          <Skeleton rows={4} />
+        ) : friends.length === 0 ? (
+          <Empty title="No friends yet" body="Nobody has connected with them yet." />
+        ) : (
+          friends.map((friend, i) => (
+            <PersonRow
+              key={friend.telegram_user_id}
+              person={friend}
+              index={i}
+              onOpen={() => {
+                onClose();
+                nav.push({ type: "profile", userId: Number(friend.telegram_user_id) });
+              }}
+            />
+          ))
+        )}
+      </div>
+    </Sheet>
   );
 }
 

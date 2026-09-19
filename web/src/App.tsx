@@ -182,6 +182,9 @@ function Shell({ me }: { me: Me }) {
   const named =
     view.type === "playlist" || view.type === "artist" || view.type === "album";
   const title = TITLES[view.type];
+  // The top bar's own-profile shortcut is pointless while already on that
+  // exact page — swapped for a Settings shortcut instead, see TopBar.
+  const onOwnProfile = view.type === "profile" && view.userId === me.id;
 
   return (
     <div
@@ -210,6 +213,8 @@ function Shell({ me }: { me: Me }) {
               }
         }
         onProfile={() => push({ type: "profile", userId: me.id })}
+        ownProfile={onOwnProfile}
+        onSettings={() => push({ type: "settings" })}
       />
 
       <div

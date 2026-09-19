@@ -363,6 +363,15 @@ export function listUserPlaylists(id: string | number): Promise<Playlist[]> {
   return request<Playlist[]>(`/api/users/${id}/playlists`);
 }
 
+/**
+ * Who somebody else knows. Only answers for yourself or an actual friend —
+ * the server 403s everyone else, matching the same rule a profile's own
+ * `friend_count` is already gated by.
+ */
+export function listUserFriends(id: string | number): Promise<Person[]> {
+  return request<Person[]>(`/api/users/${id}/friends`);
+}
+
 export function friendInviteLink(): Promise<string> {
   return request<{ link: string }>("/api/friends/link").then((r) => r.link);
 }

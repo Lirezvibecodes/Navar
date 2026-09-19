@@ -2,9 +2,11 @@ import { Router } from "express";
 import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
+  areFriends,
   endorsePerson,
   getUserAvatarFileId,
   getUserProfile,
+  listFriends,
   listPlaylistsVisibleTo,
   searchPeople,
 } from "../repo";
@@ -140,6 +142,31 @@ export function usersRouter(): Router {
         return;
       }
       res.status(204).end();
+    })
+  );
+
+  /**
+   * Who this person knows — the same list `/api/friends` gives them about
+   * themselves, opened for someone else. Gated on the same self-or-friend
+   * rule `friend_count` already uses on the profile response: a stranger
+   * gets 403 rather than an empty list, since an empty list would be
+   * indistinguishable from someone with genuinely no friends.
+   */
+  router.get(
+    "/:id/friends",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const userId = readUserId(req.params.id);
+      if (!userId) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      const viewerId = (req as AuthedRequest).telegramUserId;
+      if (viewerId !== userId && !(await areFriends(viewerId, userId))) {
+        res.status(403).json({ error: "Not visible" });
+        return;
+      }
+      res.json(await listFriends(userId));
     })
   );
 

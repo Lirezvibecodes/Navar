@@ -548,8 +548,10 @@ function ActivityRow({
  * The note under the name is for the one thing worth saying about somebody you
  * have not met — how many friends you have in common — and nothing else goes
  * there.
+ *
+ * Exported so the profile screen's friends-list sheet can render the same row.
  */
-function PersonRow({
+export function PersonRow({
   person,
   index,
   onOpen,

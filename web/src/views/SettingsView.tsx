@@ -4,10 +4,13 @@ import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
 import { ImageCropSheet } from "../components/ImageCropSheet";
 import { NameSheet } from "../components/NameSheet";
+import { CoverPicker } from "./PlaylistView";
 import { AccentPicker } from "../context/ThemeContext";
-import { Screen, SectionHeader, Toggle } from "../components/ui";
+import { GhostButton, Screen, SectionHeader, Sheet, SheetDivider, Toggle } from "../components/ui";
+import { ImageIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
+import { cacheKey, ttl, useCached } from "../lib/cache";
 import { haptic } from "../telegram";
 
 /**
@@ -17,7 +20,7 @@ import { haptic } from "../telegram";
  * a friend sees when they open you.
  */
 export function SettingsView({ nav: _nav }: { nav: Navigation }) {
-  const { me, setMe } = useLibrary();
+  const { me, tracks, setMe } = useLibrary();
   const { errorToast } = useToast();
 
   const [renaming, setRenaming] = useState(false);
@@ -28,6 +31,19 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
   // until the picture happens to be refetched some other way.
   const [avatarBust, setAvatarBust] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [pickingBg, setPickingBg] = useState(false);
+
+  // Same cache key `ProfileView` reads for this same person, so changing the
+  // background here shows up there the moment you navigate back — no extra
+  // wiring, just the one shared cache entry both screens already agree on.
+  const {
+    data: profile,
+    set: setProfile,
+  } = useCached(
+    cacheKey.profile(me?.id ?? 0),
+    () => (me ? api.getProfile(me.id) : Promise.reject(new Error("Not signed in"))),
+    ttl.profile
+  );
 
   const rename = async (typed: string) => {
     if (!me) return;
@@ -87,6 +103,26 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
     }
   };
 
+  /**
+   * Pin a track's cover as the profile header's background, or null to go
+   * back to a wash of the most-played track — the same override-on-a-
+   * computed-default shape a playlist's own cover already is. Mirrors
+   * `PlaylistView`'s `chooseCover`: close the sheet, update optimistically,
+   * revert on failure.
+   */
+  const chooseBackground = async (trackId: string | null) => {
+    if (!profile) return;
+    const before = profile;
+    setPickingBg(false);
+    setProfile({ ...profile, background_track_id: trackId });
+    try {
+      await api.setProfileBackground(trackId);
+    } catch (err) {
+      setProfile(before);
+      errorToast(err, "Could not change your background");
+    }
+  };
+
   if (!me) return null;
 
   return (
@@ -133,6 +169,11 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
         </button>
       </div>
 
+      <SectionHeader title="Profile" />
+      <GhostButton icon={ImageIcon} onClick={() => setPickingBg(true)}>
+        Change header background
+      </GhostButton>
+
       <SectionHeader title="Privacy" />
       <Toggle
         label="Show friends what I am playing"
@@ -177,6 +218,25 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
           void uploadAvatar(blob);
         }}
       />
+
+      <Sheet open={pickingBg} onClose={() => setPickingBg(false)} title="Profile background">
+        <div style={{ padding: "2px 12px 10px" }}>
+          <GhostButton
+            height={34}
+            disabled={!profile?.background_track_id}
+            onClick={() => void chooseBackground(null)}
+          >
+            Use most-played track
+          </GhostButton>
+        </div>
+        <SheetDivider />
+        <CoverPicker
+          tracks={tracks}
+          chosen={profile?.background_track_id ?? null}
+          onPick={(trackId) => void chooseBackground(trackId)}
+          emptyBody="None of your tracks carry cover art yet. Forward one that does, and it can stand for your header."
+        />
+      </Sheet>
     </Screen>
   );
 }
