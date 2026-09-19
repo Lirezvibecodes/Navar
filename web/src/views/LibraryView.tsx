@@ -184,13 +184,14 @@ export function LibraryView({ nav }: { nav: Navigation }) {
  * the whole reason this is here: it is a door, not a decoration, and it is the
  * one bright thing on the screen because it is the only shortcut on it.
  *
- * Dark ink on the gradient. White on lime is unreadable, and the left half of
- * this tile is lime.
+ * The lime lives in the icon's disc, not a fill across the whole tile — the
+ * same glass every other row on this screen sits in, so the shortcut reads as
+ * one more row that happens to matter rather than a slab dropped onto the page.
  */
 function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }) {
   return (
     <button
-      className="nav-press nav-rise"
+      className="nav-press nav-rise nav-glass"
       onClick={() => {
         haptic.tap();
         onOpen();
@@ -205,9 +206,6 @@ function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }
         padding: "0 14px",
         borderRadius: 16,
         textAlign: "left",
-        color: "#0A0A0A",
-        background: "linear-gradient(110deg, var(--color-nav-action), #89aeff)",
-        boxShadow: "0 10px 26px rgba(0,0,0,.45)",
       }}
     >
       <span
@@ -218,7 +216,8 @@ function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }
           width: 38,
           height: 38,
           borderRadius: 19,
-          background: "rgba(10,10,10,.13)",
+          background: "rgba(var(--color-nav-action-rgb),.16)",
+          color: "var(--color-nav-action)",
         }}
       >
         <HeartIcon size={18} />
@@ -231,12 +230,19 @@ function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }
         >
           Favourites
         </span>
-        <span style={{ display: "block", marginTop: 3, fontSize: 11.5, opacity: 0.68 }}>
+        <span
+          style={{
+            display: "block",
+            marginTop: 3,
+            fontSize: 11.5,
+            color: "var(--color-nav-muted)",
+          }}
+        >
           <Counted count={count} one="track" />
         </span>
       </span>
 
-      <ChevronRightIcon size={15} style={{ flex: "none", opacity: 0.55 }} />
+      <ChevronRightIcon size={15} style={{ flex: "none", opacity: 0.4 }} />
     </button>
   );
 }

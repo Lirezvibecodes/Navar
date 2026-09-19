@@ -349,6 +349,18 @@ body {
   border-radius: 0 0 26px 26px;
 }
 
+/* A person's page. The same grain-over-gradient recipe as .nav-hero-band, but
+   fading down into the screen's own near-black wash rather than a solid band
+   — a face is a social colour in this palette (see Avatar), so the wash is
+   periwinkle only, never lime, and it dissolves before it becomes a card. */
+.nav-profile-banner {
+  position: relative;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E")
+      repeat,
+    linear-gradient(180deg, rgba(137, 174, 255, 0.4), rgba(137, 174, 255, 0.14) 46%, rgba(3, 3, 3, 0) 84%);
+}
+
 /* The top bar.
 
    It is an overlay, not a row above the content: the scroll container starts
