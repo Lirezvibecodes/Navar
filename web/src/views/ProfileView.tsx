@@ -260,9 +260,11 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
               {/* Favourite track and favourite artist, directly under the
                   friends/listen row and sharing its left edge — the same
                   column, one row down, rather than a separate hero-sized
-                  block of their own. */}
+                  block of their own. Always side by side: each takes half
+                  the row and truncates its own value rather than wrapping
+                  the pair onto two lines. */}
               {stats?.topTrack || stats?.topArtist ? (
-                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "stretch", marginTop: 7, minWidth: 0 }}>
                   {stats.topTrack ? (
                     <FavoriteChip
                       label="Favourite track"
@@ -275,6 +277,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                       label="Favourite artist"
                       value={stats.topArtist.name}
                       coverTrackId={stats.topArtist.cover_track_id}
+                      divider={Boolean(stats.topTrack)}
                     />
                   ) : null}
                 </div>
@@ -572,36 +575,44 @@ function ListenChip({ seconds }: { seconds: number }) {
 }
 
 /**
- * A favourite, worn as a small glass pill inside the banner itself — cover
- * art (or a star, when even the artist's own tracks carry none) beside a
- * small-caps label and the value. Both the track and the artist get the same
- * square cover, like every other cover art in the app — an artist has no
- * more claim to a round portrait here than a playlist or an album does.
+ * A favourite, sitting in the header the way the count beside it does —
+ * cover art (or a star, when even the artist's own tracks carry none) next
+ * to a small-caps label and the value, with no pill of its own behind it.
+ * A full glass card here read as a badge stapled onto the header; bare text
+ * with no anchor at all read as nothing. The cover art already is a small,
+ * bounded shape, so it carries the "contained" half of that tension by
+ * itself — the second chip gets a hairline rule instead of its own box, the
+ * same way two figures in one stat row are divided, not each boxed apart.
+ * Both the track and the artist get the same square cover, like every other
+ * cover art in the app — an artist has no more claim to a round portrait
+ * here than a playlist or an album does.
  */
 function FavoriteChip({
   label,
   value,
   coverTrackId,
+  divider,
 }: {
   label: string;
   value: string;
   coverTrackId?: string | null;
+  divider?: boolean;
 }) {
   return (
     <span
-      className="nav-glass"
       style={{
-        display: "inline-flex",
+        display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "3px 9px 3px 3px",
-        borderRadius: 11,
-        maxWidth: "100%",
+        gap: 7,
+        flex: "1 1 0",
         minWidth: 0,
+        paddingLeft: divider ? 10 : 0,
+        marginLeft: divider ? 10 : 0,
+        borderLeft: divider ? "1px solid rgba(255,255,255,.14)" : "none",
       }}
     >
       {coverTrackId ? (
-        <CollectionArt name={value} coverTrackId={coverTrackId} size={20} radius={5} />
+        <CollectionArt name={value} coverTrackId={coverTrackId} size={22} radius={5} />
       ) : (
         <span
           style={{
@@ -609,8 +620,8 @@ function FavoriteChip({
             flex: "none",
             alignItems: "center",
             justifyContent: "center",
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             borderRadius: 5,
             background: "rgba(255,255,255,.12)",
           }}
@@ -622,7 +633,7 @@ function FavoriteChip({
         <span style={{ ...EYEBROW, display: "block", fontSize: 8 }}>{label}</span>
         <span
           className="nav-clip"
-          style={{ display: "block", fontSize: 10.5, fontWeight: 600, marginTop: 0, maxWidth: 100 }}
+          style={{ display: "block", fontSize: 10.5, fontWeight: 600, marginTop: 0 }}
         >
           {value}
         </span>
