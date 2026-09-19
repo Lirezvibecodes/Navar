@@ -135,6 +135,8 @@ export function TrackMenu({
   const share = async (t: Track) => {
     try {
       const { url } = await api.shareTrack(t.id);
+      // A share can trip Track Pusher, so the next Tags visit sees it fresh.
+      dropCache(cacheKey.tags);
       if (!shareLink(url, `Listen to ${trackTitle(t)} on Navaar`)) {
         toast("Not available outside Telegram");
       }

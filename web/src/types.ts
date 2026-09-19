@@ -247,6 +247,49 @@ export interface UserProfile {
   /** Null unless the profile's owner has pinned a track's cover as their
    *  header's background — otherwise it falls back to a wash of `stats.topTrack`. */
   background_track_id: string | null;
+  /** Up to 3 Navaar Tags this person has pinned, in the order they chose. */
+  equipped_tags: EquippedTag[];
+}
+
+/**
+ * Navaar Tags: a collectible identity layer, separate from the endorsement
+ * BadgeTier above — a tier says how people rate your taste, a tag says how
+ * you actually use music, and the two render in different places on a
+ * profile rather than merging into one.
+ */
+export type TagTier = "copper" | "chrome" | "gold" | "emerald" | "cosmic";
+export type TagCategory = "listening" | "library" | "playlists" | "social" | "secret";
+
+/**
+ * One tag as GET /api/tags returns it, unlocked or not. `progress`/`target`
+ * are null for any still-locked secret tag, and for the couple of public
+ * tags with no single number worth showing a bar for — never assume they are
+ * present just because the tag is public.
+ */
+export interface TagState {
+  id: string;
+  name: string;
+  category: TagCategory;
+  tier: TagTier;
+  secret: boolean;
+  unlocked: boolean;
+  unlocked_at: string | null;
+  equipped: boolean;
+  /** flavor text once unlocked, the locked clue line while it isn't. */
+  flavor: string;
+  progress: number | null;
+  target: number | null;
+}
+
+/** A tag as it appears pinned to someone else's profile — always unlocked,
+ *  never carrying progress, since only an earned tag can be equipped. */
+export interface EquippedTag {
+  id: string;
+  name: string;
+  category: TagCategory;
+  tier: TagTier;
+  secret: boolean;
+  flavor: string;
 }
 
 /** Somebody else's playlist as Home carries it: whose it is, and no share slug. */

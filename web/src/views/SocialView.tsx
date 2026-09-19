@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { Avatar } from "../components/Avatar";
@@ -8,14 +8,19 @@ import {
   ActionButton,
   Counted,
   Empty,
+  GhostButton,
   Screen,
   SectionHeader,
+  Sheet,
   Skeleton,
   TextField,
 } from "../components/ui";
 import {
+  ChevronRightIcon,
+  CloseIcon,
   DownloadIcon,
   HeadphonesIcon,
+  SearchIcon,
   ShareIcon,
   UserCheckIcon,
   UserPlusIcon,
@@ -30,17 +35,24 @@ import {
   revalidate,
   ttl,
 } from "../lib/cache";
-import { formatAge, namesList, personName, trackTitle } from "../lib/format";
+import {
+  formatAge,
+  listeningAge,
+  namesList,
+  personName,
+  trackTitle,
+} from "../lib/format";
 import { haptic, onActivationChange, shareLink } from "../telegram";
 import type { ActivityItem, Person, PersonResult, Suggestion } from "../types";
 
 /**
  * People.
  *
- * Who is playing something right now, what the people you know have been
- * doing, who is waiting on you, and anybody you go looking for.
- * A section with no data behind it renders nothing at all rather than an empty
- * frame — most of this screen is blank on the first day and that is correct.
+ * A live room (who is playing something right now, or was recently), an
+ * activity journal (what the people you know have been doing), who is
+ * waiting on you, and a directory to find more of them. A section with no
+ * data behind it renders nothing at all rather than an empty frame — most of
+ * this screen is blank on the first day and that is correct.
  *
  * Everything in the feed comes from one call. A row never names somebody you
  * cannot already see: the server leaves that name out, and this file has no
@@ -60,6 +72,9 @@ const ACTIVITY_REFRESH_MS = 30_000;
  */
 const SEARCH_DEBOUNCE_MS = 250;
 
+/** How many suggestions show inline before "See all" is worth offering. */
+const SUGGESTION_PREVIEW = 3;
+
 export function SocialView({ nav }: { nav: Navigation }) {
   const { toast, errorToast } = useToast();
   // Seeded from the cache so that opening this tab a second time shows the
@@ -72,9 +87,14 @@ export function SocialView({ nav }: { nav: Navigation }) {
   const [loading, setLoading] = useState(
     () => peek(cacheKey.friends) === undefined
   );
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PersonResult[]>([]);
   const [searched, setSearched] = useState(false);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>(
     () => peek<Suggestion[]>(cacheKey.suggestions) ?? []
   );
@@ -183,6 +203,15 @@ export function SocialView({ nav }: { nav: Navigation }) {
     };
   }, [query]);
 
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    setQuery("");
+    setSearchOpen(false);
+  };
+
   const accept = async (person: Person): Promise<boolean> => {
     setIncoming((rows) =>
       rows.filter((r) => r.telegram_user_id !== person.telegram_user_id)
@@ -194,7 +223,10 @@ export function SocialView({ nav }: { nav: Navigation }) {
         cacheKey.friends,
         cacheKey.suggestions,
         cacheKey.activity,
-        cacheKey.profile(person.telegram_user_id)
+        cacheKey.profile(person.telegram_user_id),
+        // Accepting is the one friendship action that lands on this session's
+        // own social tags (First Contact, Social Butterfly, Connector).
+        cacheKey.tags
       );
       haptic.success();
       return true;
@@ -243,15 +275,36 @@ export function SocialView({ nav }: { nav: Navigation }) {
 
   return (
     <Screen scrollKey="social">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-        <TextField
-          value={query}
-          onChange={setQuery}
-          placeholder="Find someone by their @name"
-          height={38}
-          autoCorrect={false}
-        />
-      </div>
+      {searchOpen ? (
+        <div
+          className="nav-rise"
+          style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}
+        >
+          <TextField
+            ref={searchRef}
+            value={query}
+            onChange={setQuery}
+            placeholder="Find someone by their @name"
+            height={38}
+            autoCorrect={false}
+          />
+          <GhostButton
+            icon={CloseIcon}
+            label="Close search"
+            width={44}
+            onClick={closeSearch}
+          />
+        </div>
+      ) : (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+          <GhostButton
+            icon={SearchIcon}
+            label="Find someone"
+            width={44}
+            onClick={() => setSearchOpen(true)}
+          />
+        </div>
+      )}
 
       {searching ? (
         <>
@@ -299,46 +352,45 @@ export function SocialView({ nav }: { nav: Navigation }) {
         </>
       ) : null}
 
-      {incoming.length > 0 ? (
-        <>
-          <SectionHeader title="Waiting on you" spaceAbove={16} />
-          {incoming.map((person, i) => (
-            <PersonRow
-              key={person.telegram_user_id}
-              person={person}
-              index={i}
-              onOpen={() => openProfile(person.telegram_user_id)}
-              action={
-                <ActionButton grow={false} onClick={() => void accept(person)}>
-                  Accept
-                </ActionButton>
-              }
-            />
-          ))}
-        </>
-      ) : null}
-
       {listening.length > 0 ? (
         <>
-          <SectionHeader title="Listening now" spaceAbove={22} />
+          <SectionHeader title="Live now" eyebrow spaceAbove={16} />
           <div className="nav-shelf" style={{ gap: 12 }}>
-            {listening.map((row, i) => (
-              <PersonTile
-                key={row.person.telegram_user_id}
-                person={row.person}
-                line={row.track ? trackTitle(row.track) : undefined}
-                live
-                index={i}
-                onOpen={() => openProfile(row.person.telegram_user_id)}
-              />
-            ))}
+            {listening.map((row, i) => {
+              const age = listeningAge(row.at);
+              return (
+                <PersonTile
+                  key={row.person.telegram_user_id}
+                  person={row.person}
+                  line={
+                    age.live
+                      ? row.track
+                        ? trackTitle(row.track)
+                        : undefined
+                      : age.label
+                  }
+                  live={age.live}
+                  dim={!age.live}
+                  index={i}
+                  onOpen={() => openProfile(row.person.telegram_user_id)}
+                />
+              );
+            })}
           </div>
         </>
       ) : null}
 
+      {incoming.length > 0 ? (
+        <FriendRequestsRow
+          count={incoming.length}
+          spaceAbove={listening.length > 0 ? 22 : 16}
+          onOpen={() => setRequestsOpen(true)}
+        />
+      ) : null}
+
       {feed.length > 0 ? (
         <>
-          <SectionHeader title="Going around" spaceAbove={22} />
+          <SectionHeader title="Around your people" eyebrow spaceAbove={22} />
           {feed.map((item, i) => (
             <ActivityRow
               key={item.kind + item.person.telegram_user_id + item.at}
@@ -356,10 +408,43 @@ export function SocialView({ nav }: { nav: Navigation }) {
         </>
       ) : null}
 
+      <SectionHeader
+        title="Your people"
+        eyebrow
+        action={friends.length > 0 ? "View all" : undefined}
+        onAction={() => setFriendsOpen(true)}
+        spaceAbove={22}
+      />
+      {friends.length === 0 ? (
+        <Empty
+          title="Nobody here yet"
+          body="Send someone your invite link. Once they add you, what each of you shares shows up on the other's Home."
+          action="Invite a friend"
+          onAction={() => void invite()}
+        />
+      ) : (
+        <div className="nav-shelf" style={{ gap: 12 }}>
+          {friends.map((person, i) => (
+            <PersonTile
+              key={person.telegram_user_id}
+              person={person}
+              index={i}
+              onOpen={() => openProfile(person.telegram_user_id)}
+            />
+          ))}
+        </div>
+      )}
+
+      <SectionHeader
+        title="Find your people"
+        eyebrow
+        action="Invite"
+        onAction={() => void invite()}
+        spaceAbove={22}
+      />
       {suggestions.length > 0 ? (
         <>
-          <SectionHeader title="People you may know" spaceAbove={22} />
-          {suggestions.map((person, i) => (
+          {suggestions.slice(0, SUGGESTION_PREVIEW).map((person, i) => (
             <PersonRow
               key={person.telegram_user_id}
               person={person}
@@ -382,42 +467,147 @@ export function SocialView({ nav }: { nav: Navigation }) {
               action={<AddFriendButton userId={person.telegram_user_id} />}
             />
           ))}
+          {suggestions.length > SUGGESTION_PREVIEW ? (
+            <button
+              className="nav-press"
+              onClick={() => {
+                haptic.tap();
+                setSuggestOpen(true);
+              }}
+              style={{
+                color: "var(--color-nav-action)",
+                fontSize: 11.5,
+                fontWeight: 600,
+                minHeight: 40,
+                padding: "4px 2px",
+              }}
+            >
+              See all
+            </button>
+          ) : null}
         </>
       ) : null}
 
-      <SectionHeader
-        title="Friends"
-        action="Invite"
-        onAction={() => void invite()}
-        spaceAbove={
-          incoming.length > 0 ||
-          searching ||
-          listening.length > 0 ||
-          feed.length > 0 ||
-          suggestions.length > 0
-            ? 22
-            : 16
-        }
-      />
+      <Sheet
+        open={requestsOpen}
+        onClose={() => setRequestsOpen(false)}
+        title="Friend requests"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "2px 12px 10px" }}>
+          {incoming.map((person, i) => (
+            <PersonRow
+              key={person.telegram_user_id}
+              person={person}
+              index={i}
+              onOpen={() => {
+                setRequestsOpen(false);
+                openProfile(person.telegram_user_id);
+              }}
+              action={
+                <ActionButton grow={false} onClick={() => void accept(person)}>
+                  Accept
+                </ActionButton>
+              }
+            />
+          ))}
+        </div>
+      </Sheet>
 
-      {friends.length === 0 ? (
-        <Empty
-          title="Nobody here yet"
-          body="Send someone your invite link. Once they add you, what each of you shares shows up on the other's Home."
-          action="Invite a friend"
-          onAction={() => void invite()}
-        />
-      ) : (
-        friends.map((person, i) => (
-          <PersonRow
-            key={person.telegram_user_id}
-            person={person}
-            index={i}
-            onOpen={() => openProfile(person.telegram_user_id)}
-          />
-        ))
-      )}
+      <Sheet
+        open={friendsOpen}
+        onClose={() => setFriendsOpen(false)}
+        title="Your people"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "2px 12px 10px" }}>
+          {friends.map((person, i) => (
+            <PersonRow
+              key={person.telegram_user_id}
+              person={person}
+              index={i}
+              onOpen={() => {
+                setFriendsOpen(false);
+                openProfile(person.telegram_user_id);
+              }}
+            />
+          ))}
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={suggestOpen}
+        onClose={() => setSuggestOpen(false)}
+        title="Find your people"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "2px 12px 10px" }}>
+          {suggestions.map((person, i) => (
+            <PersonRow
+              key={person.telegram_user_id}
+              person={person}
+              index={i}
+              note={
+                person.mutual_friends.length > 0 ? (
+                  <>Friends with {namesList(person.mutual_friends, person.mutual_count)}</>
+                ) : (
+                  <>
+                    <Counted
+                      count={person.mutual_count}
+                      one="friend"
+                      many="friends"
+                    />{" "}
+                    in common
+                  </>
+                )
+              }
+              onOpen={() => {
+                setSuggestOpen(false);
+                openProfile(person.telegram_user_id);
+              }}
+              action={<AddFriendButton userId={person.telegram_user_id} />}
+            />
+          ))}
+        </div>
+      </Sheet>
     </Screen>
+  );
+}
+
+/**
+ * The compact utility row for pending requests — a line, never a reserved
+ * block. It only ever renders while `incoming.length > 0`, so there is no
+ * empty state to design for: the row simply is not there otherwise.
+ */
+function FriendRequestsRow({
+  count,
+  spaceAbove,
+  onOpen,
+}: {
+  count: number;
+  spaceAbove: number;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      className="nav-press nav-row-in"
+      onClick={() => {
+        haptic.tap();
+        onOpen();
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        minHeight: 44,
+        marginTop: spaceAbove,
+        textAlign: "left",
+      }}
+    >
+      <UserPlusIcon size={16} style={{ color: "var(--color-nav-action)", flex: "none" }} />
+      <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600 }}>
+        <Counted count={count} one="friend request" many="friend requests" />
+      </span>
+      <ChevronRightIcon size={14} style={{ color: "var(--color-nav-faint)", flex: "none" }} />
+    </button>
   );
 }
 

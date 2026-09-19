@@ -118,7 +118,9 @@ export function CoverBackdrop({ palette }: { palette: Palette | null }) {
  * 16.5px, not 13. At 13 the heading was the same size as the row captions under
  * it, so a screen with four shelves read as one continuous grey column and you
  * had to find the section breaks by looking at the gaps. It is one of exactly
- * two heading treatments in the app — this and the uppercase eyebrow in TopBar.
+ * two heading treatments in the app — this and the uppercase eyebrow below,
+ * which `eyebrow` lets a section header borrow for a quieter, named-kind-of-
+ * thing section (Social's shelves) without a second heading component.
  * Its trailing action stays small: the size difference between a heading and
  * its affordance is what says which one is the label.
  */
@@ -127,11 +129,14 @@ export function SectionHeader({
   action,
   onAction,
   spaceAbove = 22,
+  eyebrow,
 }: {
   title: string;
   action?: string;
   onAction?: () => void;
   spaceAbove?: number;
+  /** Render `title` in the small uppercase eyebrow style instead of the default heading. */
+  eyebrow?: boolean;
 }) {
   return (
     <div
@@ -144,7 +149,11 @@ export function SectionHeader({
       }}
     >
       <span
-        style={{ fontSize: 16.5, fontWeight: 600, letterSpacing: "-0.015em" }}
+        style={
+          eyebrow
+            ? EYEBROW
+            : { fontSize: 16.5, fontWeight: 600, letterSpacing: "-0.015em" }
+        }
       >
         {title}
       </span>

@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { authenticate } from "./api";
+import { authenticate, getTags } from "./api";
 import { BottomNav } from "./components/BottomNav";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
@@ -14,7 +14,7 @@ import { Empty } from "./components/ui";
 import { FirstRun } from "./components/Welcome";
 import { LibraryProvider, useLibrary } from "./context/LibraryContext";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
-import { ToastProvider } from "./context/ToastContext";
+import { ToastProvider, useToast } from "./context/ToastContext";
 import { ThemeEffect } from "./context/ThemeContext";
 import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
@@ -27,10 +27,18 @@ import { FriendLibraryView } from "./views/FriendLibraryView";
 import { PlayerView } from "./views/PlayerView";
 import { SettingsView } from "./views/SettingsView";
 import { SharedView } from "./views/SharedView";
+import { TagsView } from "./views/TagsView";
 import { hideSplash } from "./lib/splash";
+import { peek, cacheKey, revalidate } from "./lib/cache";
 import { tabOriginX } from "./lib/tabOrigin";
-import { getTelegramWebApp, initTelegramPlatform, setBackButton } from "./telegram";
-import type { Me } from "./types";
+import {
+  getTelegramWebApp,
+  haptic,
+  initTelegramPlatform,
+  onActivationChange,
+  setBackButton,
+} from "./telegram";
+import type { Me, TagState } from "./types";
 import type { RootTab, View } from "./view";
 import { rootTabFor } from "./view";
 
@@ -82,7 +90,70 @@ const TITLES: Record<View["type"], string> = {
   profile: "Profile",
   friendLibrary: "Their Library",
   settings: "Settings",
+  tags: "Tags",
 };
+
+/**
+ * The one thing in Navaar watched for the whole session rather than a single
+ * screen: whether a tag has unlocked since the last time anything asked.
+ *
+ * Every mutation that could unlock one — a play recorded, a track saved, a
+ * playlist made or followed, a friend accepted — already drops `cacheKey.tags`
+ * (see `api.ts` and `LibraryContext.tsx`). That is enough for the Tags screen
+ * itself, which refetches on every mount, but it is not enough for the toast:
+ * `useCached`'s own effect only ever fires once for a stable key, so a tag
+ * unlocked while the user is on some other screen would otherwise go
+ * unannounced until they happened to open Tags and notice a new card. This
+ * polls in its place, on the same bounded, visibility-aware shape SocialView
+ * already uses for the activity feed — no new event bus, just the one poll
+ * this app already has a pattern for, pointed at a second key.
+ *
+ * The first observation in a session only ever seeds the baseline; it never
+ * toasts, so a tag unlocked in a past session is never announced again just
+ * because this session happened to be the first to look.
+ */
+const TAG_UNLOCK_POLL_MS = 45_000;
+
+function useTagUnlockToasts(): void {
+  const { toast } = useToast();
+  const seen = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    const cachedTags = peek<TagState[]>(cacheKey.tags);
+    if (cachedTags) {
+      seen.current = new Set(cachedTags.filter((t) => t.unlocked).map((t) => t.id));
+    }
+
+    const check = (tags: TagState[]) => {
+      if (seen.current) {
+        for (const tag of tags) {
+          if (tag.unlocked && !seen.current.has(tag.id)) {
+            toast(`Tag unlocked: ${tag.name}`);
+            haptic.success();
+          }
+        }
+      }
+      seen.current = new Set(tags.filter((t) => t.unlocked).map((t) => t.id));
+    };
+
+    // Through the cache rather than around it, so the Tags screen sees
+    // whatever this just fetched rather than asking again a moment later.
+    revalidate(cacheKey.tags, getTags).then(check).catch(() => undefined);
+
+    let onScreen = true;
+    const stop = onActivationChange((active) => {
+      onScreen = active;
+    });
+    const timer = window.setInterval(() => {
+      if (!onScreen || document.hidden) return;
+      revalidate(cacheKey.tags, getTags).then(check).catch(() => undefined);
+    }, TAG_UNLOCK_POLL_MS);
+    return () => {
+      window.clearInterval(timer);
+      stop();
+    };
+  }, [toast]);
+}
 
 function Shell({ me }: { me: Me }) {
   const [stack, setStack] = useState<View[]>([{ type: "home" }]);
@@ -97,6 +168,8 @@ function Shell({ me }: { me: Me }) {
 
   const { tracks, loading, error, reload } = useLibrary();
   const { current, restoreLast } = usePlayer();
+
+  useTagUnlockToasts();
 
   const view = stack[stack.length - 1];
 
@@ -181,6 +254,8 @@ function Shell({ me }: { me: Me }) {
         return <FriendLibraryView nav={nav} friendId={view.friendId} />;
       case "settings":
         return <SettingsView nav={nav} />;
+      case "tags":
+        return <TagsView nav={nav} />;
     }
   };
 
@@ -214,7 +289,12 @@ function Shell({ me }: { me: Me }) {
         subdued={named}
         me={me}
         onSearch={
-          view.type === "crate"
+          // Crate and Social both draw their own search field in place —
+          // see CrateView and SocialView — so the shared bar's icon, which
+          // only knows how to jump to Crate's search, would either be a
+          // second entry point into the same field or point at the wrong
+          // one entirely.
+          view.type === "crate" || view.type === "social"
             ? undefined
             : () => {
                 setSearchOnOpen(true);

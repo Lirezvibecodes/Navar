@@ -38,6 +38,22 @@ export function formatAge(iso: string): string {
   return `${Math.floor(days / 7)}w`;
 }
 
+/**
+ * Live vs. recent for the Social "Live now" shelf. Distinct from `formatAge`:
+ * that one is terse activity-feed shorthand ("20m"), this one draws the line
+ * a listening dot actually means ("NOW" only while genuinely live) and reads
+ * naturally next to it ("2h ago", "yesterday").
+ */
+export function listeningAge(iso: string): { live: boolean; label: string } {
+  const ms = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(ms / 60000);
+  if (min < 10) return { live: true, label: "NOW" };
+  if (min < 60) return { live: false, label: `${min}m ago` };
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return { live: false, label: `${hours}h ago` };
+  return { live: false, label: "yesterday" };
+}
+
 /** What to print when a file arrived with no title tag. */
 export function trackTitle(track: { title: string | null }): string {
   return track.title?.trim() || "Untitled";

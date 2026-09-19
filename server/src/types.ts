@@ -109,6 +109,22 @@ export interface SharedPlaylist {
 }
 
 /**
+ * A tag as it appears pinned to somebody's profile — never the caller's own,
+ * which reads the fuller TagState from GET /api/tags instead. Once a tag is
+ * equipped it is by definition unlocked, so its real name and flavor text are
+ * fine to show; this is only ever handed out for tags a person chose to pin,
+ * never for progress toward one they haven't earned yet.
+ */
+export interface EquippedTagSummary {
+  id: string;
+  name: string;
+  category: string;
+  tier: string;
+  secret: boolean;
+  flavor: string;
+}
+
+/**
  * What GET /api/shared/:slug answers with: the row, plus the way back in.
  *
  * The link is composed by the route rather than read from the database, which

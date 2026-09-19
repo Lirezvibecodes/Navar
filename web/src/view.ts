@@ -31,7 +31,9 @@ export type View =
   | { type: "profile"; userId: number }
   | { type: "friendLibrary"; friendId: number }
   /** Reached only from your own profile: name, photo, accent, privacy. */
-  | { type: "settings" };
+  | { type: "settings" }
+  /** Reached only by pushing from Profile — not a 4th bottom-nav tab. */
+  | { type: "tags" };
 
 /** The three destinations the bottom nav and the sidebar offer. */
 export type RootTab = "home" | "library" | "social";
@@ -55,6 +57,7 @@ export function rootTabFor(view: View): RootTab {
     case "profile":
     case "friendLibrary":
     case "settings":
+    case "tags":
       return "social";
   }
 }

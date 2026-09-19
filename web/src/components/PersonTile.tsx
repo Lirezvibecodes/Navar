@@ -16,6 +16,7 @@ export function PersonTile({
   person,
   line,
   live,
+  dim,
   index,
   onOpen,
 }: {
@@ -24,6 +25,8 @@ export function PersonTile({
   line?: string;
   /** A track is playing right now, not just was. Draws the lime corner dot. */
   live?: boolean;
+  /** Recently listening rather than live — fades the tile back a step. */
+  dim?: boolean;
   index: number;
   onOpen: () => void;
 }) {
@@ -47,6 +50,7 @@ export function PersonTile({
           width: 64,
           flex: "none",
           textAlign: "center",
+          opacity: dim ? 0.55 : 1,
         } as React.CSSProperties
       }
     >

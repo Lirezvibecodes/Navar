@@ -53,6 +53,7 @@ export const cacheKey = {
   suggestions: "social:suggestions",
   activity: "social:activity",
   palette: (id: string) => `palette:${id}`,
+  tags: "tags",
 } as const;
 
 /**
@@ -80,6 +81,9 @@ export const ttl = {
   activity: 30_000,
   /** A cover is fixed, so the colours taken from it are too. */
   palette: Infinity,
+  /** Dropped explicitly by every mutation that could unlock one, so this only
+   *  covers a tag unlocked by something this phone did not do the asking for. */
+  tags: 60_000,
 } as const;
 
 /** What is held for this key right now, without asking for any of it. */

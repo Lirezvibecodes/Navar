@@ -117,7 +117,7 @@ export function LibraryProvider({
   // needs the owner's name and cover, which this client does not otherwise have.
   const follow = useCallback(async (playlistId: string) => {
     await api.followPlaylist(playlistId);
-    dropCache(cacheKey.home);
+    dropCache(cacheKey.home, cacheKey.tags);
     setFollowedPlaylists(await api.listFollowedPlaylists());
   }, []);
 
@@ -148,8 +148,11 @@ export function LibraryProvider({
   // reload it eventually gets would put it anyway.
   const putTrack = useCallback((track: Track) => {
     // A retitled or newly hearted row is quoted by Home's shelves and sits
-    // inside whatever playlists hold it.
-    dropCache(cacheKey.home, "playlist:");
+    // inside whatever playlists hold it. It can also be what trips a library
+    // tag (a title/cover filled in, a favourite added), so tags is dropped
+    // alongside — a redundant refetch on a plain reload, but the only place
+    // every library-editing path funnels through.
+    dropCache(cacheKey.home, "playlist:", cacheKey.tags);
     setTracks((rows) =>
       rows.some((t) => t.id === track.id)
         ? rows.map((t) => (t.id === track.id ? track : t))
@@ -166,7 +169,7 @@ export function LibraryProvider({
   }, []);
 
   const markInPlaylist = useCallback((ids: string[]) => {
-    dropCache(cacheKey.home, "playlist:");
+    dropCache(cacheKey.home, "playlist:", cacheKey.tags);
     const filed = new Set(ids);
     setTracks((rows) =>
       rows.map((t) => (filed.has(t.id) ? { ...t, in_playlist: true } : t))
@@ -175,8 +178,9 @@ export function LibraryProvider({
 
   const putPlaylist = useCallback((playlist: Playlist) => {
     // Home draws playlist cards and a profile counts them; the rows inside are
-    // untouched by a rename or a change of cover, so that key stays.
-    dropCache(cacheKey.home, "profile:");
+    // untouched by a rename or a change of cover, so that key stays. A new
+    // playlist can trip a playlist tag, so tags is dropped too.
+    dropCache(cacheKey.home, "profile:", cacheKey.tags);
     setPlaylists((rows) => {
       const exists = rows.some((p) => p.id === playlist.id);
       return exists

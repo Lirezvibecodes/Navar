@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { getPool, withTransaction } from "./db";
 import { tierFor, type BadgeTier } from "./badges";
+import {
+  recordQualifiedListen,
+  evaluateLibraryTags,
+  evaluatePlaylistTags,
+  evaluateSocialTags,
+} from "./tagEvaluator";
+import { TAG_CATALOGUE, TAG_BY_ID, MAX_EQUIPPED_TAGS, type TagState } from "./tags";
 import type {
+  EquippedTagSummary,
   Playlist,
   PlaylistVisibility,
   SharedPlaylist,
@@ -276,6 +284,7 @@ export async function createTrack(input: NewTrack): Promise<Track> {
     INSERT_TRACK_SQL,
     insertTrackParams(input, input.album)
   );
+  void evaluateLibraryTags(input.ownerTelegramId);
   return rows[0];
 }
 
@@ -522,11 +531,16 @@ export interface SavedTrack {
  * the read path uses, so a track the requester may not have cannot be copied
  * even if the route's own check were removed.
  */
+type SaveOutcome =
+  | { track: Track; already: true }
+  | { track: Track; already: false; originId: number }
+  | null;
+
 export async function saveTrackToLibrary(
   sourceTrackId: string,
   saverTelegramId: number
 ): Promise<SavedTrack | null> {
-  return withTransaction(async (client) => {
+  const result = await withTransaction<SaveOutcome>(async (client) => {
     const live = async (): Promise<Track | null> => {
       const { rows } = await client.query<Track>(
         `SELECT ${TRACK_COLUMNS_T}
@@ -566,7 +580,7 @@ export async function saveTrackToLibrary(
     // rather than both deciding the slot was free. A slot whose copy has since
     // been deleted is taken over, because saving something again after throwing
     // it away is a thing people do on purpose.
-    const claim = await client.query(
+    const claim = await client.query<{ origin_id: string }>(
       `INSERT INTO track_saves (saver_id, origin_id, source_track_id, saved_track_id)
        SELECT $1, t.owner_telegram_id, t.id, $3 FROM tracks t WHERE t.id = $2
        ON CONFLICT (saver_id, source_track_id) DO UPDATE
@@ -575,7 +589,7 @@ export async function saveTrackToLibrary(
            SELECT 1 FROM tracks prev
            WHERE prev.id = track_saves.saved_track_id AND prev.deleted_at IS NULL
          )
-       RETURNING saved_track_id`,
+       RETURNING saved_track_id, origin_id`,
       [saverTelegramId, sourceTrackId, track.id]
     );
     if (claim.rowCount === 0) {
@@ -584,8 +598,18 @@ export async function saveTrackToLibrary(
       return winner ? { track: winner, already: true } : null;
     }
 
-    return { track, already: false };
+    return { track, already: false, originId: Number(claim.rows[0].origin_id) };
   });
+
+  // Fired only after commit: these run on their own pool connection, so
+  // evaluating against a still-open transaction would race the very row it
+  // just wrote (a fresh save invisible to its own tag count).
+  if (result && !result.already) {
+    void evaluateLibraryTags(saverTelegramId);
+    void evaluateSocialTags(result.originId);
+  }
+
+  return result ? { track: result.track, already: result.already } : null;
 }
 
 /** Tracks whose artwork was never captured — the input to a cover backfill. */
@@ -757,7 +781,11 @@ export async function updateTrackFields(
       fields.favorited === true,
     ]
   );
-  return rows[0] ?? null;
+  const track = rows[0] ?? null;
+  if (track && ("title" in fields || "artist" in fields || "album" in fields)) {
+    void evaluateLibraryTags(ownerTelegramId);
+  }
+  return track;
 }
 
 /**
@@ -784,7 +812,11 @@ export async function updateTrackCover(
       telegram ? cover.fileId : null,
     ]
   );
-  return rows[0] ?? null;
+  const track = rows[0] ?? null;
+  if (track) {
+    void evaluateLibraryTags(ownerTelegramId);
+  }
+  return track;
 }
 
 /**
@@ -935,6 +967,7 @@ export async function createPlaylist(
     `INSERT INTO playlists (owner_telegram_id, name) VALUES ($1, $2) RETURNING *`,
     [ownerTelegramId, name]
   );
+  void evaluatePlaylistTags(ownerTelegramId);
   return rows[0];
 }
 
@@ -1206,6 +1239,7 @@ export async function followPlaylist(
      VALUES ($1, $2) ON CONFLICT DO NOTHING`,
     [followerTelegramId, playlistId]
   );
+  void evaluatePlaylistTags(Number(playlist.owner_telegram_id));
   return true;
 }
 
@@ -1436,7 +1470,11 @@ export async function createTrackShare(
      RETURNING token`,
     [trackId, senderTelegramId, newShareSlug()]
   );
-  return rows[0]?.token ?? null;
+  const token = rows[0]?.token ?? null;
+  if (token) {
+    void evaluatePlaylistTags(senderTelegramId);
+  }
+  return token;
 }
 
 /**
@@ -1506,7 +1544,7 @@ export async function redeemTrackShare(
   const sourceTrackId = rows[0]?.track_id;
   if (!sourceTrackId) return null;
 
-  return withTransaction(async (client) => {
+  const result = await withTransaction<SaveOutcome>(async (client) => {
     const live = async (): Promise<Track | null> => {
       const { rows } = await client.query<Track>(
         `SELECT ${TRACK_COLUMNS_T}
@@ -1536,7 +1574,7 @@ export async function redeemTrackShare(
     const track = copy.rows[0];
     if (!track) return null;
 
-    const claim = await client.query(
+    const claim = await client.query<{ origin_id: string }>(
       `INSERT INTO track_saves (saver_id, origin_id, source_track_id, saved_track_id)
        SELECT $1, t.owner_telegram_id, t.id, $3 FROM tracks t WHERE t.id = $2
        ON CONFLICT (saver_id, source_track_id) DO UPDATE
@@ -1545,7 +1583,7 @@ export async function redeemTrackShare(
            SELECT 1 FROM tracks prev
            WHERE prev.id = track_saves.saved_track_id AND prev.deleted_at IS NULL
          )
-       RETURNING saved_track_id`,
+       RETURNING saved_track_id, origin_id`,
       [recipientTelegramId, sourceTrackId, track.id]
     );
     if (claim.rowCount === 0) {
@@ -1554,8 +1592,15 @@ export async function redeemTrackShare(
       return winner ? { track: winner, already: true } : null;
     }
 
-    return { track, already: false };
+    return { track, already: false, originId: Number(claim.rows[0].origin_id) };
   });
+
+  if (result && !result.already) {
+    void evaluateLibraryTags(recipientTelegramId);
+    void evaluateSocialTags(result.originId);
+  }
+
+  return result ? { track: result.track, already: result.already } : null;
 }
 
 export async function addPlaylistTrack(
@@ -2016,7 +2061,12 @@ export async function acceptFriendship(
      WHERE requester_id = $2 AND addressee_id = $1 AND status = 'pending'`,
     [addresseeId, requesterId]
   );
-  return (rowCount ?? 0) > 0;
+  const accepted = (rowCount ?? 0) > 0;
+  if (accepted) {
+    void evaluateSocialTags(addresseeId);
+    void evaluateSocialTags(requesterId);
+  }
+  return accepted;
 }
 
 /**
@@ -2293,7 +2343,7 @@ export async function listIdleIngestSessions(): Promise<IngestSession[]> {
 export async function createTrackInSession(
   input: NewTrack
 ): Promise<{ track: Track; session: IngestSession | null }> {
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const { rows: sessionRows } = await client.query<IngestSession>(
       `SELECT * FROM ingest_sessions WHERE telegram_user_id = $1 FOR UPDATE`,
       [input.ownerTelegramId]
@@ -2362,6 +2412,12 @@ export async function createTrackInSession(
 
     return { track, session: null };
   });
+
+  void evaluateLibraryTags(input.ownerTelegramId);
+  if (result.session?.mode === "playlist") {
+    void evaluatePlaylistTags(input.ownerTelegramId);
+  }
+  return result;
 }
 
 /**
@@ -2541,7 +2597,15 @@ export async function createTrackInGroupCrate(
   input: NewTrack,
   playlistId: string
 ): Promise<{ track: Track; position: number | null }> {
-  return withTransaction(async (client) => {
+  let crateOwnerId: number | null = null;
+
+  const result = await withTransaction(async (client) => {
+    const { rows: owner } = await client.query<{ owner_telegram_id: string }>(
+      `SELECT owner_telegram_id FROM playlists WHERE id = $1`,
+      [playlistId]
+    );
+    crateOwnerId = owner[0] ? Number(owner[0].owner_telegram_id) : null;
+
     const { rows } = await client.query<Track>(
       INSERT_TRACK_SQL,
       insertTrackParams(input, input.album)
@@ -2558,6 +2622,12 @@ export async function createTrackInGroupCrate(
 
     return { track, position: placed[0]?.position ?? null };
   });
+
+  void evaluateLibraryTags(input.ownerTelegramId);
+  if (crateOwnerId !== null) {
+    void evaluatePlaylistTags(crateOwnerId);
+  }
+  return result;
 }
 
 // --- Channel registry --------------------------------------------------------
@@ -2615,6 +2685,19 @@ export async function setAppChannel(
  * now" is not a lie.
  */
 const LISTENING_WINDOW_MINUTES = 10;
+
+/**
+ * How far back Social's "Live now" shelf will call somebody a recent
+ * listener rather than dropping them, and how many it will show.
+ *
+ * `listen_status` keeps exactly one row per user and never deletes it, so
+ * "recently listening" is the same `updated_at` column the ten-minute window
+ * already reads — just a wider filter, not a new field. Two days and twenty
+ * people are a judgment call with no retention policy to derive them from;
+ * they can move if the shelf ever feels stale or overcrowded.
+ */
+const SOCIAL_LIVE_LOOKBACK_MINUTES = 48 * 60;
+const SOCIAL_LIVE_SHELF_LIMIT = 20;
 
 /**
  * How long a play stays in the history.
@@ -2786,7 +2869,8 @@ export async function setListeningPrivacy(
  * opted out of telling you.
  */
 export async function listFriendsListening(
-  viewerTelegramId: number
+  viewerTelegramId: number,
+  windowMinutes: number = LISTENING_WINDOW_MINUTES
 ): Promise<ListeningNow[]> {
   const { rows } = await getPool().query<Record<string, unknown>>(
     `SELECT ${personColumns("u", "person")},
@@ -2798,7 +2882,7 @@ export async function listFriendsListening(
      JOIN users u ON u.telegram_user_id = ls.telegram_user_id
      JOIN tracks t ON t.id = ls.track_id
      WHERE ls.is_public
-       AND ls.updated_at > now() - interval '${LISTENING_WINDOW_MINUTES} minutes'
+       AND ls.updated_at > now() - interval '${windowMinutes} minutes'
        AND ${LIVE_T}
        AND EXISTS (
          SELECT 1 FROM friendships f
@@ -2844,7 +2928,8 @@ export async function listFriendsListening(
  */
 export async function recordPlay(
   telegramUserId: number,
-  trackId: string
+  trackId: string,
+  opts: { localMinuteOfDay?: number; localDate?: string } = {}
 ): Promise<boolean> {
   const { rowCount } = await getPool().query(
     `WITH pruned AS (
@@ -2865,7 +2950,11 @@ export async function recordPlay(
      WHERE u.telegram_user_id = $1`,
     [telegramUserId, trackId]
   );
-  return (rowCount ?? 0) > 0;
+  const landed = (rowCount ?? 0) > 0;
+  if (landed) {
+    void recordQualifiedListen(telegramUserId, trackId, opts);
+  }
+  return landed;
 }
 
 /**
@@ -3077,32 +3166,38 @@ async function listRecentSaves(
  * the other two's columns and the result would be harder to read than the
  * thing it saved. They go out together on one pool and are merged here.
  *
- * Every branch is already capped, so the merge is at most ninety rows in
- * memory before the cap that matters. Listening rows are always inside the
- * ten-minute window and therefore always sort to the top, which is the order
- * the screen wants anyway.
+ * Every branch is already capped, so the merge is at most a little over a
+ * hundred rows in memory before the cap that matters. Listening gets its own
+ * budget rather than sharing the feed's: once it looks back beyond ten
+ * minutes for the "recently listening" shelf, a stale listener is no longer
+ * guaranteed to sort above thirty shares and saves, and the shelf must never
+ * lose someone to a feed cap they have nothing to do with.
  */
 export async function listSocialActivity(
   viewerTelegramId: number
 ): Promise<ActivityItem[]> {
   const [listening, shared, saved] = await Promise.all([
-    listFriendsListening(viewerTelegramId),
+    listFriendsListening(viewerTelegramId, SOCIAL_LIVE_LOOKBACK_MINUTES),
     listRecentShares(viewerTelegramId),
     listRecentSaves(viewerTelegramId),
   ]);
 
-  const nowPlaying: ActivityItem[] = listening.map((row) => ({
-    kind: "listening" as const,
-    at: row.at,
-    person: row.person,
-    from: null,
-    track: row.track,
-    playlist: null,
-  }));
+  const nowPlaying: ActivityItem[] = listening
+    .slice(0, SOCIAL_LIVE_SHELF_LIMIT)
+    .map((row) => ({
+      kind: "listening" as const,
+      at: row.at,
+      person: row.person,
+      from: null,
+      track: row.track,
+      playlist: null,
+    }));
 
-  return [...nowPlaying, ...shared, ...saved]
+  const feed = [...shared, ...saved]
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, ACTIVITY_LIMIT);
+
+  return [...nowPlaying, ...feed];
 }
 
 // ---------------------------------------------------------------------------
@@ -3440,6 +3535,8 @@ export interface UserProfile {
    * which case the header falls back to a wash of their most-played track.
    */
   background_track_id: string | null;
+  /** Up to MAX_EQUIPPED_TAGS pinned Navaar Tags, in the order they chose. */
+  equipped_tags: EquippedTagSummary[];
 }
 
 const MUTUAL_FRIENDS_ON_PROFILE_LIMIT = 6;
@@ -3478,7 +3575,7 @@ export async function getUserProfile(
   // behind a friend request just left every stranger's profile looking empty.
   const canSeeFriendCount = isSelf || state === "friends";
 
-  const [playlists, friendCount, stats, mutualFriends] = await Promise.all([
+  const [playlists, friendCount, stats, mutualFriends, equippedTagRows] = await Promise.all([
     listPlaylistsVisibleTo(targetTelegramId, viewerTelegramId),
     canSeeFriendCount
       ? listFriends(targetTelegramId).then((f) => f.length)
@@ -3487,7 +3584,27 @@ export async function getUserProfile(
     !isSelf && state !== "friends"
       ? mutualFriendsOf(viewerTelegramId, targetTelegramId, MUTUAL_FRIENDS_ON_PROFILE_LIMIT)
       : Promise.resolve([]),
+    getPool().query<{ tag_id: string }>(
+      `SELECT tag_id FROM user_equipped_tags WHERE telegram_user_id = $1 ORDER BY position`,
+      [targetTelegramId]
+    ),
   ]);
+
+  // The catalogue, not the ledger, supplies the name/tier/flavor a plaque
+  // shows — user_equipped_tags only ever stores an id. A row whose tag_id
+  // isn't in TAG_BY_ID (a future catalogue rename) is dropped rather than
+  // rendered blank.
+  const equippedTags: EquippedTagSummary[] = equippedTagRows.rows
+    .map((r) => TAG_BY_ID.get(r.tag_id))
+    .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
+    .map((tag) => ({
+      id: tag.id,
+      name: tag.name,
+      category: tag.category,
+      tier: tag.tier,
+      secret: Boolean(tag.secret),
+      flavor: tag.flavor,
+    }));
 
   return {
     person: {
@@ -3505,6 +3622,7 @@ export async function getUserProfile(
     stats,
     mutual_friends: mutualFriends,
     background_track_id: row.background_track_id ? String(row.background_track_id) : null,
+    equipped_tags: equippedTags,
   };
 }
 
@@ -3537,7 +3655,10 @@ export async function endorsePerson(
      ON CONFLICT DO NOTHING`,
     [endorserId, endorseeId]
   );
-  if ((rowCount ?? 0) > 0) return "ok";
+  if ((rowCount ?? 0) > 0) {
+    void evaluateSocialTags(endorseeId);
+    return "ok";
+  }
 
   // Nothing was inserted, which is either of two very different things.
   const { rows } = await getPool().query<{ exists: boolean }>(
@@ -3548,6 +3669,266 @@ export async function endorsePerson(
     [endorserId, endorseeId]
   );
   return rows[0]?.exists ? "already" : "not-earned";
+}
+
+// ---------------------------------------------------------------------------
+// Navaar Tags
+// ---------------------------------------------------------------------------
+
+/**
+ * Collapses "Thom Yorke", " thom  yorke ", "THOM YORKE" to the same key.
+ * Mirrors tagEvaluator.ts's own normaliser (that module can't import this
+ * file back — see its own header comment — so the handful of lines are
+ * duplicated there rather than shared).
+ */
+function normalizeArtistKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+interface TagProgress {
+  progress: number;
+  target: number;
+}
+
+/**
+ * Everything GET /api/tags needs, in one batch of parallel reads rather than
+ * one per tag. These mirror tagEvaluator.ts's own queries almost exactly —
+ * that module decides unlocks with them, this one reads the same aggregates
+ * back for display — but nothing here writes; a stats-only read has no
+ * business sharing a code path with a fire-and-forget unlock check.
+ *
+ * Progress/target are computed only for a locked, public tag: an unlocked
+ * tag has nothing left to show a bar for, and a secret tag's condition is
+ * never leaked as a number, unlocked or not. Metadata Police is a two-part
+ * gate (a track count *and* a completeness ratio) that no single bar can
+ * represent, so it is deliberately left without one too.
+ */
+export async function getTagStates(telegramUserId: number): Promise<TagState[]> {
+  const pool = getPool();
+  const [
+    unlockedRows,
+    equippedRows,
+    trackStatsRow,
+    midnightRow,
+    dayRow,
+    artistRow,
+    userRow,
+    libraryRows,
+    playlistRows,
+    shareRow,
+    friendRow,
+    endorseRow,
+    plugRow,
+  ] = await Promise.all([
+    pool.query<{ tag_id: string; unlocked_at: string }>(
+      `SELECT tag_id, unlocked_at FROM user_tags WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ tag_id: string }>(
+      `SELECT tag_id FROM user_equipped_tags WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ has_play: boolean; max_play_count: string }>(
+      `SELECT EXISTS(SELECT 1 FROM user_tag_track_stats WHERE telegram_user_id = $1) AS has_play,
+              COALESCE(MAX(play_count), 0) AS max_play_count
+       FROM user_tag_track_stats WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ midnight_plays: string }>(
+      `SELECT midnight_plays FROM user_tag_stats WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*) FROM user_tag_listening_days WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*) FROM user_tag_listened_artists WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ total_listened_seconds: string }>(
+      `SELECT total_listened_seconds FROM users WHERE telegram_user_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{
+      artist: string | null;
+      album: string | null;
+      title: string | null;
+      has_cover: boolean;
+    }>(
+      `SELECT artist, album, title,
+              (cover_image IS NOT NULL OR cover_file_id IS NOT NULL) AS has_cover
+       FROM tracks WHERE owner_telegram_id = $1 AND ${LIVE}`,
+      [telegramUserId]
+    ),
+    pool.query<{
+      visibility: string;
+      group_chat_id: string | null;
+      track_count: string;
+      follower_count: string;
+    }>(
+      `SELECT p.visibility, p.group_chat_id,
+              (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) AS track_count,
+              (SELECT COUNT(*) FROM playlist_follows pf WHERE pf.playlist_id = p.id) AS follower_count
+       FROM playlists p WHERE p.owner_telegram_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(DISTINCT track_id) AS count FROM track_shares WHERE sender_telegram_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*) FROM friendships
+       WHERE status = 'accepted' AND (requester_id = $1 OR addressee_id = $1)`,
+      [telegramUserId]
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*) FROM endorsements WHERE endorsee_id = $1`,
+      [telegramUserId]
+    ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(DISTINCT source_track_id) AS count FROM track_saves
+       WHERE origin_id = $1 AND saver_id <> $1`,
+      [telegramUserId]
+    ),
+  ]);
+
+  const unlockedMap = new Map<string, string>(
+    unlockedRows.rows.map((r) => [r.tag_id, new Date(r.unlocked_at).toISOString()])
+  );
+  const equippedSet = new Set(equippedRows.rows.map((r) => r.tag_id));
+
+  const hasPlay = trackStatsRow.rows[0]?.has_play ?? false;
+  const maxPlayCount = Number(trackStatsRow.rows[0]?.max_play_count ?? 0);
+  const midnightPlays = Number(midnightRow.rows[0]?.midnight_plays ?? 0);
+  const listeningDays = Number(dayRow.rows[0]?.count ?? 0);
+  const listenedArtists = Number(artistRow.rows[0]?.count ?? 0);
+  const totalListenedSeconds = Number(userRow.rows[0]?.total_listened_seconds ?? 0);
+
+  let libraryTotal = 0;
+  const artistKeys = new Set<string>();
+  const albumKeys = new Set<string>();
+  let coverCount = 0;
+  let completeCount = 0;
+  for (const row of libraryRows.rows) {
+    libraryTotal++;
+    if (row.artist) {
+      for (const a of splitArtists(row.artist)) artistKeys.add(normalizeArtistKey(a));
+    }
+    if (row.album && row.album.trim()) albumKeys.add(row.album.trim().toLowerCase());
+    if (row.has_cover) coverCount++;
+    if (row.title?.trim() && row.artist?.trim() && row.album?.trim()) completeCount++;
+  }
+
+  const playlists = playlistRows.rows.map((r) => ({
+    visibility: r.visibility,
+    groupChatId: r.group_chat_id,
+    trackCount: Number(r.track_count),
+    followerCount: Number(r.follower_count),
+  }));
+  const sharedTracks = Number(shareRow.rows[0]?.count ?? 0);
+  const friends = Number(friendRow.rows[0]?.count ?? 0);
+  const endorsements = Number(endorseRow.rows[0]?.count ?? 0);
+  const plug = Number(plugRow.rows[0]?.count ?? 0);
+
+  const maxPlaylistTrackCount = playlists.reduce((m, p) => Math.max(m, p.trackCount), 0);
+  const maxPlaylistFollowers = playlists.reduce((m, p) => Math.max(m, p.followerCount), 0);
+  const maxPublicPlaylistFollowers = playlists
+    .filter((p) => p.visibility === "public")
+    .reduce((m, p) => Math.max(m, p.followerCount), 0);
+  const maxGroupCrateTrackCount = playlists
+    .filter((p) => p.groupChatId)
+    .reduce((m, p) => Math.max(m, p.trackCount), 0);
+
+  const progressByTag: Record<string, TagProgress | undefined> = {
+    first_spin: { progress: hasPlay ? 1 : 0, target: 1 },
+    regular: { progress: listeningDays, target: 7 },
+    deep_listener: { progress: totalListenedSeconds, target: 10 * 3600 },
+    midnight_radio: { progress: midnightPlays, target: 25 },
+    repeat_offender: { progress: maxPlayCount, target: 10 },
+    one_song_cult: { progress: maxPlayCount, target: 50 },
+    eclectic: { progress: listenedArtists, target: 50 },
+    crate_digger: { progress: libraryTotal, target: 25 },
+    crate_goblin: { progress: libraryTotal, target: 100 },
+    vault_keeper: { progress: libraryTotal, target: 250 },
+    album_nerd: { progress: albumKeys.size, target: 20 },
+    scene_builder: { progress: artistKeys.size, target: 50 },
+    art_director: { progress: coverCount, target: 10 },
+    // Two-part gate (50-track minimum, then 90% complete-metadata ratio) — show
+    // progress toward whichever half isn't cleared yet, matching the exact
+    // condition evaluateLibraryTags() checks in tagEvaluator.ts.
+    metadata_police:
+      libraryTotal < 50
+        ? { progress: libraryTotal, target: 50 }
+        : { progress: completeCount, target: Math.ceil(libraryTotal * 0.9) },
+    playlist_architect: { progress: playlists.length, target: 5 },
+    mixtape_machine: { progress: maxPlaylistTrackCount, target: 25 },
+    track_pusher: { progress: sharedTracks, target: 10 },
+    mixtape_dealer: { progress: maxPlaylistFollowers, target: 3 },
+    public_radio: { progress: maxPublicPlaylistFollowers, target: 5 },
+    group_chat_dj: { progress: maxGroupCrateTrackCount, target: 3 },
+    first_contact: { progress: friends, target: 1 },
+    social_butterfly: { progress: friends, target: 5 },
+    connector: { progress: friends, target: 10 },
+    taste_dealer: { progress: endorsements, target: 3 },
+    the_plug: { progress: plug, target: 10 },
+  };
+
+  return TAG_CATALOGUE.map((tag) => {
+    const unlockedAt = unlockedMap.get(tag.id) ?? null;
+    const unlocked = unlockedAt !== null;
+    const p = !unlocked && !tag.secret ? progressByTag[tag.id] : undefined;
+    return {
+      id: tag.id,
+      name: tag.name,
+      category: tag.category,
+      tier: tag.tier,
+      secret: Boolean(tag.secret),
+      unlocked,
+      unlocked_at: unlockedAt,
+      equipped: equippedSet.has(tag.id),
+      flavor: unlocked ? tag.flavor : tag.lockedClue,
+      progress: p ? Math.min(p.progress, p.target) : null,
+      target: p ? p.target : null,
+    };
+  });
+}
+
+/**
+ * Replaces the caller's equipped set in one transaction. Rejects an
+ * over-length list or any id that isn't both a real tag and one this user
+ * has actually unlocked — the route turns these into 400s rather than
+ * silently dropping the offending id, so a stale client finds out at once
+ * instead of equipping fewer tags than it asked for.
+ */
+export async function setEquippedTags(
+  telegramUserId: number,
+  tagIds: string[]
+): Promise<"ok" | "too-many" | "not-unlocked"> {
+  if (tagIds.length > MAX_EQUIPPED_TAGS) return "too-many";
+  const unique = [...new Set(tagIds)];
+  if (unique.some((id) => !TAG_BY_ID.has(id))) return "not-unlocked";
+
+  return withTransaction(async (client) => {
+    if (unique.length > 0) {
+      const { rows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*) FROM user_tags WHERE telegram_user_id = $1 AND tag_id = ANY($2::text[])`,
+        [telegramUserId, unique]
+      );
+      if (Number(rows[0]?.count ?? 0) !== unique.length) return "not-unlocked";
+    }
+
+    await client.query(`DELETE FROM user_equipped_tags WHERE telegram_user_id = $1`, [
+      telegramUserId,
+    ]);
+    for (let i = 0; i < unique.length; i++) {
+      await client.query(
+        `INSERT INTO user_equipped_tags (telegram_user_id, tag_id, position) VALUES ($1, $2, $3)`,
+        [telegramUserId, unique[i], i]
+      );
+    }
+    return "ok";
+  });
 }
 
 // ---------------------------------------------------------------------------

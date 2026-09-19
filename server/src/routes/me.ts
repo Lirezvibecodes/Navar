@@ -138,6 +138,12 @@ export function meRouter(): Router {
    * Log a play. The client sends one per track, well into it — a seek is not a
    * play, and neither is skipping through six songs looking for one.
    *
+   * `localMinuteOfDay` (0–1439) and `localDate` are optional and only ever
+   * used to check two late-night tags (Midnight Radio, the 4:44 Club secret)
+   * against the listener's own clock rather than the server's UTC one. A
+   * client that omits them simply never trips those two tags for that play —
+   * nothing here guesses at a timezone.
+   *
    * Nothing is returned but a 204: the history this feeds is read back as a
    * list, and a client that had to reconcile a row would be a client that
    * cares when this call fails. It does not.
@@ -146,13 +152,30 @@ export function meRouter(): Router {
     "/plays",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const { trackId } = req.body ?? {};
+      const { trackId, localMinuteOfDay, localDate } = req.body ?? {};
       if (typeof trackId !== "string") {
         res.status(400).json({ error: "trackId is required" });
         return;
       }
 
-      const ok = await recordPlay((req as AuthedRequest).telegramUserId, trackId);
+      const opts: { localMinuteOfDay?: number; localDate?: string } = {};
+      if (
+        typeof localMinuteOfDay === "number" &&
+        Number.isInteger(localMinuteOfDay) &&
+        localMinuteOfDay >= 0 &&
+        localMinuteOfDay < 1440
+      ) {
+        opts.localMinuteOfDay = localMinuteOfDay;
+      }
+      if (typeof localDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(localDate)) {
+        opts.localDate = localDate;
+      }
+
+      const ok = await recordPlay(
+        (req as AuthedRequest).telegramUserId,
+        trackId,
+        opts
+      );
       if (!ok) {
         res.status(404).json({ error: "Not found" });
         return;

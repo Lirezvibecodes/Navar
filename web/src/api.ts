@@ -13,9 +13,11 @@ import type {
   SharedPlaylistPage,
   SharedTrack,
   Suggestion,
+  TagState,
   Track,
   UserProfile,
 } from "./types";
+import { cacheKey, dropCache, writeCache } from "./lib/cache";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -423,11 +425,31 @@ export function setListeningPrivacy(
   });
 }
 
-/** Log a play, once a track has genuinely been listened to. */
+/**
+ * Log a play, once a track has genuinely been listened to.
+ *
+ * The local clock's minute-of-day and calendar date ride along because two
+ * Navaar Tags key off them (a late-night streak, a specific minute) and the
+ * server has no other way to know what midnight looked like from here — its
+ * own clock is UTC, and guessing the listener's timezone from an IP is the
+ * kind of thing this app does not do.
+ */
 export function recordPlay(trackId: string): Promise<void> {
+  const now = new Date();
   return request<void>("/api/me/plays", {
     method: "POST",
-    body: json({ trackId }),
+    body: json({
+      trackId,
+      localMinuteOfDay: now.getHours() * 60 + now.getMinutes(),
+      localDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+        now.getDate()
+      ).padStart(2, "0")}`,
+    }),
+  }).then(() => {
+    // Best-effort: a listening tag may have just unlocked. Dropped after the
+    // request lands rather than awaited by the caller, same as every other
+    // fire-and-forget play log in this app.
+    dropCache(cacheKey.tags);
   });
 }
 
@@ -587,4 +609,22 @@ export function sharedTrackCoverUrl(slug: string, trackId: string): string {
 export function sharedPlaylistCoverUrl(playlist: SharedPlaylist): string | null {
   if (!playlist.has_cover) return null;
   return `${API_BASE}/api/shared/${encodeURIComponent(playlist.share_slug)}/cover`;
+}
+
+// --- Navaar Tags --------------------------------------------------------------
+
+/** All 29 tags, unlocked or not, for the caller. One round trip, no N+1. */
+export function getTags(): Promise<TagState[]> {
+  return request<TagState[]>("/api/tags");
+}
+
+/** Pin up to 3 unlocked tags to the profile, in the order given. */
+export function setEquippedTags(tagIds: string[]): Promise<TagState[]> {
+  return request<TagState[]>("/api/tags/equipped", {
+    method: "PUT",
+    body: json({ tagIds }),
+  }).then((tags) => {
+    writeCache(cacheKey.tags, tags);
+    return tags;
+  });
 }
