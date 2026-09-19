@@ -1,4 +1,5 @@
 import { trackCoverUrl } from "../api";
+import { drawPixelatedWash as drawWash } from "./pixelWash";
 import type { Track } from "../types";
 
 /**
@@ -31,7 +32,6 @@ const COVER_Y = 300;
  *  blur pass on top of the blocks softens their hard edges without losing
  *  the pixelation itself. */
 const WASH_PIXEL_W = 54;
-const WASH_PIXEL_H = Math.round((HEIGHT / WIDTH) * WASH_PIXEL_W);
 const WASH_BLUR_PX = 8;
 
 const MAX_LYRIC_LINES = 8;
@@ -100,36 +100,11 @@ function drawCoverFit(
   ctx.restore();
 }
 
-/** Fills the whole canvas with a blocky, pixelated wash of `img`: drawn small
- *  onto an offscreen canvas, scaled back up with smoothing disabled so each
- *  source block stays a hard-edged square, then laid onto the real canvas
- *  through a soft blur so those edges read as gently out of focus rather
- *  than jagged. */
+/** Fills the whole canvas with a blocky, pixelated wash of `img`, at the
+ *  story card's own size — see `lib/pixelWash.ts` for how the wash itself is
+ *  built; the profile banner draws the same wash at a different size. */
 function drawPixelatedWash(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
-  const tiny = document.createElement("canvas");
-  tiny.width = WASH_PIXEL_W;
-  tiny.height = WASH_PIXEL_H;
-  const tctx = tiny.getContext("2d");
-  if (!tctx) return;
-  tctx.filter = "brightness(.45) saturate(1.3)";
-  const scale =
-    Math.max(WASH_PIXEL_W / img.naturalWidth, WASH_PIXEL_H / img.naturalHeight) * 1.2;
-  const dw = img.naturalWidth * scale;
-  const dh = img.naturalHeight * scale;
-  tctx.drawImage(img, (WASH_PIXEL_W - dw) / 2, (WASH_PIXEL_H - dh) / 2, dw, dh);
-
-  const blocky = document.createElement("canvas");
-  blocky.width = WIDTH;
-  blocky.height = HEIGHT;
-  const bctx = blocky.getContext("2d");
-  if (!bctx) return;
-  bctx.imageSmoothingEnabled = false;
-  bctx.drawImage(tiny, 0, 0, WIDTH, HEIGHT);
-
-  ctx.save();
-  ctx.filter = `blur(${WASH_BLUR_PX}px)`;
-  ctx.drawImage(blocky, 0, 0);
-  ctx.restore();
+  drawWash(ctx, img, WIDTH, HEIGHT, WASH_PIXEL_W, WASH_BLUR_PX);
 }
 
 /** Greedy word wrap, capped at `maxLines` — a card is a fixed canvas, not a scroller. */

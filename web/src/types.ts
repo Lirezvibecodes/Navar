@@ -239,6 +239,9 @@ export interface UserProfile {
   stats: ListeningStats | null;
   /** Populated only for a not-yet-connected suggested profile. */
   mutual_friends: Person[];
+  /** Null unless the profile's owner has pinned a track's cover as their
+   *  header's background — otherwise it falls back to a wash of `stats.topTrack`. */
+  background_track_id: string | null;
 }
 
 /** Somebody else's playlist as Home carries it: whose it is, and no share slug. */

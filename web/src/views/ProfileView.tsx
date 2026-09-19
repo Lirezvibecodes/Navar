@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton } from "./SocialView";
+import { CoverPicker } from "./PlaylistView";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
@@ -11,12 +13,13 @@ import {
   GhostButton,
   Screen,
   SectionHeader,
+  Sheet,
+  SheetDivider,
   Skeleton,
 } from "../components/ui";
 import {
-  BoltIcon,
   ChevronRightIcon,
-  type IconProps,
+  ImageIcon,
   LibraryIcon,
   SettingsIcon,
   ShareIcon,
@@ -26,8 +29,49 @@ import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { formatListened, personName } from "../lib/format";
+import { drawPixelatedWash } from "../lib/pixelWash";
+import { loadImage } from "../lib/storyCard";
 import { haptic, shareLink } from "../telegram";
-import type { ActivityTrack, BadgeTier, ListeningStats, Playlist } from "../types";
+import type { ActivityTrack, BadgeTier, Playlist } from "../types";
+
+/** The banner's own pixelated wash, drawn at its own modest size rather than
+ *  a story card's full 1080×1920 — same technique as the story-share
+ *  background (`lib/pixelWash.ts`), a different canvas. */
+const BANNER_W = 480;
+const BANNER_H = 220;
+
+/**
+ * A wash of whichever cover the header is showing, recomputed whenever that
+ * cover changes. There is exactly one owner and one viewer of it at a time,
+ * so nothing here needs to persist past the component that asked for it.
+ */
+function usePixelatedBanner(coverUrl: string | null): string | null {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!coverUrl) {
+      setDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const img = await loadImage(coverUrl);
+      if (cancelled || !img) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = BANNER_W;
+      canvas.height = BANNER_H;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      drawPixelatedWash(ctx, img, BANNER_W, BANNER_H);
+      if (!cancelled) setDataUrl(canvas.toDataURL("image/jpeg", 0.85));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [coverUrl]);
+
+  return dataUrl;
+}
 
 /**
  * One person's page — yours or somebody else's.
@@ -56,6 +100,8 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     () => api.getProfile(userId),
     ttl.profile
   );
+
+  const [pickingBg, setPickingBg] = useState(false);
 
   const invite = async () => {
     try {
@@ -96,6 +142,31 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
     }
   };
 
+  /**
+   * Pin a track's cover as the header's background, or null to go back to a
+   * wash of the most-played track — the same override-on-a-computed-default
+   * shape a playlist's own cover already is. Mirrors `PlaylistView`'s
+   * `chooseCover`: close the sheet, update optimistically, revert on failure.
+   */
+  const chooseBackground = async (trackId: string | null) => {
+    if (!profile) return;
+    const before = profile;
+    setPickingBg(false);
+    setProfile({ ...profile, background_track_id: trackId });
+    try {
+      await api.setProfileBackground(trackId);
+    } catch (err) {
+      setProfile(before);
+      errorToast(err, "Could not change your background");
+    }
+  };
+
+  // The header's photo defaults to the owner's most-played track and can be
+  // overridden with any cover from their own library — an override on a
+  // computed default, the same shape `playlists.cover_track_id` already is.
+  const bgTrackId = profile?.background_track_id ?? profile?.stats?.topTrack?.cover_track_id ?? null;
+  const bannerUrl = usePixelatedBanner(bgTrackId ? api.trackCoverUrl(bgTrackId) : null);
+
   if (loading) {
     return (
       <Screen>
@@ -115,15 +186,12 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const shared = !isMe ? (profile?.playlists ?? []) : [];
   const ownPlaylists = isMe ? playlists.slice(0, 3) : [];
 
-  // The meta line under the name: whatever counts this viewer is owed, joined
-  // into one sentence-case sentence rather than a row of separate chips —
-  // that is the one line the reference's banner spends on stats, so it is the
-  // one place the numbers this page has to show actually live.
+  // The meta line under the name: friends and lifetime listening, joined into
+  // one sentence rather than a row of separate chips. Your own track and
+  // playlist counts used to live here too; they're one scroll away in the
+  // Playlists section below, so saying them twice just crowded the line the
+  // header now also spends on favourites.
   const metaParts: React.ReactNode[] = [];
-  if (isMe) {
-    metaParts.push(<Counted key="tracks" count={tracks.length} one="track" />);
-    metaParts.push(<Counted key="playlists" count={playlists.length} one="playlist" />);
-  }
   if (profile?.friend_count != null) {
     metaParts.push(
       <Counted key="friends" count={profile.friend_count} one="friend" many="friends" />
@@ -149,108 +217,146 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
             "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px 18px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Avatar
-            userId={userId}
-            username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
-            hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
-            size={84}
+        {/* A pixelated wash of the header's chosen track, under everything
+            else — same technique as the story-share background, at the
+            banner's own size. Absolutely positioned so it paints under the
+            content below (CSS 2.1's painting order would otherwise put a
+            plain in-flow layer *over* positioned content at the same stack
+            level); the class's own noise-and-gradient wash still shows
+            through whenever nobody has a most-played track yet, so there is
+            nothing to gate this on beyond `bannerUrl` itself. The scrim is
+            flatter and stronger than the story card's own bottom-third
+            gradient, because a name and two favourites sit across this
+            banner's full height and all of it has to stay legible. */}
+        {bannerUrl ? (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `linear-gradient(180deg, rgba(3,3,3,.6), rgba(3,3,3,.7) 50%, rgba(3,3,3,.9)), url(${bannerUrl}) center/cover no-repeat`,
+            }}
           />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span
-              className="nav-clip nav-display"
-              style={{
-                display: "block",
-                fontSize: 25,
-                lineHeight: 1.15,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {name}
-            </span>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                marginTop: 6,
-                flexWrap: "wrap",
-              }}
-            >
-              {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
-              {metaParts.length > 0 ? (
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,.68)" }}>
-                  {metaParts.reduce<React.ReactNode[]>(
-                    (acc, part, i) => (i === 0 ? [part] : [...acc, " · ", part]),
-                    []
-                  )}
-                </span>
-              ) : null}
+        ) : null}
+
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <Avatar
+              userId={userId}
+              username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
+              hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
+              size={84}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span
+                className="nav-clip nav-display"
+                style={{
+                  display: "block",
+                  fontSize: 25,
+                  lineHeight: 1.15,
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                {name}
+              </span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  marginTop: 6,
+                  flexWrap: "wrap",
+                }}
+              >
+                {profile ? <TierChip tier={profile.tier} own={isMe} /> : null}
+                {metaParts.length > 0 ? (
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,.68)" }}>
+                    {metaParts.reduce<React.ReactNode[]>(
+                      (acc, part, i) => (i === 0 ? [part] : [...acc, " · ", part]),
+                      []
+                    )}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div style={{ display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" }}>
-          {isMe ? (
-            <>
-              <GhostButton icon={ShareIcon} onClick={() => void invite()}>
-                Invite a friend
-              </GhostButton>
-              <GhostButton
-                label="Settings"
-                icon={SettingsIcon}
-                width={38}
-                height={38}
-                onClick={() => nav.push({ type: "settings" })}
-              />
-            </>
-          ) : (
-            <>
-              {known ? (
-                <>
-                  <GhostButton
-                    icon={LibraryIcon}
-                    onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
-                  >
-                    Their Library
-                  </GhostButton>
-                  <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
-                </>
-              ) : profile?.state === "pending_out" ? (
-                <GhostButton disabled onClick={() => undefined}>
-                  Requested
-                </GhostButton>
-              ) : (
-                <AddFriendButton userId={userId} />
-              )}
-              {profile?.can_endorse ? (
-                <GhostButton icon={StarIcon} onClick={() => void endorse()}>
-                  Endorse
-                </GhostButton>
-              ) : profile?.endorsed ? (
-                <GhostButton icon={StarIcon} disabled onClick={() => undefined}>
-                  Endorsed
-                </GhostButton>
+          {/* Favourite track and favourite artist, folded into the header
+              itself now rather than living in a stats grid below the fold —
+              the one thing worth a hero spot doesn't need a whole section to
+              say it. */}
+          {stats?.topTrack || stats?.topArtist ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              {stats.topTrack ? (
+                <FavoriteChip
+                  label="Favourite track"
+                  value={stats.topTrack.title ?? "Untitled"}
+                  track={stats.topTrack}
+                />
               ) : null}
-            </>
-          )}
+              {stats.topArtist ? (
+                <FavoriteChip label="Favourite artist" value={stats.topArtist} />
+              ) : null}
+            </div>
+          ) : null}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            {isMe ? (
+              <>
+                <GhostButton icon={ShareIcon} width={172} onClick={() => void invite()}>
+                  Invite a friend
+                </GhostButton>
+                <GhostButton
+                  label="Change background"
+                  icon={ImageIcon}
+                  width={38}
+                  height={38}
+                  onClick={() => setPickingBg(true)}
+                />
+                <GhostButton
+                  label="Settings"
+                  icon={SettingsIcon}
+                  width={38}
+                  height={38}
+                  onClick={() => nav.push({ type: "settings" })}
+                />
+              </>
+            ) : (
+              <>
+                {known ? (
+                  <>
+                    <GhostButton
+                      icon={LibraryIcon}
+                      onClick={() => nav.push({ type: "friendLibrary", friendId: userId })}
+                    >
+                      Their Library
+                    </GhostButton>
+                    <GhostButton onClick={() => void unfriend()}>Remove</GhostButton>
+                  </>
+                ) : profile?.state === "pending_out" ? (
+                  <GhostButton disabled onClick={() => undefined}>
+                    Requested
+                  </GhostButton>
+                ) : (
+                  <AddFriendButton userId={userId} />
+                )}
+                {profile?.can_endorse ? (
+                  <GhostButton icon={StarIcon} onClick={() => void endorse()}>
+                    Endorse
+                  </GhostButton>
+                ) : profile?.endorsed ? (
+                  <GhostButton icon={StarIcon} disabled onClick={() => undefined}>
+                    Endorsed
+                  </GhostButton>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {isMe ? (
         <>
-          {hasStats(stats) ? (
-            <>
-              <SectionHeader title="Listening" spaceAbove={20} />
-              <StatsGrid stats={stats} />
-            </>
-          ) : profile ? (
-            <>
-              <SectionHeader title="Listening" spaceAbove={20} />
-              <Empty title="Nothing yet" body="Play something and your stats will land here." />
-            </>
-          ) : null}
-
           <SectionHeader
             title="Playlists"
             action="Manage"
@@ -287,13 +393,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         </>
       ) : (
         <>
-          {hasStats(stats) ? (
-            <>
-              <SectionHeader title="Listening" spaceAbove={20} />
-              <StatsGrid stats={stats} />
-            </>
-          ) : null}
-
           {!known && (profile?.mutual_friends.length ?? 0) > 0 ? (
             <>
               <SectionHeader title="Friends in common" />
@@ -341,6 +440,27 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           ) : null}
         </>
       )}
+
+      {isMe ? (
+        <Sheet open={pickingBg} onClose={() => setPickingBg(false)} title="Profile background">
+          <div style={{ padding: "2px 12px 10px" }}>
+            <GhostButton
+              height={34}
+              disabled={!profile?.background_track_id}
+              onClick={() => void chooseBackground(null)}
+            >
+              Use most-played track
+            </GhostButton>
+          </div>
+          <SheetDivider />
+          <CoverPicker
+            tracks={tracks}
+            chosen={profile?.background_track_id ?? null}
+            onPick={(trackId) => void chooseBackground(trackId)}
+            emptyBody="None of your tracks carry cover art yet. Forward one that does, and it can stand for your header."
+          />
+        </Sheet>
+      ) : null}
     </Screen>
   );
 }
@@ -381,132 +501,62 @@ function TierChip({ tier, own }: { tier: BadgeTier; own: boolean }) {
 }
 
 /**
- * Whether there is anything at all to draw a `StatsGrid` from.
- *
- * Lifetime listening is no longer this grid's business — it moved into the
- * banner's own meta line — so the grid itself only needs to exist once there
- * is a recent window or a most-played track to show.
+ * A favourite, worn as a small glass pill inside the banner itself — cover
+ * art (or a star, for the artist, who has none) beside a small-caps label
+ * and the value. This is what the stats grid's most-played tiles used to say
+ * below the fold; folding them into the header is what the reference asked
+ * for directly.
  */
-function hasStats(stats: ListeningStats | null | undefined): stats is ListeningStats {
-  return !!stats && (stats.totalPlays > 0 || !!stats.topTrack);
-}
-
-/**
- * What this person has been into lately, and the top of it — as glass tiles
- * rather than a line of text, so a number people have actually earned reads
- * like one. No hero card here any more: a flat gradient slab was the exact
- * "AI slop" the reference was called in against, and the one number worth a
- * hero treatment (lifetime listening) already lives in the banner above.
- */
-function StatsGrid({ stats }: { stats: ListeningStats }) {
-  const hasRecent = stats.totalPlays > 0;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingBottom: 14 }}>
-      {hasRecent ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: stats.topArtist ? "1fr 1fr" : "1fr",
-            gap: 10,
-          }}
-        >
-          <StatTile
-            icon={BoltIcon}
-            index={0}
-            value={<Counted count={stats.totalPlays} one="play" many="plays" />}
-            caption="last 90 days"
-          />
-          {stats.topArtist ? (
-            <StatTile icon={StarIcon} index={1} value={stats.topArtist} caption="most played" />
-          ) : null}
-        </div>
-      ) : null}
-
-      {stats.topTrack ? <TopTrackTile track={stats.topTrack} index={2} /> : null}
-    </div>
-  );
-}
-
-/**
- * The one stat that isn't a number — the actual track behind "most played",
- * with its own art. The plays/artist tiles above say how much and who; this
- * says what, which is the part a number can't carry on its own.
- */
-function TopTrackTile({ track, index }: { track: ActivityTrack; index: number }) {
-  return (
-    <div
-      className="nav-glass nav-row-in"
-      style={
-        {
-          "--i": index,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "10px 13px",
-          borderRadius: 16,
-        } as React.CSSProperties
-      }
-    >
-      <CollectionArt
-        name={track.title ?? "Untitled"}
-        coverTrackId={track.cover_track_id}
-        size={42}
-        radius={10}
-      />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ ...EYEBROW, display: "block" }}>Most played track</span>
-        <span
-          className="nav-clip"
-          style={{ display: "block", fontSize: 13, fontWeight: 600, marginTop: 2 }}
-        >
-          {track.title ?? "Untitled"}
-        </span>
-        {track.artist ? (
-          <span
-            className="nav-clip"
-            style={{ display: "block", fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}
-          >
-            {track.artist}
-          </span>
-        ) : null}
-      </span>
-    </div>
-  );
-}
-
-/** One glass tile in the `StatsGrid` — an icon, a headline value, a caption. */
-function StatTile({
-  icon: Icon,
-  index,
+function FavoriteChip({
+  label,
   value,
-  caption,
+  track,
 }: {
-  icon: (props: IconProps) => React.ReactNode;
-  index: number;
-  value: React.ReactNode;
-  caption: string;
+  label: string;
+  value: string;
+  track?: ActivityTrack | null;
 }) {
   return (
-    <div
-      className="nav-glass nav-row-in"
-      style={
-        {
-          "--i": index,
-          display: "flex",
-          flexDirection: "column",
-          gap: 7,
-          padding: "12px 13px",
-          borderRadius: 16,
-          minWidth: 0,
-        } as React.CSSProperties
-      }
+    <span
+      className="nav-glass"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px 6px 6px",
+        borderRadius: 14,
+        maxWidth: "100%",
+        minWidth: 0,
+      }}
     >
-      <Icon size={15} style={{ color: "var(--color-nav-action)" }} />
-      <span className="nav-clip" style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>
-        {value}
+      {track ? (
+        <CollectionArt name={value} coverTrackId={track.cover_track_id} size={28} radius={7} />
+      ) : (
+        <span
+          style={{
+            display: "flex",
+            flex: "none",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            background: "rgba(255,255,255,.12)",
+          }}
+        >
+          <StarIcon size={13} style={{ color: "var(--color-nav-action)" }} />
+        </span>
+      )}
+      <span style={{ minWidth: 0 }}>
+        <span style={{ ...EYEBROW, display: "block", fontSize: 9.5 }}>{label}</span>
+        <span
+          className="nav-clip"
+          style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginTop: 1, maxWidth: 140 }}
+        >
+          {value}
+        </span>
       </span>
-      <span style={{ fontSize: 11, color: "var(--color-nav-muted)" }}>{caption}</span>
-    </div>
+    </span>
   );
 }
 

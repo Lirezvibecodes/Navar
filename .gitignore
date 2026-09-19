@@ -13,3 +13,5 @@ web/public/telegram-web-app.js
 .idea/
 coverage/
 supabase/.temp/
+.claude/
+*.tsbuildinfo

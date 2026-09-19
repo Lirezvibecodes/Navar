@@ -520,6 +520,15 @@ export function getProfile(id: string | number): Promise<UserProfile> {
   return request<UserProfile>(`/api/users/${id}/profile`);
 }
 
+/** Pin a track's cover as your profile header's background, or pass null to
+ *  let it go back to a wash of your most-played track. */
+export function setProfileBackground(trackId: string | null): Promise<void> {
+  return request("/api/me/background", {
+    method: "POST",
+    body: json({ trackId }),
+  });
+}
+
 /**
  * Say somebody's taste is worth following.
  *

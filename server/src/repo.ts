@@ -1642,6 +1642,30 @@ export async function setAccentColor(
   );
 }
 
+/**
+ * Pin a track's cover as the profile header's background, or pass null to
+ * let it go back to the computed default (a wash of the most-played track).
+ * Mirrors `setPlaylistCover`: the WHERE clause is the whole validation, so a
+ * track that isn't yours or carries no artwork silently fails rather than
+ * being trusted on the strength of an id alone.
+ */
+export async function setProfileBackground(
+  telegramUserId: number,
+  trackId: string | null
+): Promise<boolean> {
+  const { rowCount } = await getPool().query(
+    `UPDATE users SET background_track_id = $2
+     WHERE telegram_user_id = $1
+       AND ($2::uuid IS NULL OR EXISTS (
+         SELECT 1 FROM tracks t
+         WHERE t.id = $2::uuid AND t.owner_telegram_id = $1
+           AND ${LIVE_T} AND t.cover_image IS NOT NULL
+       ))`,
+    [telegramUserId, trackId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 // ---------------------------------------------------------------------------
 // Derived collections
 // ---------------------------------------------------------------------------
@@ -3348,6 +3372,12 @@ export interface UserProfile {
   stats: ListeningStats | null;
   /** Who the viewer and this person both know, when they are not yet friends. */
   mutual_friends: PersonSummary[];
+  /**
+   * The track whose cover art the profile header uses as its background,
+   * chosen by the profile's owner. Null when they haven't picked one, in
+   * which case the header falls back to a wash of their most-played track.
+   */
+  background_track_id: string | null;
 }
 
 const MUTUAL_FRIENDS_ON_PROFILE_LIMIT = 6;
@@ -3365,8 +3395,11 @@ export async function getUserProfile(
        EXISTS (SELECT 1 FROM endorsements e
          WHERE e.endorsee_id = u.telegram_user_id AND e.endorser_id = $1) AS endorsed,
        EXISTS (SELECT 1 FROM track_saves ts
-         WHERE ts.saver_id = $1 AND ts.origin_id = u.telegram_user_id) AS has_saved
+         WHERE ts.saver_id = $1 AND ts.origin_id = u.telegram_user_id) AS has_saved,
+       t.id AS background_track_id
      FROM users u
+     LEFT JOIN tracks t
+       ON t.id = u.background_track_id AND ${LIVE_T} AND t.cover_image IS NOT NULL
      WHERE u.telegram_user_id = $2`,
     [viewerTelegramId, targetTelegramId]
   );
@@ -3409,6 +3442,7 @@ export async function getUserProfile(
     friend_count: friendCount,
     stats,
     mutual_friends: mutualFriends,
+    background_track_id: row.background_track_id ? String(row.background_track_id) : null,
   };
 }
 

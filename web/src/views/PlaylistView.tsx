@@ -460,24 +460,21 @@ export function PlaylistView({
  * the one it fell back to on its own, so the sheet opens already showing you
  * where you are rather than asking you to remember.
  */
-function CoverPicker({
+export function CoverPicker({
   tracks,
   chosen,
   onPick,
+  emptyBody = "None of these tracks arrived with cover art. Forward one that has some, and it can stand for the playlist.",
 }: {
   tracks: Track[];
   chosen: string | null;
   onPick: (trackId: string | null) => void;
+  emptyBody?: string;
 }) {
   const withArt = tracks.filter((t) => t.has_cover);
 
   if (withArt.length === 0) {
-    return (
-      <Empty
-        title="No artwork to choose from"
-        body="None of these tracks arrived with cover art. Forward one that has some, and it can stand for the playlist."
-      />
-    );
+    return <Empty title="No artwork to choose from" body={emptyBody} />;
   }
 
   return (

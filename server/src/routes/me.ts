@@ -13,6 +13,7 @@ import {
   setHandle,
   setListeningPrivacy,
   setListeningStatus,
+  setProfileBackground,
 } from "../repo";
 import { captionOf, personLabel, postCoverVideo } from "../channels";
 import { storeCover } from "./covers";
@@ -351,6 +352,26 @@ export function meRouter(): Router {
 
       await setAccentColor((req as AuthedRequest).telegramUserId, accentColor);
       res.json({ accent_color: accentColor });
+    })
+  );
+
+  /** Pin a track's cover as the profile header's background, or null to go
+   *  back to the computed default. */
+  router.post(
+    "/background",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const { trackId } = req.body ?? {};
+      if (trackId !== null && typeof trackId !== "string") {
+        res.status(400).json({ error: "Not a valid track" });
+        return;
+      }
+      const ok = await setProfileBackground((req as AuthedRequest).telegramUserId, trackId);
+      if (!ok) {
+        res.status(404).json({ error: "That track isn't yours, or has no artwork" });
+        return;
+      }
+      res.json({ background_track_id: trackId });
     })
   );
 
