@@ -60,7 +60,7 @@ export function TagCard({ tag, onOpen }: { tag: TagState; onOpen: () => void }) 
           fontWeight: 800,
         }}
       >
-        {secretLocked ? "?" : unlocked ? <Icon size={17} /> : <LockIcon size={16} />}
+        {secretLocked ? "?" : unlocked ? <Icon size={24} /> : <LockIcon size={16} />}
       </span>
 
       <span style={{ minWidth: 0 }}>
@@ -179,7 +179,7 @@ export function TagPlaque({
         border: `1px solid ${token.border}`,
       }}
     >
-      <Icon size={small ? 9 : 11} />
+      <Icon size={small ? 12 : 16} />
       {name}
     </button>
   );

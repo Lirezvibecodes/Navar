@@ -93,7 +93,7 @@ export function TagDetailSheet({
             fontWeight: 800,
           }}
         >
-          {secretLocked ? "?" : tag.unlocked ? <Icon size={28} /> : <LockIcon size={26} />}
+          {secretLocked ? "?" : tag.unlocked ? <Icon size={38} /> : <LockIcon size={26} />}
         </span>
 
         <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em", textAlign: "center" }}>
