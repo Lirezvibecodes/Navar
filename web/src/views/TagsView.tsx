@@ -120,7 +120,7 @@ export function TagsView({ nav: _nav }: { nav: Navigation }) {
       {equipped.length > 0 ? (
         <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
           {equipped.map((tag) => (
-            <TagPlaque key={tag.id} name={tag.name} tier={tag.tier} onOpen={() => openSheet(tag)} />
+            <TagPlaque key={tag.id} id={tag.id} name={tag.name} tier={tag.tier} onOpen={() => openSheet(tag)} />
           ))}
         </div>
       ) : null}

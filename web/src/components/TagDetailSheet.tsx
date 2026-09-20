@@ -1,5 +1,6 @@
 import { CheckIcon, LockIcon, TagIcon } from "../icons";
 import { TAG_TIERS } from "../lib/tagTiers";
+import { TAG_SHAPE_ICONS } from "../lib/tagShapeIcons";
 import { Sheet, SheetItem } from "./ui";
 import type { TagCategory, TagState, TagTier } from "../types";
 
@@ -69,6 +70,7 @@ export function TagDetailSheet({
 
   const tier = TAG_TIERS[tag.tier];
   const secretLocked = tag.secret && !tag.unlocked;
+  const Icon = TAG_SHAPE_ICONS[tag.id] ?? TagIcon;
   const pct =
     !tag.unlocked && !tag.secret && tag.target
       ? Math.max(0, Math.min(100, Math.round(((tag.progress ?? 0) / tag.target) * 100)))
@@ -91,7 +93,7 @@ export function TagDetailSheet({
             fontWeight: 800,
           }}
         >
-          {secretLocked ? "?" : tag.unlocked ? <TagIcon size={28} /> : <LockIcon size={26} />}
+          {secretLocked ? "?" : tag.unlocked ? <Icon size={28} /> : <LockIcon size={26} />}
         </span>
 
         <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em", textAlign: "center" }}>

@@ -1,5 +1,6 @@
 import { LockIcon, TagIcon } from "../icons";
 import { TAG_TIERS } from "../lib/tagTiers";
+import { TAG_SHAPE_ICONS } from "../lib/tagShapeIcons";
 import { haptic } from "../telegram";
 import type { TagState, TagTier } from "../types";
 
@@ -18,6 +19,7 @@ export function TagCard({ tag, onOpen }: { tag: TagState; onOpen: () => void }) 
   const tier = TAG_TIERS[tag.tier];
   const unlocked = tag.unlocked;
   const secretLocked = tag.secret && !unlocked;
+  const Icon = TAG_SHAPE_ICONS[tag.id] ?? TagIcon;
   const pct =
     !unlocked && !tag.secret && tag.target
       ? Math.max(0, Math.min(100, Math.round(((tag.progress ?? 0) / tag.target) * 100)))
@@ -58,7 +60,7 @@ export function TagCard({ tag, onOpen }: { tag: TagState; onOpen: () => void }) 
           fontWeight: 800,
         }}
       >
-        {secretLocked ? "?" : unlocked ? <TagIcon size={17} /> : <LockIcon size={16} />}
+        {secretLocked ? "?" : unlocked ? <Icon size={17} /> : <LockIcon size={16} />}
       </span>
 
       <span style={{ minWidth: 0 }}>
@@ -142,17 +144,20 @@ export function TagCard({ tag, onOpen }: { tag: TagState; onOpen: () => void }) 
  * around it.
  */
 export function TagPlaque({
+  id,
   name,
   tier,
   onOpen,
   small,
 }: {
+  id: string;
   name: string;
   tier: TagTier;
   onOpen: () => void;
   small?: boolean;
 }) {
   const token = TAG_TIERS[tier];
+  const Icon = TAG_SHAPE_ICONS[id] ?? TagIcon;
   return (
     <button
       className="nav-glass nav-press"
@@ -174,7 +179,7 @@ export function TagPlaque({
         border: `1px solid ${token.border}`,
       }}
     >
-      <TagIcon size={small ? 9 : 11} />
+      <Icon size={small ? 9 : 11} />
       {name}
     </button>
   );

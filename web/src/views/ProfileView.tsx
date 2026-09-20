@@ -441,7 +441,7 @@ function OwnPrimaryTag({ nav }: { nav: Navigation }) {
   if (!primary) return null;
 
   return (
-    <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => nav.push({ type: "tags" })} small />
+    <TagPlaque id={primary.id} name={primary.name} tier={primary.tier} onOpen={() => nav.push({ type: "tags" })} small />
   );
 }
 
@@ -462,7 +462,7 @@ function OtherPrimaryTag({ tags }: { tags: EquippedTag[] }) {
 
   return (
     <>
-      <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} small />
+      <TagPlaque id={primary.id} name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} small />
       <TagDetailSheet
         tag={{ ...primary, unlocked: true, unlocked_at: null, progress: null, target: null }}
         open={sheetOpen}
