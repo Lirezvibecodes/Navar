@@ -6,7 +6,7 @@ import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
 import { TagPlaque } from "../components/TagCard";
-import { TagDetailSheet, detailFromState } from "../components/TagDetailSheet";
+import { TagDetailSheet } from "../components/TagDetailSheet";
 import {
   Counted,
   Empty,
@@ -21,7 +21,6 @@ import {
   ChevronRightIcon,
   HeadphonesIcon,
   LibraryIcon,
-  LockIcon,
   StarIcon,
   UserIcon,
 } from "../icons";
@@ -32,7 +31,7 @@ import { formatListened, personName } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
 import { confirmAction, haptic } from "../telegram";
-import type { BadgeTier, EquippedTag, ListeningStats, Person, Playlist } from "../types";
+import type { EquippedTag, ListeningStats, Person, Playlist } from "../types";
 
 /** The banner's own pixelated wash, drawn at its own modest size rather than
  *  a story card's full 1080×1920 — same technique as the story-share
@@ -144,7 +143,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   );
 
   const [friendsOpen, setFriendsOpen] = useState(false);
-  const [tierOpen, setTierOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
 
   const unfriend = async () => {
@@ -264,10 +262,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                 >
                   {name}
                 </span>
-                {profile ? (
-                  <TierChip tier={profile.tier} own={isMe} onClick={() => setTierOpen(true)} />
-                ) : null}
-                {isMe ? <OwnPrimaryTag /> : <OtherPrimaryTag tags={profile?.equipped_tags ?? []} />}
+                {isMe ? <OwnPrimaryTag nav={nav} /> : <OtherPrimaryTag tags={profile?.equipped_tags ?? []} />}
               </div>
               <div
                 style={{
@@ -443,15 +438,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         open={friendsOpen}
         onClose={() => setFriendsOpen(false)}
       />
-      {profile ? (
-        <TierSheet
-          tier={profile.tier}
-          own={isMe}
-          name={name}
-          open={tierOpen}
-          onClose={() => setTierOpen(false)}
-        />
-      ) : null}
       {stats ? (
         <ListenSheet
           stats={stats}
@@ -465,50 +451,28 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 }
 
 /**
- * The one pinned Navaar Tag shown beside the handle — the same spot the
- * tier chip already sits in that row. You can still equip up to 3 (the Tags
- * screen itself shows the rest), but the profile header only ever surfaces
- * the first, so it stays a name-plus-two-chips row rather than growing a
- * whole section of its own.
+ * The one pinned Navaar Tag shown beside the handle — the spot the old tier
+ * chip used to sit before it was retired in favour of this. Sized to match
+ * that old chip exactly (`TagPlaque`'s `small` variant: 18px tall, 9px type)
+ * so replacing it didn't also mean resizing the header row around it. You
+ * can still equip up to 3 (the Tags screen shows the rest), but this slot
+ * only ever surfaces the first.
  *
  * Fetches `/api/tags` for itself (the same cache key `TagsView` reads, so
- * opening either one first makes the other instant). Tapping the chip opens
- * the same `TagDetailSheet` the Tags screen uses, `editable` so it doubles
- * as the quick way to unpin it without leaving your own profile — equipping
- * a different one still means a trip to the full Tags screen.
+ * opening either one first makes the other instant). Tapping it is a
+ * shortcut to the full Tags screen — the "progress page" — rather than a
+ * quick-unequip affordance: unpinning or swapping which tag leads now always
+ * happens there, where the other two equip slots and everything still locked
+ * are visible too.
  */
-function OwnPrimaryTag() {
-  const { errorToast } = useToast();
-  const { data: tags, set: setTags } = useCached(cacheKey.tags, api.getTags, ttl.tags);
-  const [sheetOpen, setSheetOpen] = useState(false);
+function OwnPrimaryTag({ nav }: { nav: Navigation }) {
+  const { data: tags } = useCached(cacheKey.tags, api.getTags, ttl.tags);
 
-  const equipped = (tags ?? []).filter((t) => t.equipped);
-  const primary = equipped[0];
+  const primary = (tags ?? []).find((t) => t.equipped);
   if (!primary) return null;
 
-  const unequip = async () => {
-    try {
-      setTags(await api.setEquippedTags(equipped.filter((t) => t.id !== primary.id).map((t) => t.id)));
-      haptic.select();
-      setSheetOpen(false);
-    } catch (err) {
-      errorToast(err, "Could not remove that");
-    }
-  };
-
   return (
-    <>
-      <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} />
-      <TagDetailSheet
-        tag={detailFromState(primary)}
-        open={sheetOpen}
-        onClose={() => setSheetOpen(false)}
-        editable
-        equipped
-        canEquipMore={false}
-        onUnequip={() => void unequip()}
-      />
-    </>
+    <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => nav.push({ type: "tags" })} small />
   );
 }
 
@@ -516,10 +480,11 @@ function OwnPrimaryTag() {
  * The read-only twin of `OwnPrimaryTag`, for somebody else's profile: takes
  * the first entry of `equipped_tags` straight from `UserProfile` rather than
  * fetching anything of its own, and renders nothing when there is nothing
- * pinned. `TagDetailSheet` opens `editable={false}`, and the detail it is
- * handed is built with `unlocked: true` and no progress or unlock date,
- * because an `EquippedTag` carries none of that and a stranger's page must
- * never imply otherwise.
+ * pinned. Tapping it raises `TagDetailSheet` read-only (`editable={false}`)
+ * — a stranger's page shows what the tag is, never a way to change it. The
+ * detail handed in is built with `unlocked: true` and no progress or unlock
+ * date, because an `EquippedTag` carries none of that and a stranger's page
+ * must never imply otherwise.
  */
 function OtherPrimaryTag({ tags }: { tags: EquippedTag[] }) {
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -528,7 +493,7 @@ function OtherPrimaryTag({ tags }: { tags: EquippedTag[] }) {
 
   return (
     <>
-      <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} />
+      <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} small />
       <TagDetailSheet
         tag={{ ...primary, unlocked: true, unlocked_at: null, progress: null, target: null }}
         open={sheetOpen}
@@ -542,64 +507,13 @@ function OtherPrimaryTag({ tags }: { tags: EquippedTag[] }) {
 }
 
 /**
- * What somebody has earned, as a word.
- *
- * Every tier renders identically — same icon, same weight, same size — because
- * the alternative is a chip that gets louder as the number behind it grows,
- * which is the number again wearing a costume. The number itself never leaves
- * the server.
- *
- * The tier everybody starts on is shown on your own page and nowhere else: a
- * column of identical chips down a list of people would say nothing about any
- * of them, and would bury the ones that mean something.
- *
- * Tapping it raises `TierSheet` — the full ladder, not just the one word this
- * chip has room for.
- */
-function TierChip({
-  tier,
-  own,
-  onClick,
-}: {
-  tier: BadgeTier;
-  own: boolean;
-  onClick: () => void;
-}) {
-  if (tier.min === 0 && !own) return null;
-  return (
-    <button
-      className="nav-glass nav-press"
-      onClick={() => {
-        haptic.tap();
-        onClick();
-      }}
-      style={{
-        display: "inline-flex",
-        flexShrink: 0,
-        alignItems: "center",
-        gap: 3,
-        height: 18,
-        padding: "0 7px",
-        borderRadius: 9,
-        fontSize: 9,
-        fontWeight: 600,
-        color: "#fff",
-      }}
-    >
-      <StarIcon size={9} />
-      {tier.label}
-    </button>
-  );
-}
-
-/**
- * Who somebody knows, worn beside the tier chip and in the exact spot the
- * tag used to sit — bolder than the tier chip it replaces there (800 weight,
- * solid glass rather than a thin outline) because unlike the tier this one
- * opens something: tapping it raises `FriendsSheet`. It only ever renders
- * when the profile response actually carried a `friend_count`, which is the
- * same self-or-friend visibility rule the backend's `/:id/friends` route
- * re-checks before answering, so there is nothing to gate here beyond that.
+ * Who somebody knows — bolder than the tag chip beside it in the name row
+ * (800 weight, solid glass rather than a thin outline) because unlike that
+ * one this opens something: tapping it raises `FriendsSheet`. It only ever
+ * renders when the profile response actually carried a `friend_count`,
+ * which is the same self-or-friend visibility rule the backend's
+ * `/:id/friends` route re-checks before answering, so there is nothing to
+ * gate here beyond that.
  */
 function FriendsChip({ count, onClick }: { count: number; onClick: () => void }) {
   return (
@@ -682,122 +596,6 @@ function FriendsSheet({
         )}
       </div>
     </Sheet>
-  );
-}
-
-/**
- * Mirrors `server/src/badges.ts`'s `BADGE_TIERS` — a static rule table, the
- * same for everyone, so showing its thresholds here is not the same as
- * showing anybody's actual endorsement count. That count never leaves the
- * server (see `getUserProfile`'s own comment); unlocked/locked below is
- * decided from `tier.min` alone. Because `tierFor` only ever moves up, a
- * ladder rung is unlocked exactly when its threshold sits at or below the
- * tier already on the profile — no count needed.
- */
-const TIER_LADDER: ReadonlyArray<{ id: string; label: string; min: number }> = [
-  { id: "listener", label: "Listener", min: 0 },
-  { id: "selector", label: "Selector", min: 1 },
-  { id: "tastemaker", label: "Tastemaker", min: 5 },
-  { id: "curator", label: "Curator", min: 15 },
-];
-
-/**
- * The full ladder a `TierChip` opens: what's been reached, and what it takes
- * to reach what hasn't. Locked rungs sit visibly dimmer with a lock glyph in
- * place of the star — the "darker, with an explanation" the tag panel asked
- * for — and the endorsement mechanic itself is explained once, above the
- * locked list, rather than repeated in every row's copy.
- */
-function TierSheet({
-  tier,
-  own,
-  name,
-  open,
-  onClose,
-}: {
-  tier: BadgeTier;
-  own: boolean;
-  name: string;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const subject = own ? "You" : name;
-  const taste = own ? "your taste" : `${name}’s taste`;
-  const unlocked = TIER_LADDER.filter((t) => t.min <= tier.min);
-  const locked = TIER_LADDER.filter((t) => t.min > tier.min);
-
-  return (
-    <Sheet open={open} onClose={onClose} title="Tiers">
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 14px 16px" }}>
-        <span style={{ ...EYEBROW, fontSize: 10 }}>Unlocked</span>
-        {unlocked.map((t) => (
-          <TierRow
-            key={t.id}
-            label={t.label}
-            locked={false}
-            copy={t.min === 0 ? "Everyone starts here." : `${subject} reached this once ${t.min}+ people endorsed ${taste}.`}
-          />
-        ))}
-
-        {locked.length > 0 ? (
-          <>
-            <span style={{ ...EYEBROW, fontSize: 10, marginTop: 10 }}>Locked</span>
-            <p style={{ margin: "-2px 2px 2px", fontSize: 11.5, lineHeight: 1.5, color: "var(--color-nav-muted)" }}>
-              {own
-                ? "Somebody can endorse your taste once they've kept a track they got from you — a record of music that travelled, not a popularity count."
-                : `Somebody can endorse ${taste} once they've kept a track they got from ${name}.`}
-            </p>
-            {locked.map((t) => (
-              <TierRow key={t.id} label={t.label} locked copy={`Reached once ${t.min}+ people endorse ${taste}.`} />
-            ))}
-          </>
-        ) : (
-          <Empty
-            title="Every tier unlocked"
-            body={own ? "You've reached the top of the ladder." : `${name} has reached the top of the ladder.`}
-          />
-        )}
-      </div>
-    </Sheet>
-  );
-}
-
-function TierRow({ label, copy, locked }: { label: string; copy: string; locked: boolean }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 10,
-        padding: "10px 11px",
-        borderRadius: 12,
-        background: locked ? "rgba(255,255,255,.03)" : "rgba(255,255,255,.07)",
-        opacity: locked ? 0.55 : 1,
-      }}
-    >
-      <span
-        style={{
-          display: "flex",
-          flex: "none",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 26,
-          height: 26,
-          borderRadius: 8,
-          background: locked ? "rgba(255,255,255,.06)" : "var(--color-nav-action)",
-          color: locked ? "rgba(255,255,255,.4)" : "#0A0A0A",
-        }}
-      >
-        {locked ? <LockIcon size={12} /> : <StarIcon size={12} />}
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: locked ? "rgba(255,255,255,.55)" : "#fff" }}>
-          {label}
-        </div>
-        <div style={{ fontSize: 11.5, lineHeight: 1.4, color: "var(--color-nav-muted)", marginTop: 2 }}>
-          {copy}
-        </div>
-      </div>
-    </div>
   );
 }
 

@@ -131,18 +131,26 @@ export function TagCard({ tag, onOpen }: { tag: TagState; onOpen: () => void }) 
 
 /**
  * A single equipped tag, rendered as a small pill — the header row of the
- * Tags screen and the "Tags" section of a profile both show up to 3 of
- * these. Kept here rather than duplicated at each call site, since both are
- * literally the same tier-colored TagIcon-plus-name button.
+ * Tags screen shows up to 3 of these. Kept here rather than duplicated at
+ * each call site, since every use is literally the same tier-colored
+ * TagIcon-plus-name button, just at one of two sizes.
+ *
+ * `small` drops it to the exact dimensions the profile header's old tier
+ * chip used to be (18px tall, 9px type) — that chip was retired in favour
+ * of the primary equipped tag living in the same spot, and the replacement
+ * was asked to keep its predecessor's size rather than resize the row
+ * around it.
  */
 export function TagPlaque({
   name,
   tier,
   onOpen,
+  small,
 }: {
   name: string;
   tier: TagTier;
   onOpen: () => void;
+  small?: boolean;
 }) {
   const token = TAG_TIERS[tier];
   return (
@@ -154,18 +162,19 @@ export function TagPlaque({
       }}
       style={{
         display: "inline-flex",
+        flexShrink: 0,
         alignItems: "center",
-        gap: 6,
-        height: 26,
-        padding: "0 10px",
-        borderRadius: 13,
-        fontSize: 11,
-        fontWeight: 700,
+        gap: small ? 3 : 6,
+        height: small ? 18 : 26,
+        padding: small ? "0 7px" : "0 10px",
+        borderRadius: small ? 9 : 13,
+        fontSize: small ? 9 : 11,
+        fontWeight: small ? 600 : 700,
         color: token.color,
         border: `1px solid ${token.border}`,
       }}
     >
-      <TagIcon size={11} />
+      <TagIcon size={small ? 9 : 11} />
       {name}
     </button>
   );
