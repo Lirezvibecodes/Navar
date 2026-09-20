@@ -211,32 +211,14 @@ export interface ListeningStats {
 }
 
 /**
- * A tier earned through endorsements.
- *
- * There is no count here and there is not meant to be one. Every tier renders
- * at the same weight, and `id` is what the client tests against — the first
- * tier is what everybody starts on and is shown nowhere but your own profile.
- */
-export interface BadgeTier {
-  id: string;
-  label: string;
-  min: number;
-}
-
-/**
  * One person's page.
  *
  * `playlists` is already narrowed to what the viewer may open, so there is
- * nothing to filter here. `can_endorse` is the server saying the endorsement
- * has been earned; the button is absent otherwise rather than present and
- * refused.
+ * nothing to filter here.
  */
 export interface UserProfile {
   person: Person;
   state: FriendshipState;
-  tier: BadgeTier;
-  endorsed: boolean;
-  can_endorse: boolean;
   playlists: Playlist[];
   /** Null unless the viewer may see it: themselves, or a friend. */
   friend_count: number | null;
@@ -252,10 +234,7 @@ export interface UserProfile {
 }
 
 /**
- * Navaar Tags: a collectible identity layer, separate from the endorsement
- * BadgeTier above — a tier says how people rate your taste, a tag says how
- * you actually use music, and the two render in different places on a
- * profile rather than merging into one.
+ * Navaar Tags: the app's one collectible music-identity layer.
  */
 export type TagTier = "copper" | "chrome" | "gold" | "emerald" | "cosmic";
 export type TagCategory = "listening" | "library" | "playlists" | "social" | "secret";

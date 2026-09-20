@@ -132,11 +132,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const isMe = me?.id === userId;
   // Cached per person, so stepping back out of somebody's page and into it
   // again — which is most of how the Social tab is used — costs nothing.
-  const {
-    data: profile,
-    loading,
-    set: setProfile,
-  } = useCached(
+  const { data: profile, loading } = useCached(
     cacheKey.profile(userId),
     () => api.getProfile(userId),
     ttl.profile
@@ -155,24 +151,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
       nav.pop();
     } catch (err) {
       errorToast(err, "Could not remove them");
-    }
-  };
-
-  /**
-   * Say their taste is worth following.
-   *
-   * Only offered when the server said it had been earned, so the failure path
-   * here is a genuine failure rather than the ordinary refusal.
-   */
-  const endorse = async () => {
-    if (!profile) return;
-    setProfile({ ...profile, endorsed: true, can_endorse: false });
-    try {
-      await api.endorse(userId);
-      haptic.success();
-    } catch (err) {
-      setProfile({ ...profile, endorsed: false, can_endorse: true });
-      errorToast(err, "Could not endorse them");
     }
   };
 
@@ -331,15 +309,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
               ) : (
                 <AddFriendButton userId={userId} />
               )}
-              {profile?.can_endorse ? (
-                <GhostButton icon={StarIcon} onClick={() => void endorse()}>
-                  Endorse
-                </GhostButton>
-              ) : profile?.endorsed ? (
-                <GhostButton icon={StarIcon} disabled onClick={() => undefined}>
-                  Endorsed
-                </GhostButton>
-              ) : null}
             </div>
           ) : null}
         </div>

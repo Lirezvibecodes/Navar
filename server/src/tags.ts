@@ -1,13 +1,13 @@
 /**
- * Navaar Tags: a collectible music-identity layer, separate from the
- * endorsement-based Taste Tier ladder in badges.ts. Where a Taste Tier says
- * "people recognize your taste", a tag says "this is how you use music" —
- * the two are shown in different places on a profile and never merged.
+ * Navaar Tags: the app's one collectible music-identity layer. (An earlier,
+ * endorsement-based Taste Tier ladder lived in badges.ts and showed a
+ * separate chip on the profile header; it has been retired in favor of tags,
+ * which is why this catalogue no longer has a second system to stay distinct
+ * from.)
  *
  * This file is the catalogue only: ids, names, tiers and copy. The
  * conditions themselves — what has to be true for a tag to unlock — live in
- * tagEvaluator.ts, kept out of here the same way badges.ts keeps `tierFor`
- * next to its thresholds but nowhere stores the endorsements that feed it.
+ * tagEvaluator.ts.
  */
 
 export type TagTier = "copper" | "chrome" | "gold" | "emerald" | "cosmic";
@@ -83,7 +83,7 @@ export interface TagDefinition {
 }
 
 /**
- * All 29 launch tags. Ids, names, tiers and copy are verbatim from the
+ * All 30 launch tags. Ids, names, tiers and copy are verbatim from the
  * product spec — this is the one place they are written down, so a threshold
  * or a line of flavor text is never re-typed (and never drifts) anywhere else.
  */
@@ -285,7 +285,7 @@ export const TAG_CATALOGUE: readonly TagDefinition[] = [
     category: "social",
     tier: "gold",
     flavor: "Your taste is travelling.",
-    lockedClue: "Receive 3 endorsements.",
+    lockedClue: "5 different people save a track that started with you.",
   },
   {
     id: "the_plug",

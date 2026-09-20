@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { getPool, withTransaction } from "./db";
-import { tierFor, type BadgeTier } from "./badges";
 import {
   recordQualifiedListen,
   evaluateLibraryTags,
@@ -3201,7 +3200,7 @@ export async function listSocialActivity(
 }
 
 // ---------------------------------------------------------------------------
-// Discovery, profiles and endorsements
+// Discovery and profiles
 // ---------------------------------------------------------------------------
 
 /** How many people a search will name, and how many suggestions are offered. */
@@ -3460,19 +3459,6 @@ export async function listFriendSuggestions(
 }
 
 /**
- * One person's page.
- *
- * Everything on it is already scoped by whatever produced it: the playlists
- * come from the listener-scoped read, so somebody unconnected gets the ones
- * published to anyone and a friend gets more, and neither case needs a branch
- * here.
- *
- * The endorsement count is turned into a tier inside this function and never
- * returned. Somewhere the raw number has to be counted, and this is the only
- * place it exists — a route that wanted to render "12 endorsements" would have
- * to come here and change this line, which is the point of putting it here.
- */
-/**
  * Friends the viewer and this other person share — the same two-hop shape
  * {@link listFriendSuggestions} uses, narrowed to one candidate instead of
  * every stranger-of-a-friend at once. Meant for a person the viewer has not
@@ -3509,15 +3495,6 @@ async function mutualFriendsOf(
 export interface UserProfile {
   person: PersonSummary;
   state: FriendshipState;
-  tier: BadgeTier;
-  /** Whether the viewer has already endorsed them. */
-  endorsed: boolean;
-  /**
-   * Whether the viewer is allowed to. True only once they have kept a track
-   * that came from this person — the same rule the insert enforces, asked
-   * ahead of time so the button is absent rather than refused.
-   */
-  can_endorse: boolean;
   playlists: Playlist[];
   /**
    * How many friends they have. Null rather than 0 when the viewer isn't
@@ -3549,12 +3526,6 @@ export async function getUserProfile(
     `SELECT u.telegram_user_id, u.username, u.handle,
        (u.avatar_file_id IS NOT NULL) AS has_avatar,
        ${friendshipState("$1", "u.telegram_user_id")} AS state,
-       (SELECT COUNT(*)::int FROM endorsements e
-         WHERE e.endorsee_id = u.telegram_user_id) AS endorsement_count,
-       EXISTS (SELECT 1 FROM endorsements e
-         WHERE e.endorsee_id = u.telegram_user_id AND e.endorser_id = $1) AS endorsed,
-       EXISTS (SELECT 1 FROM track_saves ts
-         WHERE ts.saver_id = $1 AND ts.origin_id = u.telegram_user_id) AS has_saved,
        t.id AS background_track_id
      FROM users u
      LEFT JOIN tracks t
@@ -3566,7 +3537,6 @@ export async function getUserProfile(
   const row = rows[0];
   if (!row) return null;
 
-  const endorsed = Boolean(row.endorsed);
   const state = row.state as FriendshipState;
   const isSelf = viewerTelegramId === targetTelegramId;
   // Friend count stays a friends-or-self secret — who someone knows is the
@@ -3614,9 +3584,6 @@ export async function getUserProfile(
       has_avatar: Boolean(row.has_avatar),
     },
     state,
-    tier: tierFor(Number(row.endorsement_count ?? 0)),
-    endorsed,
-    can_endorse: !endorsed && Boolean(row.has_saved),
     playlists,
     friend_count: friendCount,
     stats,
@@ -3624,51 +3591,6 @@ export async function getUserProfile(
     background_track_id: row.background_track_id ? String(row.background_track_id) : null,
     equipped_tags: equippedTags,
   };
-}
-
-/**
- * Endorse somebody, if it has been earned.
- *
- * The rule is that you may only endorse a person whose music you have actually
- * kept, and it is the INSERT that enforces it: the row only comes into being
- * if the SELECT feeding it finds a save. There is no read-then-write for a
- * second request to slip between, and no route that can decide to skip the
- * check because the caller looked like somebody who would pass it.
- *
- * Three outcomes rather than a boolean, because the route answers them
- * differently: an endorsement that is already there is not a failure and must
- * not read as one, while an endorsement that was never earned is a refusal.
- */
-export async function endorsePerson(
-  endorserId: number,
-  endorseeId: number
-): Promise<"ok" | "already" | "not-earned"> {
-  if (endorserId === endorseeId) return "not-earned";
-
-  const { rowCount } = await getPool().query(
-    `INSERT INTO endorsements (endorser_id, endorsee_id)
-     SELECT $1, $2
-     WHERE EXISTS (
-       SELECT 1 FROM track_saves ts
-       WHERE ts.saver_id = $1 AND ts.origin_id = $2
-     )
-     ON CONFLICT DO NOTHING`,
-    [endorserId, endorseeId]
-  );
-  if ((rowCount ?? 0) > 0) {
-    void evaluateSocialTags(endorseeId);
-    return "ok";
-  }
-
-  // Nothing was inserted, which is either of two very different things.
-  const { rows } = await getPool().query<{ exists: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1 FROM endorsements
-       WHERE endorser_id = $1 AND endorsee_id = $2
-     ) AS exists`,
-    [endorserId, endorseeId]
-  );
-  return rows[0]?.exists ? "already" : "not-earned";
 }
 
 // ---------------------------------------------------------------------------
@@ -3717,8 +3639,7 @@ export async function getTagStates(telegramUserId: number): Promise<TagState[]> 
     playlistRows,
     shareRow,
     friendRow,
-    endorseRow,
-    plugRow,
+    saveRow,
   ] = await Promise.all([
     pool.query<{ tag_id: string; unlocked_at: string }>(
       `SELECT tag_id, unlocked_at FROM user_tags WHERE telegram_user_id = $1`,
@@ -3782,12 +3703,12 @@ export async function getTagStates(telegramUserId: number): Promise<TagState[]> 
        WHERE status = 'accepted' AND (requester_id = $1 OR addressee_id = $1)`,
       [telegramUserId]
     ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) FROM endorsements WHERE endorsee_id = $1`,
-      [telegramUserId]
-    ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(DISTINCT source_track_id) AS count FROM track_saves
+    // Taste Dealer and The Plug share this one table — distinct people and
+    // distinct tracks, respectively, both scoped to other users only.
+    pool.query<{ people_count: string; track_count: string }>(
+      `SELECT COUNT(DISTINCT saver_id) AS people_count,
+              COUNT(DISTINCT source_track_id) AS track_count
+       FROM track_saves
        WHERE origin_id = $1 AND saver_id <> $1`,
       [telegramUserId]
     ),
@@ -3828,8 +3749,8 @@ export async function getTagStates(telegramUserId: number): Promise<TagState[]> 
   }));
   const sharedTracks = Number(shareRow.rows[0]?.count ?? 0);
   const friends = Number(friendRow.rows[0]?.count ?? 0);
-  const endorsements = Number(endorseRow.rows[0]?.count ?? 0);
-  const plug = Number(plugRow.rows[0]?.count ?? 0);
+  const peopleSaved = Number(saveRow.rows[0]?.people_count ?? 0);
+  const plug = Number(saveRow.rows[0]?.track_count ?? 0);
 
   const maxPlaylistTrackCount = playlists.reduce((m, p) => Math.max(m, p.trackCount), 0);
   const maxPlaylistFollowers = playlists.reduce((m, p) => Math.max(m, p.followerCount), 0);
@@ -3870,7 +3791,7 @@ export async function getTagStates(telegramUserId: number): Promise<TagState[]> 
     first_contact: { progress: friends, target: 1 },
     social_butterfly: { progress: friends, target: 5 },
     connector: { progress: friends, target: 10 },
-    taste_dealer: { progress: endorsements, target: 3 },
+    taste_dealer: { progress: peopleSaved, target: 5 },
     the_plug: { progress: plug, target: 10 },
   };
 

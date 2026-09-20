@@ -518,19 +518,16 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
   });
 
   /**
-   * Discovery, profiles and endorsements.
+   * Discovery and profiles.
    *
-   * Three separate rules meet here and each one fails quietly when it breaks.
+   * Two separate rules meet here and each one fails quietly when it breaks.
    * Search is the first place in Navaar where a name is shown to somebody with
    * no relationship to its owner, so what it will and will not match is the
    * test. Suggestions walk the friend graph, and the thing to prove is where
    * the walk stops — a third hop reaches people whose only connection to the
-   * viewer is that the graph is small. And an endorsement is the one action in
-   * the app with a precondition, so the precondition is checked from both
-   * sides: it lets through somebody who earned it and refuses somebody who
-   * did not.
+   * viewer is that the graph is small.
    */
-  describe("discovery, profiles and endorsements", () => {
+  describe("discovery and profiles", () => {
     // Two hops out and three hops out, so the boundary has something on each
     // side of it. MUTUAL knows FRIEND and not OWNER; FAR knows only MUTUAL.
     const MUTUAL = ID_BASE + 6;
@@ -635,41 +632,6 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
 
     test("somebody with no friends is suggested nobody", async () => {
       assert.deepEqual(await repo.listFriendSuggestions(GROUP_MATE), []);
-    });
-
-    test("endorsing is refused until something of theirs was kept", async () => {
-      // MUTUAL, because MUTUAL is this block's own fixture and has kept
-      // nothing. Everybody seeded further up has saved a track from OWNER at
-      // some point, so a refusal there would be refusing something earned.
-      assert.equal(await repo.endorsePerson(MUTUAL, OWNER), "not-earned");
-    });
-
-    test("endorsing yourself is refused", async () => {
-      assert.equal(await repo.endorsePerson(OWNER, OWNER), "not-earned");
-    });
-
-    test("endorsing is allowed once something of theirs was kept", async () => {
-      // OWNER kept a track that came from STRANGER, in the block above.
-      assert.equal(await repo.endorsePerson(OWNER, STRANGER), "ok");
-    });
-
-    test("endorsing twice is not a failure", async () => {
-      assert.equal(await repo.endorsePerson(OWNER, STRANGER), "already");
-    });
-
-    test("an endorsement moves the tier and is never returned as a count", async () => {
-      const profile = await repo.getUserProfile(OWNER, STRANGER);
-      assert.equal(profile?.tier.id, "selector");
-      assert.equal(profile?.endorsed, true);
-      assert.equal(profile?.can_endorse, false);
-      assert.equal("endorsement_count" in (profile ?? {}), false);
-    });
-
-    test("somebody unendorsed holds the tier everybody starts on", async () => {
-      const profile = await repo.getUserProfile(OWNER, FRIEND);
-      assert.equal(profile?.tier.id, "listener");
-      // OWNER kept a track that came from FRIEND, so the button is offered.
-      assert.equal(profile?.can_endorse, true);
     });
 
     test("a profile says where the viewer stands", async () => {

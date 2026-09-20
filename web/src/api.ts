@@ -568,17 +568,6 @@ export function setProfileBackground(trackId: string | null): Promise<void> {
   });
 }
 
-/**
- * Say somebody's taste is worth following.
- *
- * Only offered when the profile came back with `can_endorse`; the server
- * refuses it outright otherwise, since an endorsement has to be earned by
- * keeping something of theirs first.
- */
-export function endorse(id: string | number): Promise<void> {
-  return request<void>(`/api/users/${id}/endorse`, { method: "POST" });
-}
-
 // --- The share page ---------------------------------------------------------
 //
 // The only calls in this file that carry no session, because the page they

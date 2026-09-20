@@ -62,8 +62,8 @@ export const cacheKey = {
  * These are backstops, not the correctness mechanism — a mutation drops the
  * keys it invalidates the moment it happens, so a TTL only governs the things
  * this phone cannot know about: a friend adding a track, somebody accepting a
- * request, an endorsement arriving. They are short where another person can
- * change the answer and long where only you can.
+ * request, a tag unlocking. They are short where another person can change
+ * the answer and long where only you can.
  */
 export const ttl = {
   /** What Home shows moves as friends listen; it is also the wake-up call. */
@@ -72,7 +72,7 @@ export const ttl = {
   playlistTracks: 300_000,
   /** Somebody else's playlist can change its cover or name at any time. */
   playlistMeta: 60_000,
-  /** Badges and endorsements are other people's doing. */
+  /** Their tags and friend state are other people's doing. */
   profile: 60_000,
   friends: 60_000,
   /** The friend graph cannot have moved much between two glances. */

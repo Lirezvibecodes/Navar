@@ -6,15 +6,12 @@ import { MAX_EQUIPPED_TAGS } from "../tags";
 
 /**
  * Navaar Tags: the collectible identity layer, read and equipped here.
- * Separate from /api/users' endorsement-driven Taste Tier, which has its own
- * home in getUserProfile — a tag says how you use music, not how well other
- * people think you use it, and the two are never merged into one response.
  */
 export function tagsRouter(): Router {
   const router = Router();
 
   /**
-   * All 29 tags for the caller in one round trip: unlocked ones with their
+   * All 30 tags for the caller in one round trip: unlocked ones with their
    * date, locked public ones with live progress, locked secret ones with
    * nothing but their id, tier and vague clue. See getTagStates for exactly
    * what is and isn't computed per state.

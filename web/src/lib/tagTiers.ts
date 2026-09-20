@@ -1,8 +1,7 @@
 import type { TagTier } from "../types";
 
 /**
- * Client mirror of server/src/tags.ts's TAG_TIERS. Kept in sync by hand, the
- * same way ProfileView.tsx's TIER_LADDER already tracks badges.ts's tiers —
+ * Client mirror of server/src/tags.ts's TAG_TIERS. Kept in sync by hand —
  * these are presentation tokens, not something worth a network round trip to
  * fetch.
  */

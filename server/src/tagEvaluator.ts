@@ -319,44 +319,42 @@ export async function evaluatePlaylistTags(telegramUserId: number): Promise<void
 
 /**
  * The five social tags: First Contact/Social Butterfly/Connector (accepted
- * friendships), Taste Dealer (endorsements received) and The Plug (tracks
- * this user originated that other people have since saved). Bundled into one
- * function since every hook that can move any of them — an accepted friend
- * request, an endorsement, another user's save — is cheap enough to just
- * recheck all five rather than track which single counter moved.
+ * friendships), Taste Dealer (distinct people who saved something that
+ * started with you) and The Plug (distinct tracks this user originated that
+ * other people have since saved). The last two share one source table —
+ * track_saves, scoped to other users only, since origin_id is set on the copy
+ * at save time and never recomputed — so one query answers both. Bundled into
+ * one function since every hook that can move any of these five — an accepted
+ * friend request, another user's save — is cheap enough to just recheck all
+ * five rather than track which single counter moved.
  */
 export async function evaluateSocialTags(telegramUserId: number): Promise<void> {
   try {
     const pool = getPool();
-    const [friendRow, endorseRow, plugRow] = await Promise.all([
+    const [friendRow, saveRow] = await Promise.all([
       pool.query<{ count: string }>(
         `SELECT COUNT(*) FROM friendships
          WHERE status = 'accepted' AND (requester_id = $1 OR addressee_id = $1)`,
         [telegramUserId]
       ),
-      pool.query<{ count: string }>(
-        `SELECT COUNT(*) FROM endorsements WHERE endorsee_id = $1`,
-        [telegramUserId]
-      ),
-      // Other users only, and by distinct track — origin_id is set on the
-      // copy at save time and never recomputed, so this stays correct no
-      // matter how many hands a track passes through after that.
-      pool.query<{ count: string }>(
-        `SELECT COUNT(DISTINCT source_track_id) AS count FROM track_saves
+      pool.query<{ people_count: string; track_count: string }>(
+        `SELECT COUNT(DISTINCT saver_id) AS people_count,
+                COUNT(DISTINCT source_track_id) AS track_count
+         FROM track_saves
          WHERE origin_id = $1 AND saver_id <> $1`,
         [telegramUserId]
       ),
     ]);
 
     const friends = Number(friendRow.rows[0]?.count ?? 0);
-    const endorsements = Number(endorseRow.rows[0]?.count ?? 0);
-    const plug = Number(plugRow.rows[0]?.count ?? 0);
+    const peopleSaved = Number(saveRow.rows[0]?.people_count ?? 0);
+    const plug = Number(saveRow.rows[0]?.track_count ?? 0);
 
     const unlocks: string[] = [];
     if (friends >= 1) unlocks.push("first_contact");
     if (friends >= 5) unlocks.push("social_butterfly");
     if (friends >= 10) unlocks.push("connector");
-    if (endorsements >= 3) unlocks.push("taste_dealer");
+    if (peopleSaved >= 5) unlocks.push("taste_dealer");
     if (plug >= 10) unlocks.push("the_plug");
 
     if (unlocks.length > 0) await unlockTags(telegramUserId, unlocks);

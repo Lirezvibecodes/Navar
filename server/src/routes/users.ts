@@ -3,7 +3,6 @@ import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
   areFriends,
-  endorsePerson,
   getUserAvatarFileId,
   getUserProfile,
   listFriends,
@@ -108,40 +107,6 @@ export function usersRouter(): Router {
         return;
       }
       res.json(profile);
-    })
-  );
-
-  /**
-   * Say that somebody's taste is worth following.
-   *
-   * The 403 here is the one place in this API that says "no" rather than
-   * "there is nothing here", and it is deliberate: this is not a resource
-   * being hidden, it is an action with a condition, and the person asking
-   * already knows the account exists because they are looking at it. Whether
-   * the condition is met is decided by the insert itself — see the repo.
-   *
-   * Endorsing twice is not an error. The first one already said it.
-   */
-  router.post(
-    "/:id/endorse",
-    requireAuth,
-    asyncHandler(async (req, res) => {
-      const userId = readUserId(req.params.id);
-      if (!userId) {
-        res.status(404).json({ error: "Not found" });
-        return;
-      }
-      const outcome = await endorsePerson(
-        (req as AuthedRequest).telegramUserId,
-        userId
-      );
-      if (outcome === "not-earned") {
-        res.status(403).json({
-          error: "Keep something of theirs first",
-        });
-        return;
-      }
-      res.status(204).end();
     })
   );
 
