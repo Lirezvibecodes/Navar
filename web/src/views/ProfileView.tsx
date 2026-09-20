@@ -7,7 +7,6 @@ import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
 import { TagPlaque } from "../components/TagCard";
 import { TagDetailSheet, detailFromState } from "../components/TagDetailSheet";
-import type { TagDetailInfo } from "../components/TagDetailSheet";
 import {
   Counted,
   Empty,
@@ -30,11 +29,10 @@ import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, dropCache, ttl, useCached } from "../lib/cache";
 import { formatListened, personName } from "../lib/format";
-import { MAX_EQUIPPED_TAGS } from "../lib/tagTiers";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
 import { confirmAction, haptic } from "../telegram";
-import type { BadgeTier, EquippedTag, ListeningStats, Person, Playlist, TagState } from "../types";
+import type { BadgeTier, EquippedTag, ListeningStats, Person, Playlist } from "../types";
 
 /** The banner's own pixelated wash, drawn at its own modest size rather than
  *  a story card's full 1080×1920 — same technique as the story-share
@@ -252,7 +250,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
               size={84}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span
                   className="nav-clip nav-display"
                   style={{
@@ -269,6 +267,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                 {profile ? (
                   <TierChip tier={profile.tier} own={isMe} onClick={() => setTierOpen(true)} />
                 ) : null}
+                {isMe ? <OwnPrimaryTag /> : <OtherPrimaryTag tags={profile?.equipped_tags ?? []} />}
               </div>
               <div
                 style={{
@@ -350,8 +349,6 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           ) : null}
         </div>
       </div>
-
-      {isMe ? <OwnTagsSection nav={nav} /> : <OtherTagsSection tags={profile?.equipped_tags ?? []} />}
 
       {isMe ? (
         <>
@@ -468,116 +465,72 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
 }
 
 /**
- * The "Tags" section on your own profile — up to 3 pinned Navaar Tags, and
- * the way into the full Tags screen. It fetches `/api/tags` for itself
- * (the same cache key `TagsView` reads, so opening either one first makes
- * the other instant) rather than asking `ProfileView` to carry a second
- * payload it otherwise has no use for.
+ * The one pinned Navaar Tag shown beside the handle — the same spot the
+ * tier chip already sits in that row. You can still equip up to 3 (the Tags
+ * screen itself shows the rest), but the profile header only ever surfaces
+ * the first, so it stays a name-plus-two-chips row rather than growing a
+ * whole section of its own.
  *
- * Tapping a pinned plaque opens the same `TagDetailSheet` the Tags screen
- * itself uses, `editable` so it doubles as the quick way to unpin one
- * without leaving your own profile.
+ * Fetches `/api/tags` for itself (the same cache key `TagsView` reads, so
+ * opening either one first makes the other instant). Tapping the chip opens
+ * the same `TagDetailSheet` the Tags screen uses, `editable` so it doubles
+ * as the quick way to unpin it without leaving your own profile — equipping
+ * a different one still means a trip to the full Tags screen.
  */
-function OwnTagsSection({ nav }: { nav: Navigation }) {
+function OwnPrimaryTag() {
   const { errorToast } = useToast();
-  const { data: tags, loading, set: setTags } = useCached(cacheKey.tags, api.getTags, ttl.tags);
-  const [openTag, setOpenTag] = useState<TagDetailInfo | null>(null);
+  const { data: tags, set: setTags } = useCached(cacheKey.tags, api.getTags, ttl.tags);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // The profile header above already carries its own Skeleton while the
-  // profile itself loads; this section only appears once it has something
-  // real to show, rather than stacking a second loading placeholder under it.
-  if (loading) return null;
-
   const equipped = (tags ?? []).filter((t) => t.equipped);
+  const primary = equipped[0];
+  if (!primary) return null;
 
-  const openSheet = (tag: TagState) => {
-    setOpenTag(detailFromState(tag));
-    setSheetOpen(true);
-  };
-
-  const setEquipped = async (ids: string[], failure: string) => {
+  const unequip = async () => {
     try {
-      setTags(await api.setEquippedTags(ids));
+      setTags(await api.setEquippedTags(equipped.filter((t) => t.id !== primary.id).map((t) => t.id)));
       haptic.select();
+      setSheetOpen(false);
     } catch (err) {
-      errorToast(err, failure);
+      errorToast(err, "Could not remove that");
     }
   };
 
   return (
     <>
-      <SectionHeader title="Tags" action="See all" onAction={() => nav.push({ type: "tags" })} />
-      {equipped.length > 0 ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {equipped.map((tag) => (
-            <TagPlaque key={tag.id} name={tag.name} tier={tag.tier} onOpen={() => openSheet(tag)} />
-          ))}
-        </div>
-      ) : (
-        <Empty
-          title="No tags pinned"
-          body="Navaar Tags unlock quietly as you listen, save and share — pin up to 3 to your profile."
-          action="Explore tags"
-          onAction={() => nav.push({ type: "tags" })}
-        />
-      )}
-
+      <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} />
       <TagDetailSheet
-        tag={openTag}
+        tag={detailFromState(primary)}
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         editable
-        equipped={openTag ? equipped.some((t) => t.id === openTag.id) : false}
-        canEquipMore={equipped.length < MAX_EQUIPPED_TAGS}
-        onEquip={() => {
-          if (!openTag) return;
-          void setEquipped([...equipped.map((t) => t.id), openTag.id], "Could not equip that");
-        }}
-        onUnequip={() => {
-          if (!openTag) return;
-          void setEquipped(
-            equipped.filter((t) => t.id !== openTag.id).map((t) => t.id),
-            "Could not remove that"
-          );
-        }}
+        equipped
+        canEquipMore={false}
+        onUnequip={() => void unequip()}
       />
     </>
   );
 }
 
 /**
- * The read-only twin of `OwnTagsSection`, for somebody else's profile: it
- * takes `equipped_tags` straight from `UserProfile` rather than fetching
- * anything of its own, and never renders when there is nothing pinned —
- * the same null-hides-the-section rule `friend_count`/`stats` already
- * follow. `TagDetailSheet` opens with `editable={false}`, and the detail it
- * is handed is built with `unlocked: true` and no progress or unlock date,
+ * The read-only twin of `OwnPrimaryTag`, for somebody else's profile: takes
+ * the first entry of `equipped_tags` straight from `UserProfile` rather than
+ * fetching anything of its own, and renders nothing when there is nothing
+ * pinned. `TagDetailSheet` opens `editable={false}`, and the detail it is
+ * handed is built with `unlocked: true` and no progress or unlock date,
  * because an `EquippedTag` carries none of that and a stranger's page must
  * never imply otherwise.
  */
-function OtherTagsSection({ tags }: { tags: EquippedTag[] }) {
-  const [openTag, setOpenTag] = useState<TagDetailInfo | null>(null);
+function OtherPrimaryTag({ tags }: { tags: EquippedTag[] }) {
   const [sheetOpen, setSheetOpen] = useState(false);
-
-  if (tags.length === 0) return null;
-
-  const openSheet = (tag: EquippedTag) => {
-    setOpenTag({ ...tag, unlocked: true, unlocked_at: null, progress: null, target: null });
-    setSheetOpen(true);
-  };
+  const primary = tags[0];
+  if (!primary) return null;
 
   return (
     <>
-      <SectionHeader title="Tags" />
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {tags.map((tag) => (
-          <TagPlaque key={tag.id} name={tag.name} tier={tag.tier} onOpen={() => openSheet(tag)} />
-        ))}
-      </div>
-
+      <TagPlaque name={primary.name} tier={primary.tier} onOpen={() => setSheetOpen(true)} />
       <TagDetailSheet
-        tag={openTag}
+        tag={{ ...primary, unlocked: true, unlocked_at: null, progress: null, target: null }}
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         editable={false}
