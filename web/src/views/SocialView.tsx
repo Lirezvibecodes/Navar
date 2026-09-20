@@ -20,7 +20,6 @@ import {
   CloseIcon,
   DownloadIcon,
   HeadphonesIcon,
-  SearchIcon,
   ShareIcon,
   UserCheckIcon,
   UserPlusIcon,
@@ -75,7 +74,16 @@ const SEARCH_DEBOUNCE_MS = 250;
 /** How many suggestions show inline before "See all" is worth offering. */
 const SUGGESTION_PREVIEW = 3;
 
-export function SocialView({ nav }: { nav: Navigation }) {
+export function SocialView({
+  nav,
+  searchOpen,
+  onCloseSearch,
+}: {
+  nav: Navigation;
+  /** Owned by the shell — its search icon sits beside the avatar, see App.tsx. */
+  searchOpen: boolean;
+  onCloseSearch: () => void;
+}) {
   const { toast, errorToast } = useToast();
   // Seeded from the cache so that opening this tab a second time shows the
   // feed that was there when it closed, rather than a skeleton over the same
@@ -87,7 +95,6 @@ export function SocialView({ nav }: { nav: Navigation }) {
   const [loading, setLoading] = useState(
     () => peek(cacheKey.friends) === undefined
   );
-  const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PersonResult[]>([]);
@@ -209,7 +216,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
 
   const closeSearch = () => {
     setQuery("");
-    setSearchOpen(false);
+    onCloseSearch();
   };
 
   const accept = async (person: Person): Promise<boolean> => {
@@ -295,16 +302,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
             onClick={closeSearch}
           />
         </div>
-      ) : (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
-          <GhostButton
-            icon={SearchIcon}
-            label="Find someone"
-            width={44}
-            onClick={() => setSearchOpen(true)}
-          />
-        </div>
-      )}
+      ) : null}
 
       {searching ? (
         <>
@@ -423,7 +421,7 @@ export function SocialView({ nav }: { nav: Navigation }) {
           onAction={() => void invite()}
         />
       ) : (
-        <div className="nav-shelf" style={{ gap: 12 }}>
+        <div className="nav-shelf" style={{ gap: 8 }}>
           {friends.map((person, i) => (
             <PersonTile
               key={person.telegram_user_id}

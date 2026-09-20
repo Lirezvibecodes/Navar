@@ -407,8 +407,8 @@ function Circles({
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(78px, 1fr))",
           justifyItems: "center",
-          rowGap: 18,
-          columnGap: 8,
+          rowGap: 12,
+          columnGap: 6,
         }}
       >
         {artists.map(tile)}
@@ -416,7 +416,7 @@ function Circles({
     );
   }
   return (
-    <div className="nav-shelf nav-shelf-bleed" style={{ gap: 10 }}>
+    <div className="nav-shelf nav-shelf-bleed" style={{ gap: 6 }}>
       {artists.map(tile)}
     </div>
   );

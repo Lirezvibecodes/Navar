@@ -160,6 +160,10 @@ function Shell({ me }: { me: Me }) {
   const [direction, setDirection] = useState<"push" | "pop" | "tab">("push");
   const [playerOpen, setPlayerOpen] = useState(false);
   const [searchOnOpen, setSearchOnOpen] = useState(false);
+  // Social's search toggles in place rather than navigating anywhere, so it
+  // only needs a shared open flag — the shared bar's icon opens it, and
+  // SocialView's own close button clears it back.
+  const [socialSearchOpen, setSocialSearchOpen] = useState(false);
   // Bumped on every navigation so the incoming screen remounts and replays its
   // entrance; without it React reuses the subtree and nothing animates. It is
   // state rather than a ref because the render reads it as a key, and a ref
@@ -214,6 +218,12 @@ function Shell({ me }: { me: Me }) {
     if (view.type !== "crate" && searchOnOpen) setSearchOnOpen(false);
   }, [view.type, searchOnOpen]);
 
+  // Same one-shot spending for Social's own search flag, so leaving the tab
+  // with it open doesn't leave it open the next time the tab is visited.
+  useEffect(() => {
+    if (view.type !== "social" && socialSearchOpen) setSocialSearchOpen(false);
+  }, [view.type, socialSearchOpen]);
+
   // Restoring where you were is a one-shot: only the first library load, and
   // only when nothing has started playing in the meantime.
   const restored = useRef(false);
@@ -247,7 +257,13 @@ function Shell({ me }: { me: Me }) {
       case "album":
         return <CollectionView nav={nav} kind={view.type} name={view.name} />;
       case "social":
-        return <SocialView nav={nav} />;
+        return (
+          <SocialView
+            nav={nav}
+            searchOpen={socialSearchOpen}
+            onCloseSearch={() => setSocialSearchOpen(false)}
+          />
+        );
       case "profile":
         return <ProfileView nav={nav} userId={view.userId} />;
       case "friendLibrary":
@@ -289,17 +305,20 @@ function Shell({ me }: { me: Me }) {
         subdued={named}
         me={me}
         onSearch={
-          // Crate and Social both draw their own search field in place —
-          // see CrateView and SocialView — so the shared bar's icon, which
-          // only knows how to jump to Crate's search, would either be a
-          // second entry point into the same field or point at the wrong
-          // one entirely.
-          view.type === "crate" || view.type === "social"
+          // Crate draws its own search field in place — see CrateView — so
+          // the shared bar's icon, which only knows how to jump there, would
+          // be a second entry point into the same field once already on it.
+          // Social's field also lives in place, but its trigger stays in the
+          // shared bar beside the avatar; it just steps aside once the field
+          // is open, since the field's own close button takes over from there.
+          view.type === "crate" || (view.type === "social" && socialSearchOpen)
             ? undefined
-            : () => {
-                setSearchOnOpen(true);
-                push({ type: "crate", filter: "all" });
-              }
+            : view.type === "social"
+              ? () => setSocialSearchOpen(true)
+              : () => {
+                  setSearchOnOpen(true);
+                  push({ type: "crate", filter: "all" });
+                }
         }
         onProfile={() => push({ type: "profile", userId: me.id })}
         ownProfile={onOwnProfile}
