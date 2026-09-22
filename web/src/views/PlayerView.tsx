@@ -662,8 +662,8 @@ function Backdrop({ palette }: { palette: Palette | null }) {
   );
 }
 
-/** Matches .nav-player-out — --dur-focal (460ms) less the 140ms it trims. */
-const PLAYER_OUT_MS = 320;
+/** Matches .nav-player-out — --dur-focal (600ms) less the 140ms it trims. */
+const PLAYER_OUT_MS = 460;
 
 // --- Dismissal ---------------------------------------------------------------
 
@@ -719,7 +719,7 @@ function useDragToDismiss(
       root.style.transition = "";
       root.style.transform = "";
       root.style.opacity = "";
-      root.classList.remove("nav-player-settle");
+      root.classList.remove("nav-player-settle", "nav-player-drag-out");
     };
 
     const onStart = (e: TouchEvent) => {
@@ -758,7 +758,7 @@ function useDragToDismiss(
           return;
         }
         engaged = true;
-        root.classList.remove("nav-player-settle");
+        root.classList.remove("nav-player-settle", "nav-player-drag-out");
         root.style.transition = "none";
       }
 
@@ -778,17 +778,21 @@ function useDragToDismiss(
         return;
       }
 
-      root.classList.add("nav-player-settle");
       if (travelled > root.clientHeight * DISMISS_FRACTION) {
         haptic.tap();
+        // Same clock as the chevron's own close, not the fast settle used
+        // below — dismissing is dismissing, whichever affordance triggered it.
+        root.classList.add("nav-player-drag-out");
         root.style.transform = `translateY(${root.clientHeight}px)`;
         root.style.opacity = "0";
         // Unmounting on the transition rather than a guessed delay would be
         // better, except a cancelled transition never fires one and the
-        // player would stay stuck offscreen.
-        window.setTimeout(() => closeRef.current(), 200);
+        // player would stay stuck offscreen. Matches .nav-player-drag-out's
+        // own duration.
+        window.setTimeout(() => closeRef.current(), PLAYER_OUT_MS);
         return;
       }
+      root.classList.add("nav-player-settle");
       root.style.transform = "";
       root.style.opacity = "";
     };

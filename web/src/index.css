@@ -599,9 +599,9 @@ body {
 
   --dur-tap: 90ms; /* the press itself */
   --dur-state: 200ms; /* a control changing what it means */
-  --dur-view: 300ms; /* a screen replacing another */
-  --dur-focal: 460ms; /* the bar becoming the player */
-  --dur-tab: 340ms; /* one tab opening while another closes */
+  --dur-view: 380ms; /* a screen replacing another */
+  --dur-focal: 600ms; /* the bar becoming the player */
+  --dur-tab: 420ms; /* one tab opening while another closes */
   --dur-settle: 480ms; /* a dragged row easing back to rest after release */
   --dur-remove: 360ms; /* a swiped-to-remove row leaving before the gap closes */
 }
@@ -722,10 +722,10 @@ button {
   }
 }
 .nav-view-push {
-  animation: nav-push-in var(--dur-view) var(--ease) both;
+  animation: nav-push-in var(--dur-view) var(--ease-settle) both;
 }
 .nav-view-pop {
-  animation: nav-pop-in calc(var(--dur-view) - 60ms) var(--ease) both;
+  animation: nav-pop-in calc(var(--dur-view) - 60ms) var(--ease-settle) both;
 }
 /* There is deliberately no leaving-screen animation. Keeping the outgoing view
    mounted for 300ms means holding two screens' worth of data and two sets of
@@ -746,7 +746,7 @@ button {
 }
 .nav-view-tab {
   transform-origin: var(--nav-tab-origin-x, 50%) 100%;
-  animation: nav-tab-morph-in var(--dur-view) var(--ease) both;
+  animation: nav-tab-morph-in var(--dur-view) var(--ease-settle) both;
 }
 
 /* --- The focal moment -------------------------------------------------------
@@ -773,7 +773,7 @@ button {
   }
 }
 .nav-player-in {
-  animation: nav-player-in var(--dur-focal) var(--ease) both;
+  animation: nav-player-in var(--dur-focal) var(--ease-settle) both;
 }
 .nav-player-out {
   animation: nav-player-out calc(var(--dur-focal) - 140ms) var(--ease-in) both;
@@ -790,7 +790,7 @@ button {
   }
 }
 .nav-art-in {
-  animation: nav-art-in var(--dur-focal) var(--ease) both;
+  animation: nav-art-in calc(var(--dur-focal) - 100ms) var(--ease-settle) both;
 }
 
 /* The player's backdrop arriving over the one before it. On the same clock as
@@ -805,7 +805,7 @@ button {
   }
 }
 .nav-backdrop-in {
-  animation: nav-backdrop-in var(--dur-focal) var(--ease) both;
+  animation: nav-backdrop-in var(--dur-focal) var(--ease-settle) both;
 }
 
 /* --- The bottom nav ---------------------------------------------------------
@@ -850,9 +850,9 @@ button {
      the blur, for the reason in the note above. */
   background: var(--glass-sheen), rgba(23, 23, 23, 0.94);
   transition:
-    background-color var(--dur-tab) var(--ease),
-    border-color var(--dur-tab) var(--ease),
-    box-shadow var(--dur-tab) var(--ease),
+    background-color var(--dur-tab) var(--ease-settle),
+    border-color var(--dur-tab) var(--ease-settle),
+    box-shadow var(--dur-tab) var(--ease-settle),
     transform var(--dur-tap) var(--ease-in),
     opacity var(--dur-tap) var(--ease-in);
 }
@@ -873,9 +873,9 @@ button {
   height: 44px;
   border-radius: 50%;
   transition:
-    background-color var(--dur-tab) var(--ease),
-    color var(--dur-tab) var(--ease),
-    box-shadow var(--dur-tab) var(--ease);
+    background-color var(--dur-tab) var(--ease-settle),
+    color var(--dur-tab) var(--ease-settle),
+    box-shadow var(--dur-tab) var(--ease-settle);
 }
 .nav-tab[aria-current="page"] .nav-tab-disc {
   background: var(--color-nav-action);
@@ -914,9 +914,9 @@ button {
   letter-spacing: -0.01em;
   transform: translate3d(-10px, 0, 0);
   transition:
-    max-width var(--dur-tab) var(--ease),
-    transform var(--dur-tab) var(--ease),
-    opacity calc(var(--dur-tab) * 0.55) var(--ease);
+    max-width var(--dur-tab) var(--ease-settle),
+    transform var(--dur-tab) var(--ease-settle),
+    opacity calc(var(--dur-tab) * 0.55) var(--ease-settle);
 }
 .nav-tab-label > span {
   margin: 0 11px 0 8px;
@@ -939,7 +939,7 @@ button {
   }
 }
 .nav-bar-in {
-  animation: nav-bar-in var(--dur-view) var(--ease) both;
+  animation: nav-bar-in var(--dur-view) var(--ease-settle) both;
 }
 
 /* The player while a finger is dragging it down. No transition — the sheet is
@@ -953,6 +953,15 @@ button {
   transition:
     transform var(--dur-state) var(--ease),
     opacity var(--dur-state) var(--ease);
+}
+
+/* The player continuing on down after a drag crossed the dismiss threshold.
+   Same clock as the chevron's own close (.nav-player-out) — the same event,
+   so it must take the same time regardless of which affordance triggered it. */
+.nav-player-drag-out {
+  transition:
+    transform calc(var(--dur-focal) - 140ms) var(--ease-in),
+    opacity calc(var(--dur-focal) - 140ms) var(--ease-in);
 }
 
 /* --- Lists ------------------------------------------------------------------
