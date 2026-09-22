@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
-import { TrackRow } from "../components/TrackRow";
-import { TrackMenu, AddToPlaylistSheet } from "../components/TrackMenu";
-import type { TrackMenuTarget } from "../components/TrackMenu";
+import { TrackRow } from "./TrackRow";
+import { TrackMenu, AddToPlaylistSheet } from "./TrackMenu";
+import type { TrackMenuTarget } from "./TrackMenu";
 import {
   ActionButton,
   Chip,
@@ -12,10 +12,8 @@ import {
   GhostButton,
   Num,
   Portal,
-  Screen,
-  Skeleton,
   TextField,
-} from "../components/ui";
+} from "./ui";
 import { CloseIcon, ListIcon, SearchIcon, ShuffleIcon, TrashIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
@@ -36,6 +34,11 @@ import type { CrateFilter } from "../view";
  * heart has always been on every row and in the player, and this is the first
  * screen that reads it back.
  *
+ * This renders as a tab of the Library screen rather than a screen of its
+ * own, so which cut is showing is state LibraryView holds and hands down as
+ * `filter`/`onFilterChange` — the same track list, chip row and search field
+ * as before, just without a page of its own to carry them.
+ *
  * Search is local. Every track you own is already in memory, so filtering as
  * you type costs nothing and works while the server is asleep; a search that
  * round-trips would be slower than reading the list.
@@ -53,29 +56,22 @@ const SORTS: { id: Sort; label: string }[] = [
   { id: "artist", label: "Artist" },
 ];
 
-export function CrateView({
+export function CrateSection({
   nav,
   filter,
+  onFilterChange,
   autoSearch = false,
 }: {
   nav: Navigation;
   filter: CrateFilter;
+  onFilterChange: (filter: CrateFilter) => void;
   autoSearch?: boolean;
 }) {
-  const { tracks, loading, owns, setFavorite, dropTracks, putTrack, playlists } =
+  const { tracks, owns, setFavorite, dropTracks, putTrack, playlists } =
     useLibrary();
   const { current, isPlaying, playFrom, queueNext, queueLast } = usePlayer();
   const { errorToast, undoToast, setToastLift } = useToast();
 
-  // `filter` carries real intent when it was just pushed — the Favourites
-  // shortcut, say — so it has to win on a push. Only a pop, coming back from
-  // a track opened while on some other chip, should restore the chip that
-  // was actually showing instead of snapping back to whatever was pushed.
-  const [tab, setTab] = usePersistedState<CrateFilter>(
-    "crate:tab",
-    filter,
-    nav.direction === "pop"
-  );
   const [sort, setSort] = usePersistedState<Sort>("crate:sort", "recent");
   const [searching, setSearching] = useState(autoSearch);
   const [query, setQuery] = useState("");
@@ -110,9 +106,9 @@ export function CrateView({
     // Filtered here rather than fetched: LibraryContext already holds every
     // track you own, and a favourite is a column on one of them.
     let list =
-      tab === "unsorted"
+      filter === "unsorted"
         ? tracks.filter((t) => !t.in_playlist)
-        : tab === "favorites"
+        : filter === "favorites"
           ? tracks.filter((t) => t.favorited_at != null)
           : tracks;
     if (q) {
@@ -136,20 +132,20 @@ export function CrateView({
       sorted.sort((a, b) => b.created_at.localeCompare(a.created_at));
     }
     return sorted;
-  }, [tracks, tab, query, sort]);
+  }, [tracks, filter, query, sort]);
 
   const source = useMemo(
     () => ({
       label:
-        tab === "unsorted"
+        filter === "unsorted"
           ? "Unsorted"
-          : tab === "favorites"
+          : filter === "favorites"
             ? "Favourites"
             : "The Crate",
-      key: `crate:${tab}:${sort}:${query}`,
+      key: `crate:${filter}:${sort}:${query}`,
       tracks: rows,
     }),
-    [tab, sort, query, rows]
+    [filter, sort, query, rows]
   );
 
   const selected = selection ?? new Set<string>();
@@ -186,138 +182,131 @@ export function CrateView({
 
   return (
     <>
-      {/* Keyed on the tab rather than a fixed "crate" — All, Unsorted and
-          Favourites are three different lists, and switching between them
-          is itself a scroll to remember, not just leaving the screen. */}
-      <Screen scrollKey={`crate:${tab}`}>
-        <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
-          <ChipRow>
-            <Chip
-              label="All"
-              count={tracks.length}
-              active={tab === "all"}
-              onClick={() => setTab("all")}
-            />
-            <Chip
-              label="Unsorted"
-              count={unsortedCount}
-              active={tab === "unsorted"}
-              onClick={() => setTab("unsorted")}
-            />
-            <Chip
-              label="Favourites"
-              count={favoritesCount}
-              active={tab === "favorites"}
-              onClick={() => setTab("favorites")}
-            />
-          </ChipRow>
-          <span style={{ flex: 1 }} />
-          <SortControl sort={sort} onChange={setSort} />
-        </div>
+      <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
+        <ChipRow>
+          <Chip
+            label="All"
+            count={tracks.length}
+            active={filter === "all"}
+            onClick={() => onFilterChange("all")}
+          />
+          <Chip
+            label="Unsorted"
+            count={unsortedCount}
+            active={filter === "unsorted"}
+            onClick={() => onFilterChange("unsorted")}
+          />
+          <Chip
+            label="Favourites"
+            count={favoritesCount}
+            active={filter === "favorites"}
+            onClick={() => onFilterChange("favorites")}
+          />
+        </ChipRow>
+        <span style={{ flex: 1 }} />
+        <SortControl sort={sort} onChange={setSort} />
+      </div>
 
-        {searching ? (
-          <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <TextField
-              ref={searchRef}
-              value={query}
-              onChange={setQuery}
-              placeholder="Search your crate"
-              height={38}
-              autoCorrect={false}
-            />
-            <GhostButton
-              icon={CloseIcon}
-              label="Close search"
-              width={44}
-              onClick={() => {
-                setQuery("");
-                setSearching(false);
-              }}
-            />
-          </div>
+      {searching ? (
+        <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <TextField
+            ref={searchRef}
+            value={query}
+            onChange={setQuery}
+            placeholder="Search your crate"
+            height={38}
+            autoCorrect={false}
+          />
+          <GhostButton
+            icon={CloseIcon}
+            label="Close search"
+            width={44}
+            onClick={() => {
+              setQuery("");
+              setSearching(false);
+            }}
+          />
+        </div>
+      ) : (
+        <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <ActionButton
+            onClick={() => rows.length > 0 && playFrom(source)}
+            disabled={rows.length === 0}
+          >
+            Play all
+          </ActionButton>
+          <GhostButton
+            icon={ShuffleIcon}
+            label="Shuffle"
+            width={44}
+            onClick={() => {
+              if (rows.length === 0) return;
+              playFrom(source, undefined, true);
+            }}
+          />
+          <GhostButton
+            icon={SearchIcon}
+            label="Search"
+            width={44}
+            onClick={() => setSearching(true)}
+          />
+          <GhostButton
+            icon={ListIcon}
+            label="Select tracks"
+            width={44}
+            onClick={() => setSelection(new Set())}
+          />
+        </div>
+      )}
+
+      <div style={{ marginTop: 14 }}>
+        {rows.length === 0 ? (
+          <Empty
+            title={
+              query
+                ? "Nothing matched"
+                : filter === "favorites"
+                  ? "No favourites yet"
+                  : "Nothing here yet"
+            }
+            body={
+              query
+                ? "Try part of a title, an artist or an album."
+                : filter === "unsorted"
+                  ? "Every track you own is in a playlist. Nothing left to file."
+                  : filter === "favorites"
+                    ? "Tap the heart on any track and it turns up here."
+                    : "Forward any audio file to the bot and it lands here, tagged and playable."
+            }
+          />
         ) : (
-          <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <ActionButton
-              onClick={() => rows.length > 0 && playFrom(source)}
-              disabled={rows.length === 0}
-            >
-              Play all
-            </ActionButton>
-            <GhostButton
-              icon={ShuffleIcon}
-              label="Shuffle"
-              width={44}
-              onClick={() => {
-                if (rows.length === 0) return;
-                playFrom(source, undefined, true);
+          rows.map((track, i) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              index={i}
+              playing={current?.id === track.id && isPlaying}
+              owned={owns(track)}
+              favorited={track.favorited_at != null}
+              query={query}
+              selectable={selection != null}
+              selected={selected.has(track.id)}
+              onSelect={() => toggleSelect(track)}
+              onEnterSelection={() => {
+                haptic.press();
+                setSelection(new Set([track.id]));
               }}
+              onPlay={() => playFrom(source, track)}
+              onMenu={() => setMenu({ track })}
+              onToggleFavorite={() =>
+                void setFavorite(track, track.favorited_at == null)
+              }
+              onQueueNext={() => queueNext(track)}
+              onQueueLast={() => queueLast(track)}
             />
-            <GhostButton
-              icon={SearchIcon}
-              label="Search"
-              width={44}
-              onClick={() => setSearching(true)}
-            />
-            <GhostButton
-              icon={ListIcon}
-              label="Select tracks"
-              width={44}
-              onClick={() => setSelection(new Set())}
-            />
-          </div>
+          ))
         )}
-
-        <div style={{ marginTop: 14 }}>
-          {loading ? (
-            <Skeleton />
-          ) : rows.length === 0 ? (
-            <Empty
-              title={
-                query
-                  ? "Nothing matched"
-                  : tab === "favorites"
-                    ? "No favourites yet"
-                    : "Nothing here yet"
-              }
-              body={
-                query
-                  ? "Try part of a title, an artist or an album."
-                  : tab === "unsorted"
-                    ? "Every track you own is in a playlist. Nothing left to file."
-                    : tab === "favorites"
-                      ? "Tap the heart on any track and it turns up here."
-                      : "Forward any audio file to the bot and it lands here, tagged and playable."
-              }
-            />
-          ) : (
-            rows.map((track, i) => (
-              <TrackRow
-                key={track.id}
-                track={track}
-                index={i}
-                playing={current?.id === track.id && isPlaying}
-                owned={owns(track)}
-                favorited={track.favorited_at != null}
-                query={query}
-                selectable={selection != null}
-                selected={selected.has(track.id)}
-                onSelect={() => toggleSelect(track)}
-                onEnterSelection={() => {
-                  haptic.press();
-                  setSelection(new Set([track.id]));
-                }}
-                onPlay={() => playFrom(source, track)}
-                onMenu={() => setMenu({ track })}
-                onToggleFavorite={() =>
-                  void setFavorite(track, track.favorited_at == null)
-                }
-                onQueueNext={() => queueNext(track)}
-                onQueueLast={() => queueLast(track)}
-              />
-            ))
-          )}
-        </div>
-      </Screen>
+      </div>
 
       {selection ? (
         <SelectionBar

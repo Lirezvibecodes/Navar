@@ -13,8 +13,16 @@ export type CrateFilter = "all" | "unsorted" | "favorites";
 
 export type View =
   | { type: "home" }
-  | { type: "library" }
-  | { type: "crate"; filter: CrateFilter }
+  /**
+   * The Crate lives inside this screen now, as one of its own tabs, rather
+   * than as a destination you navigate to — so reaching it with intent from
+   * outside (a "23 unsorted" nudge on Home, the shared search icon) has to
+   * travel as part of this same push instead of a separate view. `openCrate`
+   * selects the tab and its cut on arrival; `openSearch` additionally opens
+   * the Crate's own search field. Neither means anything once the screen has
+   * mounted — flipping chips after that is just the screen's own state.
+   */
+  | { type: "library"; openCrate?: CrateFilter; openSearch?: boolean }
   /**
    * `name` is not a convenience. Your own playlists are in the library, so the
    * header can look theirs up — but a friend's playlist, or one opened from an
@@ -48,7 +56,6 @@ export function rootTabFor(view: View): RootTab {
     case "home":
       return "home";
     case "library":
-    case "crate":
     case "playlist":
     case "artist":
     case "album":

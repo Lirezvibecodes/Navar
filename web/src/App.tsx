@@ -18,7 +18,6 @@ import { ToastProvider, useToast } from "./context/ToastContext";
 import { ThemeEffect } from "./context/ThemeContext";
 import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
-import { CrateView } from "./views/CrateView";
 import { PlaylistView } from "./views/PlaylistView";
 import { CollectionView } from "./views/CollectionView";
 import { SocialView } from "./views/SocialView";
@@ -69,19 +68,10 @@ export interface Navigation {
   direction: "push" | "pop" | "tab";
 }
 
-/**
- * What the top bar says on each screen.
- *
- * Two words in here mean two different things and are not interchangeable.
- * The Crate is every track you have — the flat list everything lands in. Your
- * Library is what you have made of it: playlists, albums, artists. A screen
- * that says "library" when it means the crate sends people looking for their
- * songs in the one place that does not list them.
- */
+/** What the top bar says on each screen. */
 const TITLES: Record<View["type"], string> = {
   home: "Navaar",
   library: "Your Library",
-  crate: "The Crate",
   playlist: "Playlist",
   artist: "Artist",
   album: "Album",
@@ -158,7 +148,6 @@ function Shell({ me }: { me: Me }) {
   const [stack, setStack] = useState<View[]>([{ type: "home" }]);
   const [direction, setDirection] = useState<"push" | "pop" | "tab">("push");
   const [playerOpen, setPlayerOpen] = useState(false);
-  const [searchOnOpen, setSearchOnOpen] = useState(false);
   // Social's search toggles in place rather than navigating anywhere, so it
   // only needs a shared open flag — the shared bar's icon opens it, and
   // SocialView's own close button clears it back.
@@ -210,13 +199,6 @@ function Shell({ me }: { me: Me }) {
     });
   }, [playerOpen, stack.length, pop]);
 
-  // The search button hands the Crate a flag rather than a mode of its own;
-  // it is spent as soon as the Crate is left, so arriving there from Library
-  // later does not silently open a keyboard.
-  useEffect(() => {
-    if (view.type !== "crate" && searchOnOpen) setSearchOnOpen(false);
-  }, [view.type, searchOnOpen]);
-
   // Same one-shot spending for Social's own search flag, so leaving the tab
   // with it open doesn't leave it open the next time the tab is visited.
   useEffect(() => {
@@ -247,9 +229,9 @@ function Shell({ me }: { me: Me }) {
       case "home":
         return <HomeView nav={nav} />;
       case "library":
-        return <LibraryView nav={nav} />;
-      case "crate":
-        return <CrateView nav={nav} filter={view.filter} autoSearch={searchOnOpen} />;
+        return (
+          <LibraryView nav={nav} openCrate={view.openCrate} openSearch={view.openSearch} />
+        );
       case "playlist":
         return <PlaylistView nav={nav} id={view.id} name={view.name} />;
       case "artist":
@@ -304,20 +286,17 @@ function Shell({ me }: { me: Me }) {
         subdued={named}
         me={me}
         onSearch={
-          // Crate draws its own search field in place — see CrateView — so
-          // the shared bar's icon, which only knows how to jump there, would
-          // be a second entry point into the same field once already on it.
-          // Social's field also lives in place, but its trigger stays in the
-          // shared bar beside the avatar; it just steps aside once the field
-          // is open, since the field's own close button takes over from there.
-          view.type === "crate" || (view.type === "social" && socialSearchOpen)
+          // The Crate's own search field lives inside Library now, so the
+          // shared bar's icon, which only knows how to jump there, would be a
+          // second entry point into the same field once already on that
+          // screen. Social's field also lives in place, but its trigger stays
+          // in the shared bar beside the avatar; it just steps aside once the
+          // field is open, since the field's own close button takes over.
+          view.type === "library" || (view.type === "social" && socialSearchOpen)
             ? undefined
             : view.type === "social"
               ? () => setSocialSearchOpen(true)
-              : () => {
-                  setSearchOnOpen(true);
-                  push({ type: "crate", filter: "all" });
-                }
+              : () => push({ type: "library", openCrate: "all", openSearch: true })
         }
         onProfile={() => push({ type: "profile", userId: me.id })}
         ownProfile={onOwnProfile}

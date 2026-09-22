@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { CollectionArt } from "../components/PixelArt";
 import { NameSheet } from "../components/NameSheet";
+import { CrateSection } from "../components/CrateSection";
 import {
   Chip,
   ChipRow,
@@ -12,7 +13,6 @@ import {
   SectionHeader,
   Skeleton,
 } from "../components/ui";
-import { ChevronRightIcon, CrateIcon, HeartIcon } from "../icons";
 import {
   albumsOf,
   artistsOf,
@@ -23,30 +23,61 @@ import { useToast } from "../context/ToastContext";
 import { personName } from "../lib/format";
 import { haptic } from "../telegram";
 import { usePersistedState } from "../lib/persist";
-import type { View } from "../view";
+import type { CrateFilter, View } from "../view";
+
+type Tab = "playlists" | "albums" | "artists" | "crate";
 
 /**
  * Where your music is kept.
  *
- * The Crate comes first and does not look like a playlist, because it is not
- * one: it is the whole library, and putting it in the grid with the playlists
- * would make "everything you own" the same kind of thing as "gym".
+ * Playlists, albums and artists are three views onto the same rows; the Crate
+ * is a fourth tab rather than a destination, since "everything you own" reads
+ * as a cut of the library, not a place outside it. Albums and artists are
+ * grouped from tracks already in memory rather than fetched — the server has
+ * endpoints for both, and they are what the pages for somebody else's library
+ * use.
  *
- * Albums and artists are grouped from rows already in memory rather than
- * fetched. The server has endpoints for both, and they are what the pages for
- * somebody else's library use.
+ * `openCrate`/`openSearch` are launch intent carried on the push itself
+ * (Home's "unsorted" nudge, the shared search icon) rather than live signals,
+ * since by the time either would fire this screen may not be mounted yet. A
+ * push that carries `openCrate` wins over whatever tab was showing last; a
+ * plain tab reselect or a pop restores it instead — see the `restoring`
+ * argument on each `usePersistedState` below.
  */
-export function LibraryView({ nav }: { nav: Navigation }) {
+export function LibraryView({
+  nav,
+  openCrate,
+  openSearch,
+}: {
+  nav: Navigation;
+  openCrate?: CrateFilter;
+  openSearch?: boolean;
+}) {
   const { tracks, playlists, followedPlaylists, loading, putPlaylist } = useLibrary();
   const { errorToast } = useToast();
-  // Remembered the same way the screen's own scroll position is (below):
-  // pushing an album from the Albums chip and pressing back should still show
-  // Albums, not reset to the first chip the way a plain useState would on the
-  // remount every navigation performs.
-  const [tab, setTab] = usePersistedState<"all" | "albums" | "artists">(
+
+  const [tab, setTab] = usePersistedState<Tab>(
     "library:tab",
-    "all"
+    openCrate != null ? "crate" : "playlists",
+    nav.direction === "pop" || openCrate == null
   );
+  // The Crate's own cut lives here rather than inside CrateSection, since a
+  // tap on the pinned Favourites tile below has to set it without a
+  // navigation to hang the intent on.
+  const [crateSub, setCrateSub] = usePersistedState<CrateFilter>(
+    "library:crateSub",
+    openCrate ?? "all",
+    nav.direction === "pop" || openCrate == null
+  );
+  // Spent on first render: switching to the Crate tab locally later, or
+  // returning to this same mount another way, should not reopen search.
+  const [autoSearch, setAutoSearch] = useState(openSearch ?? false);
+  useEffect(() => {
+    if (autoSearch) setAutoSearch(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [byYou, setByYou] = useState(false);
+  const [byFriends, setByFriends] = useState(false);
   const [naming, setNaming] = useState(false);
 
   const albums = useMemo(() => albumsOf(tracks), [tracks]);
@@ -75,22 +106,21 @@ export function LibraryView({ nav }: { nav: Navigation }) {
     );
   }
 
+  // Neither toggle chosen shows both — the mixed version — rather than
+  // nothing, since a filter that can select itself into an empty screen is a
+  // trap the chips give no way out of.
+  const mixed = !byYou && !byFriends;
+  const showOwn = mixed || byYou;
+  const showFriends = mixed || byFriends;
+
   return (
     <Screen scrollKey="library">
-      <FavouritesTile count={favorites} onOpen={() => nav.push({ type: "crate", filter: "favorites" })} />
-
       <ChipRow>
-        {/* The Crate is a destination rather than a filter, which is why it
-            carries a glyph and the three filters do not. It used to be a card
-            below this row; a card the width of the screen made "everything you
-            own" look like a bigger thing than the library it is the whole of. */}
         <Chip
-          label="The Crate"
-          icon={CrateIcon}
-          active={false}
-          onClick={() => nav.push({ type: "crate", filter: "all" })}
+          label="Playlists"
+          active={tab === "playlists"}
+          onClick={() => setTab("playlists")}
         />
-        <Chip label="All" active={tab === "all"} onClick={() => setTab("all")} />
         <Chip
           label="Albums"
           count={albums.length}
@@ -103,10 +133,24 @@ export function LibraryView({ nav }: { nav: Navigation }) {
           active={tab === "artists"}
           onClick={() => setTab("artists")}
         />
+        <Chip
+          label="The Crate"
+          active={tab === "crate"}
+          onClick={() => setTab("crate")}
+        />
       </ChipRow>
 
-      {tab === "all" ? (
+      {tab === "playlists" ? (
         <>
+          <ChipRow>
+            <Chip label="By you" active={byYou} onClick={() => setByYou((v) => !v)} />
+            <Chip
+              label="By friends"
+              active={byFriends}
+              onClick={() => setByFriends((v) => !v)}
+            />
+          </ChipRow>
+
           <SectionHeader
             title="Playlists"
             action="+ New"
@@ -115,30 +159,43 @@ export function LibraryView({ nav }: { nav: Navigation }) {
           />
           <Grid
             items={[
-              ...playlists.map((p) => ({
-                key: p.id,
-                name: p.name,
-                cover: p.cover_track_id,
-                art: api.playlistArtworkUrl(p),
-                caption: <Counted count={p.track_count ?? 0} one="track" />,
-                to: { type: "playlist", id: p.id, name: p.name } as View,
-              })),
+              // Pinned regardless of the toggle above: it isn't anyone's
+              // playlist, own or a friend's, so By you/By friends has nothing
+              // to say about it.
+              {
+                key: "favorites",
+                name: "Favourites",
+                caption: <Counted count={favorites} one="track" />,
+                onClick: () => {
+                  setTab("crate");
+                  setCrateSub("favorites");
+                },
+              },
+              ...(showOwn
+                ? playlists.map((p) => ({
+                    key: p.id,
+                    name: p.name,
+                    cover: p.cover_track_id,
+                    art: api.playlistArtworkUrl(p),
+                    caption: <Counted count={p.track_count ?? 0} one="track" />,
+                    to: { type: "playlist", id: p.id, name: p.name } as View,
+                  }))
+                : []),
               // Yours says how much is in it, theirs says whose it is — same
               // rule HomeView's shelf cards already follow.
-              ...followedPlaylists.map((p) => ({
-                key: p.id,
-                name: p.name,
-                cover: p.cover_track_id,
-                art: api.playlistArtworkUrl(p),
-                caption: personName(p.person),
-                to: { type: "playlist", id: p.id, name: p.name } as View,
-              })),
+              ...(showFriends
+                ? followedPlaylists.map((p) => ({
+                    key: p.id,
+                    name: p.name,
+                    cover: p.cover_track_id,
+                    art: api.playlistArtworkUrl(p),
+                    caption: personName(p.person),
+                    to: { type: "playlist", id: p.id, name: p.name } as View,
+                  }))
+                : []),
             ]}
             nav={nav}
           />
-
-          <SectionHeader title="Artists" />
-          <Circles artists={artists.slice(0, 12)} nav={nav} />
         </>
       ) : tab === "albums" ? (
         albums.length === 0 ? (
@@ -160,14 +217,25 @@ export function LibraryView({ nav }: { nav: Navigation }) {
             />
           </div>
         )
-      ) : artists.length === 0 ? (
-        <Empty
-          title="No artists yet"
-          body="Artists appear once your tracks carry an artist tag."
-        />
+      ) : tab === "artists" ? (
+        artists.length === 0 ? (
+          <Empty
+            title="No artists yet"
+            body="Artists appear once your tracks carry an artist tag."
+          />
+        ) : (
+          <div style={{ marginTop: 16 }}>
+            <Circles artists={artists} nav={nav} wrap />
+          </div>
+        )
       ) : (
-        <div style={{ marginTop: 16 }}>
-          <Circles artists={artists} nav={nav} wrap />
+        <div style={{ marginTop: 14 }}>
+          <CrateSection
+            nav={nav}
+            filter={crateSub}
+            onFilterChange={setCrateSub}
+            autoSearch={autoSearch}
+          />
         </div>
       )}
 
@@ -182,79 +250,6 @@ export function LibraryView({ nav }: { nav: Navigation }) {
   );
 }
 
-
-
-/**
- * Favourites, at the head of the library.
- *
- * The heart has been on every track row and in the player since the beginning,
- * and until this tile existed it wrote to a set no screen ever read. That is
- * the whole reason this is here: it is a door, not a decoration, and it is the
- * one bright thing on the screen because it is the only shortcut on it.
- *
- * The lime lives in the icon's disc, not a fill across the whole tile — the
- * same glass every other row on this screen sits in, so the shortcut reads as
- * one more row that happens to matter rather than a slab dropped onto the page.
- */
-function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }) {
-  return (
-    <button
-      className="nav-press nav-rise nav-glass"
-      onClick={() => {
-        haptic.tap();
-        onOpen();
-      }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        width: "100%",
-        height: 66,
-        marginBottom: 12,
-        padding: "0 14px",
-        borderRadius: 16,
-        textAlign: "left",
-      }}
-    >
-      <span
-        style={{
-          display: "grid",
-          placeItems: "center",
-          flex: "none",
-          width: 38,
-          height: 38,
-          borderRadius: 19,
-          background: "rgba(var(--color-nav-action-rgb),.16)",
-          color: "var(--color-nav-action)",
-        }}
-      >
-        <HeartIcon size={18} />
-      </span>
-
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span
-          className="nav-display"
-          style={{ display: "block", fontSize: 16, lineHeight: 1.1 }}
-        >
-          Favourites
-        </span>
-        <span
-          style={{
-            display: "block",
-            marginTop: 3,
-            fontSize: 11.5,
-            color: "var(--color-nav-muted)",
-          }}
-        >
-          <Counted count={count} one="track" />
-        </span>
-      </span>
-
-      <ChevronRightIcon size={15} style={{ flex: "none", opacity: 0.4 }} />
-    </button>
-  );
-}
-
 /**
  * The square tiles: playlists and albums are the same shape and the same tap.
  *
@@ -266,6 +261,10 @@ function FavouritesTile({ count, onOpen }: { count: number; onOpen: () => void }
  * playlist, and a dashed square the size of a real cover claimed the same
  * weight as your actual music — the compact `+ New` in the section header
  * says the same thing without pretending to be an item in the list.
+ *
+ * An item either goes somewhere (`to`, pushed onto the stack) or does
+ * something in place (`onClick`) — the pinned Favourites tile is the one tile
+ * of the second kind, since it opens the Crate tab rather than a screen.
  */
 function Grid({
   items,
@@ -279,7 +278,8 @@ function Grid({
     /** A picture the item owns outright — a playlist cover. Wins over `cover`. */
     art?: string | null;
     caption: React.ReactNode;
-    to: View;
+    to?: View;
+    onClick?: () => void;
   }[];
   nav: Navigation;
 }) {
@@ -297,7 +297,8 @@ function Grid({
           className="nav-press nav-row-in"
           onClick={() => {
             haptic.tap();
-            nav.push(item.to);
+            if (item.onClick) item.onClick();
+            else if (item.to) nav.push(item.to);
           }}
           style={
             {

@@ -193,7 +193,7 @@ export function HomeView({ nav }: { nav: Navigation }) {
           className="nav-press nav-rise"
           onClick={() => {
             haptic.tap();
-            nav.push({ type: "crate", filter: "unsorted" });
+            nav.push({ type: "library", openCrate: "unsorted" });
           }}
           style={{
             display: "flex",
