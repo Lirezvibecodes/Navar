@@ -71,6 +71,16 @@ export interface Playlist {
    * endpoint rather than a track's.
    */
   has_cover?: boolean;
+  /**
+   * Summed across its live tracks, owner_name and follower_count alongside it.
+   * Absent only from createPlaylist's bare INSERT ... RETURNING *, since a
+   * playlist that young has no tracks and no followers to sum anyway.
+   */
+  duration_seconds?: number;
+  /** The owner's handle or username, for a header that names them. */
+  owner_name?: string | null;
+  /** How many people have saved this playlist to their own library. */
+  follower_count?: number;
 }
 
 /**

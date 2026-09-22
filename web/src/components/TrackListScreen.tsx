@@ -93,15 +93,14 @@ export function TrackListScreen({
                 the name is written, a long one is allowed to take the room
                 it needs instead of being cut at the first line. */}
             <div
+              className="nav-display"
               style={{
                 display: "-webkit-box",
                 WebkitBoxOrient: "vertical",
                 WebkitLineClamp: 2,
                 overflow: "hidden",
                 fontSize: 19,
-                fontWeight: 600,
                 lineHeight: 1.2,
-                letterSpacing: "-0.02em",
               }}
             >
               {name}

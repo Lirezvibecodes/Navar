@@ -52,6 +52,15 @@ export interface Playlist {
   cover_track_id?: string | null;
   /** Whether the owner gave it a picture of its own, which wins over the pinned track. */
   has_cover?: boolean;
+  /**
+   * Summed across its live tracks, owner_name and follower_count alongside it.
+   * Absent only right after creating a playlist, before its first refetch.
+   */
+  duration_seconds?: number;
+  /** The owner's handle or username, for a header that names them. */
+  owner_name?: string | null;
+  /** How many people have saved this playlist to their own library. */
+  follower_count?: number;
 }
 
 /** An album or an artist: a GROUP BY over tags, not a table. */

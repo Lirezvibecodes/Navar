@@ -28,7 +28,7 @@ import {
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { cacheKey, ttl, useCached } from "../lib/cache";
-import { trackTitle } from "../lib/format";
+import { formatListened, trackTitle } from "../lib/format";
 import { usePaletteForUrl } from "../lib/palette";
 import { haptic } from "../telegram";
 import type { PlaylistVisibility, Track } from "../types";
@@ -129,6 +129,15 @@ export function PlaylistView({
     ttl.playlistTracks
   );
   const tracks = rows ?? [];
+
+  // Falls back to summing what's on screen so a brand new playlist — created
+  // this session, before its first refetch — still shows a real number rather
+  // than nothing.
+  const durationSeconds =
+    meta?.duration_seconds ??
+    tracks.reduce((total, t) => total + (t.duration_seconds ?? 0), 0);
+  const followerCount = meta?.follower_count ?? 0;
+  const ownerLabel = owned ? "You" : meta?.owner_name ? `@${meta.owner_name}` : "Someone";
 
   // Same precedence CollectionArt draws the header art with, so the wash
   // behind the screen always agrees with the picture sitting on top of it.
@@ -269,7 +278,15 @@ export function PlaylistView({
         }
         name={title}
         subtitle={
-          <Counted count={meta?.track_count ?? tracks.length} one="track" />
+          <>
+            <div>
+              <Counted count={meta?.track_count ?? tracks.length} one="track" />
+              {durationSeconds > 0 ? <> · {formatListened(durationSeconds)}</> : null}
+            </div>
+            <div style={{ marginTop: 2 }}>
+              Playlist by {ownerLabel} · <Counted count={followerCount} one="follower" />
+            </div>
+          </>
         }
         note={
           meta?.description ? (

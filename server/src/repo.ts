@@ -958,6 +958,19 @@ const PLAYLIST_TRACK_COUNT = `(SELECT COUNT(*) FROM playlist_tracks pt
         JOIN tracks t ON t.id = pt.track_id
         WHERE pt.playlist_id = p.id AND ${LIVE_T})::int AS track_count`;
 
+/** How long the playlist runs, end to end — the header's "3h 12m". */
+const PLAYLIST_DURATION = `(SELECT COALESCE(SUM(t.duration_seconds), 0) FROM playlist_tracks pt
+        JOIN tracks t ON t.id = pt.track_id
+        WHERE pt.playlist_id = p.id AND ${LIVE_T})::int AS duration_seconds`;
+
+/** How many people have saved this playlist to their own library. */
+const PLAYLIST_FOLLOWER_COUNT = `(SELECT COUNT(*) FROM playlist_follows pf
+        WHERE pf.playlist_id = p.id)::int AS follower_count`;
+
+/** Who made it, by the same name every other credit line uses. */
+const PLAYLIST_OWNER_NAME = `COALESCE(u.handle, u.username) AS owner_name`;
+const PLAYLIST_OWNER_JOIN = `LEFT JOIN users u ON u.telegram_user_id = p.owner_telegram_id`;
+
 export async function createPlaylist(
   ownerTelegramId: number,
   name: string
@@ -984,8 +997,12 @@ export async function listPlaylists(
   const { rows } = await getPool().query<Playlist>(
     `SELECT ${PLAYLIST_COLUMNS},
        ${PLAYLIST_TRACK_COUNT},
-       ${PLAYLIST_COVER}
+       ${PLAYLIST_COVER},
+       ${PLAYLIST_DURATION},
+       ${PLAYLIST_FOLLOWER_COUNT},
+       ${PLAYLIST_OWNER_NAME}
      FROM playlists p
+     ${PLAYLIST_OWNER_JOIN}
      WHERE p.owner_telegram_id = $1
      ORDER BY p.updated_at DESC
      LIMIT $2`,
@@ -1006,8 +1023,12 @@ export async function getPlaylist(
   const { rows } = await getPool().query<Playlist>(
     `SELECT ${PLAYLIST_COLUMNS},
        ${PLAYLIST_TRACK_COUNT},
-       ${PLAYLIST_COVER}
+       ${PLAYLIST_COVER},
+       ${PLAYLIST_DURATION},
+       ${PLAYLIST_FOLLOWER_COUNT},
+       ${PLAYLIST_OWNER_NAME}
      FROM playlists p
+     ${PLAYLIST_OWNER_JOIN}
      WHERE p.id = $1 AND p.owner_telegram_id = $2`,
     [id, ownerTelegramId]
   );
@@ -1166,8 +1187,12 @@ export async function listPlaylistsVisibleTo(
   const { rows } = await getPool().query<Playlist>(
     `SELECT ${PLAYLIST_COLUMNS},
        ${PLAYLIST_TRACK_COUNT},
-       ${PLAYLIST_COVER}
+       ${PLAYLIST_COVER},
+       ${PLAYLIST_DURATION},
+       ${PLAYLIST_FOLLOWER_COUNT},
+       ${PLAYLIST_OWNER_NAME}
      FROM playlists p
+     ${PLAYLIST_OWNER_JOIN}
      WHERE p.owner_telegram_id = $1
        AND ${playlistVisibleTo("$2")}
      ORDER BY p.updated_at DESC`,
@@ -1207,8 +1232,12 @@ export async function playlistVisibleToRequester(
   const { rows } = await getPool().query<Playlist>(
     `SELECT ${PLAYLIST_COLUMNS},
        ${PLAYLIST_TRACK_COUNT},
-       ${PLAYLIST_COVER}
+       ${PLAYLIST_COVER},
+       ${PLAYLIST_DURATION},
+       ${PLAYLIST_FOLLOWER_COUNT},
+       ${PLAYLIST_OWNER_NAME}
      FROM playlists p
+     ${PLAYLIST_OWNER_JOIN}
      WHERE p.id = $1 AND ${playlistVisibleTo("$2")}`,
     [playlistId, requesterTelegramId]
   );
