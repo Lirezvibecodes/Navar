@@ -30,7 +30,6 @@ import { SharedView } from "./views/SharedView";
 import { TagsView } from "./views/TagsView";
 import { hideSplash } from "./lib/splash";
 import { peek, cacheKey, revalidate } from "./lib/cache";
-import { tabOriginX } from "./lib/tabOrigin";
 import {
   getTelegramWebApp,
   haptic,
@@ -334,15 +333,12 @@ function Shell({ me }: { me: Me }) {
               ? "nav-view-pop"
               : "nav-view-tab"
         }
-        style={
-          {
-            flex: 1,
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            "--nav-tab-origin-x": direction === "tab" ? (tabOriginX() ?? "50%") : undefined,
-          } as React.CSSProperties
-        }
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
       >
         {body()}
       </div>

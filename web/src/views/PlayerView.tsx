@@ -111,7 +111,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
   const artRef = useRef<HTMLDivElement | null>(null);
   // Nothing playing means this screen renders nothing, so there is no root to
   // bind to until there is; the flag is what brings the listeners back.
-  useDragToDismiss(rootRef, onClose, current != null);
+  useDragToDismiss(rootRef, artRef, onClose, current != null);
 
   // The player grew out of the bar on the way in and used to vanish on the way
   // out, which read as a crash rather than a dismissal. A drag already brings
@@ -277,7 +277,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           >
             <div
               ref={artRef}
-              className={grew ? "nav-art-in" : undefined}
+              className={leaving ? "nav-art-out" : grew ? "nav-art-in" : undefined}
               style={{
                 borderRadius: 14,
                 boxShadow: artShadowCss(palette),
@@ -693,6 +693,7 @@ const ENGAGE_AT = 10;
  */
 function useDragToDismiss(
   rootRef: React.RefObject<HTMLDivElement | null>,
+  artRef: React.RefObject<HTMLDivElement | null>,
   onClose: () => void,
   ready: boolean
 ) {
@@ -783,6 +784,10 @@ function useDragToDismiss(
         // Same clock as the chevron's own close, not the fast settle used
         // below — dismissing is dismissing, whichever affordance triggered it.
         root.classList.add("nav-player-drag-out");
+        // Only when the artwork actually grew from the bar (it may be
+        // unmounted behind the lyrics/queue pane, or never grew at all) —
+        // matches the chevron close's leaving ? nav-art-out : ... check.
+        artRef.current?.classList.replace("nav-art-in", "nav-art-out");
         root.style.transform = `translateY(${root.clientHeight}px)`;
         root.style.opacity = "0";
         // Unmounting on the transition rather than a guessed delay would be
@@ -808,7 +813,7 @@ function useDragToDismiss(
       root.removeEventListener("touchcancel", onEnd);
       release();
     };
-  }, [rootRef, ready]);
+  }, [rootRef, artRef, ready]);
 }
 
 // --- Transport ---------------------------------------------------------------

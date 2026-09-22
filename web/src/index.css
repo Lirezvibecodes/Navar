@@ -701,13 +701,13 @@ button {
 /* --- The view stack ---------------------------------------------------------
 
    There is no router; App keeps a stack of views. Pushing slides the incoming
-   screen in from the right over a parent that recedes slightly, so the two
-   read as a stack rather than a swap. Popping reverses it and runs faster,
-   because going back should feel like undoing rather than travelling.
+   screen in from the right; popping reverses the same distance from the left
+   and runs faster, because going back should feel like undoing rather than
+   travelling.
 
-   The 3% scale on the outgoing screen is what sells the depth. It is small
-   enough that nobody notices it and large enough that the eye reads one
-   surface as sitting behind the other. */
+   Translate and opacity only — no scale on arrival. A screen growing up to
+   its final size as it's selected reads as a "pop", which this app avoids on
+   every page-level transition. */
 
 @keyframes nav-push-in {
   from {
@@ -717,7 +717,7 @@ button {
 }
 @keyframes nav-pop-in {
   from {
-    transform: scale(0.97);
+    transform: translate3d(-22px, 0, 0);
     opacity: 0;
   }
 }
@@ -732,20 +732,17 @@ button {
    fetches alive to animate something the incoming screen already covers. */
 
 /* Switching bottom-nav tabs is a lateral move, not a drill-in, so it gets its
-   own transition rather than borrowing push's "arriving from deeper" slide.
-   The incoming screen grows out of the tab that was actually tapped —
-   --nav-tab-origin-x is the tapped button's centre, written by BottomNav via
-   lib/tabOrigin.ts — instead of sliding in from a fixed edge. Transform and
-   opacity only, same as everywhere else in this block, so it stays cheap on
-   the tab switch, the single most frequent navigation in the app. */
+   own transition rather than borrowing push's "arriving from deeper" slide —
+   a small vertical rise instead of a horizontal one. Transform and opacity
+   only, same as the rest of this block, so it stays cheap on the tab switch,
+   the single most frequent navigation in the app. */
 @keyframes nav-tab-morph-in {
   from {
-    transform: scale(0.92) translate3d(0, 10px, 0);
+    transform: translate3d(0, 10px, 0);
     opacity: 0;
   }
 }
 .nav-view-tab {
-  transform-origin: var(--nav-tab-origin-x, 50%) 100%;
   animation: nav-tab-morph-in var(--dur-view) var(--ease-settle) both;
 }
 
@@ -754,7 +751,10 @@ button {
    The Now Playing bar becoming the full player. The player mounts with its
    artwork already at the size and position of the disc in the bar and lets it
    grow into place, so the 42px disc and the 196px square read as one object
-   that got closer rather than two views that swapped.
+   that got closer rather than two views that swapped. Closing reverses it:
+   the artwork shrinks back onto the same disc position it grew from, so both
+   directions read as the same motion played forwards and backwards rather
+   than two different transitions.
 
    The custom properties are written by the component from the real bounding
    box of the bar, so the origin is wherever the bar happened to be — no
@@ -781,9 +781,20 @@ button {
 }
 
 /* The artwork inside it, travelling on its own clock so it lands a beat before
-   the rest of the screen settles. */
+   the rest of the screen settles on open, and leads the rest of the screen
+   away on close — the same relationship, run backwards. Both keyframes read
+   the same --nav-art-dx/-dy/-scale, written once by applyFocalGrow and left
+   on the element for as long as it stays mounted, so the close needs no new
+   measurement to know where "home" is. */
 @keyframes nav-art-in {
   from {
+    transform: translate3d(var(--nav-art-dx, 0px), var(--nav-art-dy, 0px), 0)
+      scale(var(--nav-art-scale, 0.21));
+    border-radius: 50%;
+  }
+}
+@keyframes nav-art-out {
+  to {
     transform: translate3d(var(--nav-art-dx, 0px), var(--nav-art-dy, 0px), 0)
       scale(var(--nav-art-scale, 0.21));
     border-radius: 50%;
@@ -792,10 +803,16 @@ button {
 .nav-art-in {
   animation: nav-art-in calc(var(--dur-focal) - 100ms) var(--ease-settle) both;
 }
+.nav-art-out {
+  animation: nav-art-out calc(var(--dur-focal) - 200ms) var(--ease-in) both;
+}
 
 /* The player's backdrop arriving over the one before it. On the same clock as
    the bar becoming the player, because it is the same event: the colours of
-   what you are listening to changing. See Backdrop in PlayerView. */
+   what you are listening to changing. See Backdrop in PlayerView. Closing has
+   no matching fade-out class: the backdrop is a descendant of the sheet, so
+   .nav-player-out's/.nav-player-drag-out's own opacity already carries it
+   away with everything else in the same frame. */
 @keyframes nav-backdrop-in {
   from {
     opacity: 0;
