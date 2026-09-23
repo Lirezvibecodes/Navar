@@ -21,9 +21,75 @@ import {
 } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { personName } from "../lib/format";
+import { CrateIcon } from "../icons";
+import { drawPixelatedWash } from "../lib/pixelWash";
+import { loadImage } from "../lib/storyCard";
 import { haptic } from "../telegram";
 import { usePersistedState } from "../lib/persist";
 import type { CrateFilter, View } from "../view";
+
+type PlaylistFilter = "you" | "friends" | null;
+
+/**
+ * The pinned Favourites tile's own cover: a square, darkened pixel wash of the
+ * signed-in user's avatar with the app's heart glyph laid over the middle, so
+ * the one tile that isn't really a playlist still reads as unmistakably
+ * theirs. Lives here rather than in pixelWash.ts because nothing else needs a
+ * heart baked into the wash, and rather than in ProfileView.tsx because that
+ * file's own pixelated art is a track cover, not an avatar.
+ */
+function useFavoritesArt(meId: number | null): string | null {
+  const [art, setArt] = useState<string | null>(null);
+  useEffect(() => {
+    if (meId == null) {
+      setArt(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const [avatar, heart] = await Promise.all([
+        loadImage(api.avatarUrl(meId)),
+        loadImage(heartDataUrl()),
+      ]);
+      if (cancelled || !avatar) return;
+      const size = 224;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      drawPixelatedWash(ctx, avatar, size, size, 18, 3);
+      ctx.fillStyle = "rgba(0,0,0,.4)";
+      ctx.fillRect(0, 0, size, size);
+      if (heart) {
+        const h = size * 0.42;
+        ctx.drawImage(heart, (size - h) / 2, (size - h) / 2, h, h);
+      }
+      if (!cancelled) setArt(canvas.toDataURL("image/jpeg", 0.85));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meId]);
+  return art;
+}
+
+/**
+ * The pixel-art heart glyph as its own tiny image, tinted to the live accent
+ * so it composites onto a canvas the same colour a favourited track's heart
+ * already uses everywhere else. The polygon is HeartIcon's own from
+ * icons.tsx, copied rather than imported — a React icon component has no
+ * markup to hand a canvas until it is mounted, and this is the one place in
+ * the app that needs the glyph as a plain image instead.
+ */
+function heartDataUrl(): string {
+  const accent =
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--color-nav-action")
+      .trim() || "#c6f24a";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${accent}"><polygon points="23 6 23 11 22 11 22 12 21 12 21 13 20 13 20 14 19 14 19 15 18 15 18 16 17 16 17 17 16 17 16 18 15 18 15 19 14 19 14 20 13 20 13 21 11 21 11 20 10 20 10 19 9 19 9 18 8 18 8 17 7 17 7 16 6 16 6 15 5 15 5 14 4 14 4 13 3 13 3 12 2 12 2 11 1 11 1 6 2 6 2 5 3 5 3 4 4 4 4 3 10 3 10 4 11 4 11 5 13 5 13 4 14 4 14 3 20 3 20 4 21 4 21 5 22 5 22 6 23 6"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
 
 type Tab = "playlists" | "albums" | "artists" | "crate";
 
@@ -53,7 +119,7 @@ export function LibraryView({
   openCrate?: CrateFilter;
   openSearch?: boolean;
 }) {
-  const { tracks, playlists, followedPlaylists, loading, putPlaylist } = useLibrary();
+  const { me, tracks, playlists, followedPlaylists, loading, putPlaylist } = useLibrary();
   const { errorToast } = useToast();
 
   const [tab, setTab] = usePersistedState<Tab>(
@@ -76,8 +142,9 @@ export function LibraryView({
     if (autoSearch) setAutoSearch(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [byYou, setByYou] = useState(false);
-  const [byFriends, setByFriends] = useState(false);
+  // You or friends, never both — a chip toggles itself back off rather than
+  // onto the other, since "both" already has its own state: neither chosen.
+  const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>(null);
   const [naming, setNaming] = useState(false);
 
   const albums = useMemo(() => albumsOf(tracks), [tracks]);
@@ -86,6 +153,7 @@ export function LibraryView({
     () => tracks.filter((t) => t.favorited_at != null).length,
     [tracks]
   );
+  const favoritesArt = useFavoritesArt(me?.id ?? null);
 
   const newPlaylist = async (name: string) => {
     try {
@@ -106,16 +174,22 @@ export function LibraryView({
     );
   }
 
-  // Neither toggle chosen shows both — the mixed version — rather than
-  // nothing, since a filter that can select itself into an empty screen is a
-  // trap the chips give no way out of.
-  const mixed = !byYou && !byFriends;
-  const showOwn = mixed || byYou;
-  const showFriends = mixed || byFriends;
+  // Neither chip chosen shows both — the mixed version — rather than nothing,
+  // since a filter that can select itself into an empty screen is a trap the
+  // chips give no way out of.
+  const mixed = playlistFilter == null;
+  const showOwn = mixed || playlistFilter === "you";
+  const showFriends = mixed || playlistFilter === "friends";
 
   return (
     <Screen scrollKey="library">
       <ChipRow>
+        <Chip
+          label="The Crate"
+          icon={CrateIcon}
+          active={tab === "crate"}
+          onClick={() => setTab("crate")}
+        />
         <Chip
           label="Playlists"
           active={tab === "playlists"}
@@ -133,23 +207,26 @@ export function LibraryView({
           active={tab === "artists"}
           onClick={() => setTab("artists")}
         />
-        <Chip
-          label="The Crate"
-          active={tab === "crate"}
-          onClick={() => setTab("crate")}
-        />
       </ChipRow>
 
       {tab === "playlists" ? (
         <>
-          <ChipRow>
-            <Chip label="By you" active={byYou} onClick={() => setByYou((v) => !v)} />
-            <Chip
-              label="By friends"
-              active={byFriends}
-              onClick={() => setByFriends((v) => !v)}
-            />
-          </ChipRow>
+          <div className="nav-rise" style={{ marginTop: 14 }}>
+            <ChipRow>
+              <Chip
+                label="By you"
+                active={playlistFilter === "you"}
+                onClick={() => setPlaylistFilter((f) => (f === "you" ? null : "you"))}
+              />
+              <Chip
+                label="By friends"
+                active={playlistFilter === "friends"}
+                onClick={() =>
+                  setPlaylistFilter((f) => (f === "friends" ? null : "friends"))
+                }
+              />
+            </ChipRow>
+          </div>
 
           <SectionHeader
             title="Playlists"
@@ -159,27 +236,30 @@ export function LibraryView({
           />
           <Grid
             items={[
-              // Pinned regardless of the toggle above: it isn't anyone's
-              // playlist, own or a friend's, so By you/By friends has nothing
-              // to say about it.
-              {
-                key: "favorites",
-                name: "Favourites",
-                caption: <Counted count={favorites} one="track" />,
-                onClick: () => {
-                  setTab("crate");
-                  setCrateSub("favorites");
-                },
-              },
+              // Favourites is a cut of your own library, never a friend's, so
+              // it belongs only alongside your own playlists — pinned first
+              // among them rather than fixed regardless of the chips.
               ...(showOwn
-                ? playlists.map((p) => ({
-                    key: p.id,
-                    name: p.name,
-                    cover: p.cover_track_id,
-                    art: api.playlistArtworkUrl(p),
-                    caption: <Counted count={p.track_count ?? 0} one="track" />,
-                    to: { type: "playlist", id: p.id, name: p.name } as View,
-                  }))
+                ? [
+                    {
+                      key: "favorites",
+                      name: "Favourites",
+                      art: favoritesArt,
+                      caption: <Counted count={favorites} one="track" />,
+                      onClick: () => {
+                        setTab("crate");
+                        setCrateSub("favorites");
+                      },
+                    },
+                    ...playlists.map((p) => ({
+                      key: p.id,
+                      name: p.name,
+                      cover: p.cover_track_id,
+                      art: api.playlistArtworkUrl(p),
+                      caption: <Counted count={p.track_count ?? 0} one="track" />,
+                      to: { type: "playlist", id: p.id, name: p.name } as View,
+                    })),
+                  ]
                 : []),
               // Yours says how much is in it, theirs says whose it is — same
               // rule HomeView's shelf cards already follow.
