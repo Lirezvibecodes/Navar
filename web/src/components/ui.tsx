@@ -168,9 +168,14 @@ export function SectionHeader({
             color: "var(--color-nav-action)",
             fontSize: 11.5,
             fontWeight: 600,
-            minHeight: 44,
-            paddingLeft: 12,
-            marginRight: -2,
+            // A 44px tap target without the button's own box stretching this
+            // row: the padding buys the height, the equal negative margin
+            // gives it back, so the row's height still comes from the title
+            // alone — otherwise this was the one section header taller than
+            // the other three, and the gap above the title read as bigger
+            // wherever "+ New" happened to be showing.
+            padding: "15px 0 15px 12px",
+            margin: "-15px -2px -15px 0",
           }}
         >
           {action}
