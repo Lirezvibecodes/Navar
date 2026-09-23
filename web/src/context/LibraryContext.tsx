@@ -309,7 +309,7 @@ export function albumsOf(tracks: Track[]): Grouped[] {
  * track to go on, there's nothing to confirm a co-artist against, so only
  * that track's primary name is credited.
  */
-function albumArtistOf(group: Track[]): string | null {
+export function albumArtistOf(group: Track[]): string | null {
   const perTrack = group
     .map((t) => t.artist?.trim())
     .filter((a): a is string => !!a)

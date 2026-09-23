@@ -5,7 +5,7 @@ import { trackCoverUrl } from "../api";
 import { CollectionArt } from "../components/PixelArt";
 import { MissingTracksSheet } from "../components/MissingTracksSheet";
 import { TrackListScreen } from "../components/TrackListScreen";
-import { useLibrary } from "../context/LibraryContext";
+import { albumArtistOf, useLibrary } from "../context/LibraryContext";
 import { Counted, Num } from "../components/ui";
 import { CheckIcon, ChevronRightIcon } from "../icons";
 import { cacheKey, ttl, useCached } from "../lib/cache";
@@ -235,13 +235,11 @@ export function CollectionView({
   const hasMissingTracks =
     !!tracklistMatch && tracklistMatch.matched.some((entry) => !entry.track);
 
-  // The header names the release's lead artist, not the full per-track
-  // credit — a track tagged "Drake feat. Travis Scott" would otherwise print
-  // the feature right into the album's own byline. Mirrors the primary-name
-  // rule the metadata route already applies for its MusicBrainz lookup
-  // (`server/src/routes/collections.ts`).
-  const rawArtist = kind === "album" ? rows.find((t) => t.artist)?.artist : undefined;
-  const artist = rawArtist ? splitArtists(rawArtist)[0] ?? null : null;
+  // The header credits the album to whichever artist tags every track
+  // agrees on, same as the Library grid — a track tagged "Drake feat. Travis
+  // Scott" doesn't get its feature printed into the album's own byline unless
+  // every other track carries it too.
+  const artist = kind === "album" ? albumArtistOf(rows) : null;
   const coverTrackId = rows.find((t) => t.has_cover)?.id;
 
   // Artists have no cover of their own to take a wash from — an album's own
