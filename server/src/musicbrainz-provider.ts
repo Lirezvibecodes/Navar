@@ -43,10 +43,30 @@ interface MusicBrainzSearchResponse {
   releases?: MusicBrainzRelease[];
 }
 
+export interface TracklistEntry {
+  position: number;
+  title: string;
+}
+
 export interface AlbumMetadata {
   musicbrainzReleaseId: string;
   releaseDate: string | null;
   trackCount: number | null;
+  tracklist: TracklistEntry[] | null;
+}
+
+interface MusicBrainzTrack {
+  position?: number;
+  title?: string;
+}
+
+interface MusicBrainzMedium {
+  "track-offset"?: number;
+  tracks?: MusicBrainzTrack[];
+}
+
+interface MusicBrainzReleaseDetail {
+  media?: MusicBrainzMedium[];
 }
 
 /** One GET, bounded, with anything unexpected flattened to null. */
@@ -96,7 +116,35 @@ async function bestRelease(artist: string, album: string): Promise<MusicBrainzRe
 }
 
 /**
- * An album's release date and total track count, or null.
+ * The release's own tracklist, flattened across every medium in disc order.
+ *
+ * A multi-disc release numbers each medium's tracks from 1 — `track-offset`
+ * is MusicBrainz's own running total ahead of that medium, so adding it back
+ * in is what keeps disc two's track 1 sorting after disc one's last track
+ * instead of colliding with it.
+ */
+export async function fetchTracklist(releaseId: string): Promise<TracklistEntry[] | null> {
+  const body = (await get(
+    `/release/${releaseId}?inc=recordings&fmt=json`
+  )) as MusicBrainzReleaseDetail | null;
+  const media = body?.media;
+  if (!media || media.length === 0) return null;
+
+  const entries: TracklistEntry[] = [];
+  for (const medium of media) {
+    const offset = medium["track-offset"] ?? 0;
+    for (const track of medium.tracks ?? []) {
+      if (track.position == null || !track.title) continue;
+      entries.push({ position: offset + track.position, title: track.title });
+    }
+  }
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => a.position - b.position);
+  return entries;
+}
+
+/**
+ * An album's release date, total track count, and tracklist, or null.
  *
  * Callers must treat null as "asked and found nothing usable", not as "did
  * not ask" — the difference is recorded in the database, not here.
@@ -104,9 +152,11 @@ async function bestRelease(artist: string, album: string): Promise<MusicBrainzRe
 export async function lookupAlbum(artist: string, album: string): Promise<AlbumMetadata | null> {
   const release = await bestRelease(artist.trim(), album.trim());
   if (!release?.id) return null;
+  const tracklist = await fetchTracklist(release.id);
   return {
     musicbrainzReleaseId: release.id,
     releaseDate: release.date ?? null,
-    trackCount: release["track-count"] ?? null,
+    trackCount: tracklist?.length ?? release["track-count"] ?? null,
+    tracklist,
   };
 }

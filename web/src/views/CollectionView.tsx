@@ -3,15 +3,18 @@ import type { Navigation } from "../App";
 import * as api from "../api";
 import { trackCoverUrl } from "../api";
 import { CollectionArt } from "../components/PixelArt";
+import { MissingTracksSheet } from "../components/MissingTracksSheet";
 import { TrackListScreen } from "../components/TrackListScreen";
 import { useLibrary } from "../context/LibraryContext";
 import { Counted, Num } from "../components/ui";
-import { CheckIcon } from "../icons";
+import { CheckIcon, ChevronRightIcon } from "../icons";
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { splitArtists } from "../lib/artists";
+import { matchAlbumTracklist } from "../lib/albumTracklist";
 import { formatReleaseDate, trackTitle } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
+import { haptic } from "../telegram";
 
 /**
  * The album header's second line: total tracks and release date, both sourced
@@ -22,39 +25,63 @@ import { loadImage } from "../lib/storyCard";
  * lands, then folded into "X / Y tracks" once it has. A miss or a MusicBrainz
  * failure both come back as `trackCount: null`, which reads as "X / — tracks"
  * rather than as an error.
+ *
+ * `onOpenMissing` is only ever passed once the release's tracklist is known
+ * and at least one of its tracks isn't in the Crate yet — a complete album
+ * has nothing to show in that sheet, so the line stays plain text for it.
  */
-function AlbumMeta({ name, savedCount }: { name: string; savedCount: number }) {
-  const { data } = useCached(
-    cacheKey.albumMeta(name),
-    () => api.getAlbumMetadata(name),
-    ttl.albumMeta
-  );
+function AlbumMeta({
+  data,
+  savedCount,
+  onOpenMissing,
+}: {
+  data: api.AlbumMetadata | undefined;
+  savedCount: number;
+  onOpenMissing?: () => void;
+}) {
   const trackCount = data?.trackCount ?? null;
   const complete = trackCount != null && savedCount >= trackCount;
+
+  const countLine =
+    data === undefined ? (
+      <Counted count={savedCount} one="track" />
+    ) : trackCount != null ? (
+      <>
+        <Num>{savedCount}</Num> / <Num>{trackCount}</Num> tracks
+        {complete ? (
+          <CheckIcon
+            size={12}
+            style={{
+              marginLeft: 4,
+              verticalAlign: -1.5,
+              color: "var(--color-nav-action)",
+            }}
+          />
+        ) : null}
+      </>
+    ) : (
+      <>
+        <Num>{savedCount}</Num> / — tracks
+      </>
+    );
 
   return (
     <>
       <div>
-        {data === undefined ? (
-          <Counted count={savedCount} one="track" />
-        ) : trackCount != null ? (
-          <>
-            <Num>{savedCount}</Num> / <Num>{trackCount}</Num> tracks
-            {complete ? (
-              <CheckIcon
-                size={12}
-                style={{
-                  marginLeft: 4,
-                  verticalAlign: -1.5,
-                  color: "var(--color-nav-action)",
-                }}
-              />
-            ) : null}
-          </>
+        {onOpenMissing ? (
+          <button
+            className="nav-press"
+            onClick={() => {
+              haptic.tap();
+              onOpenMissing();
+            }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
+          >
+            {countLine}
+            <ChevronRightIcon size={11} style={{ opacity: 0.4, flex: "none" }} />
+          </button>
         ) : (
-          <>
-            <Num>{savedCount}</Num> / — tracks
-          </>
+          countLine
         )}
       </div>
       <div style={{ marginTop: 3 }}>
@@ -166,22 +193,50 @@ export function CollectionView({
   name: string;
 }) {
   const { tracks } = useLibrary();
+  const [missingOpen, setMissingOpen] = useState(false);
+
+  // Only an album carries release metadata — an artist page fetches nothing,
+  // so its key and fetcher stay fixed no matter which artist is open.
+  const { data: albumMeta } = useCached<api.AlbumMetadata | null>(
+    kind === "album" ? cacheKey.albumMeta(name) : "album-meta:none",
+    () => (kind === "album" ? api.getAlbumMetadata(name) : Promise.resolve(null)),
+    ttl.albumMeta
+  );
+
+  const filtered = useMemo(
+    () =>
+      tracks.filter((t) =>
+        kind === "album"
+          ? t.album === name
+          : !!t.artist && splitArtists(t.artist).includes(name)
+      ),
+    [tracks, kind, name]
+  );
+
+  // Lines the album up against the release's own tracklist, once MusicBrainz
+  // has one — this is what both the "X / Y tracks" chevron and the row order
+  // below draw from, so the two can never disagree about what's missing.
+  const tracklistMatch = useMemo(() => {
+    if (kind !== "album" || !albumMeta?.tracklist || albumMeta.tracklist.length === 0) {
+      return null;
+    }
+    return matchAlbumTracklist(filtered, albumMeta.tracklist);
+  }, [kind, albumMeta, filtered]);
 
   const rows = useMemo(() => {
-    const match = tracks.filter((t) =>
-      kind === "album"
-        ? t.album === name
-        : !!t.artist && splitArtists(t.artist).includes(name)
-    );
     if (kind === "artist") {
-      match.sort((a, b) => trackTitle(a).localeCompare(trackTitle(b)));
-    } else {
-      // `tracks` comes back newest-first (see LibraryContext); an album needs
-      // the opposite so it reads start-to-end in the order it was built.
-      match.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      return [...filtered].sort((a, b) => trackTitle(a).localeCompare(trackTitle(b)));
     }
-    return match;
-  }, [tracks, kind, name]);
+    if (tracklistMatch) return tracklistMatch.ordered;
+    // No authentic order available (no MusicBrainz match, or a tracklist
+    // that hasn't resolved yet) — fall back to upload order. `tracks` comes
+    // back newest-first (see LibraryContext); an album needs the opposite so
+    // it reads start-to-end in the order it was built.
+    return [...filtered].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }, [kind, filtered, tracklistMatch]);
+
+  const hasMissingTracks =
+    !!tracklistMatch && tracklistMatch.matched.some((entry) => !entry.track);
 
   const artist =
     kind === "album" ? rows.find((t) => t.artist)?.artist : null;
@@ -214,7 +269,11 @@ export function CollectionView({
           kind === "album" ? (
             <>
               {artist ? <div>{artist}</div> : null}
-              <AlbumMeta name={name} savedCount={rows.length} />
+              <AlbumMeta
+                data={albumMeta ?? undefined}
+                savedCount={rows.length}
+                onOpenMissing={hasMissingTracks ? () => setMissingOpen(true) : undefined}
+              />
             </>
           ) : (
             <Counted count={rows.length} one="track" />
@@ -226,6 +285,14 @@ export function CollectionView({
         emptyTitle="Nothing under that name"
         emptyBody="The tracks that carried this tag are no longer in your Crate."
       />
+      {kind === "album" && tracklistMatch ? (
+        <MissingTracksSheet
+          open={missingOpen}
+          onClose={() => setMissingOpen(false)}
+          albumName={name}
+          matched={tracklistMatch.matched}
+        />
+      ) : null}
     </>
   );
 }

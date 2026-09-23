@@ -351,9 +351,15 @@ export function listArtistTracks(name: string): Promise<Track[]> {
   return request<Track[]>(`/api/artists/${encodeURIComponent(name)}/tracks`);
 }
 
+export interface AlbumTracklistEntry {
+  position: number;
+  title: string;
+}
+
 export interface AlbumMetadata {
   releaseDate: string | null;
   trackCount: number | null;
+  tracklist: AlbumTracklistEntry[] | null;
 }
 
 export function getAlbumMetadata(name: string): Promise<AlbumMetadata> {

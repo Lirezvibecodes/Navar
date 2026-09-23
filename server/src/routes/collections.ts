@@ -8,8 +8,9 @@ import {
   renameAlbum,
   getAlbumMetadata,
   saveAlbumMetadata,
+  splitArtists,
 } from "../repo";
-import { lookupAlbum } from "../musicbrainz-provider";
+import { lookupAlbum, fetchTracklist } from "../musicbrainz-provider";
 
 /**
  * Albums and artists have no tables. Both views are a GROUP BY over the tags on
@@ -74,11 +75,17 @@ export function albumsRouter(): Router {
         return;
       }
 
-      // Same rule the album page itself uses to print an artist under the
-      // title: the first track in this album that carries one.
-      const artist = tracks.find((t) => t.artist)?.artist ?? null;
+      // The same rule the album page uses to print an artist under the
+      // title, taken down to just the primary name: a MusicBrainz release is
+      // credited to its lead artist, so searching "JID feat. Kenny Mason"
+      // whole finds nothing where "JID" finds the album. The cache is keyed
+      // on this same primary name for the same reason — two owners tagging
+      // the same album's artist field with different feature billing should
+      // still land on one cached row.
+      const rawArtist = tracks.find((t) => t.artist)?.artist;
+      const artist = rawArtist ? splitArtists(rawArtist)[0] ?? null : null;
       if (!artist) {
-        res.json({ releaseDate: null, trackCount: null });
+        res.json({ releaseDate: null, trackCount: null, tracklist: null });
         return;
       }
 
@@ -89,6 +96,7 @@ export function albumsRouter(): Router {
           musicbrainzReleaseId: found?.musicbrainzReleaseId ?? null,
           releaseDate: found?.releaseDate ?? null,
           trackCount: found?.trackCount ?? null,
+          tracklist: found?.tracklist ?? null,
         }).catch((err: unknown) => {
           console.error("[albums] could not record metadata lookup:", err);
         });
@@ -96,12 +104,35 @@ export function albumsRouter(): Router {
           musicbrainz_release_id: found?.musicbrainzReleaseId ?? null,
           release_date: found?.releaseDate ?? null,
           track_count: found?.trackCount ?? null,
+          tracklist: found?.tracklist ?? null,
           fetched_at: new Date(),
         };
+      } else if (row.musicbrainz_release_id && row.tracklist == null) {
+        // A row cached before the tracklist column existed (or one whose
+        // detail request failed the first time). One more attempt to top it
+        // up — bounded, since it only fires while tracklist is genuinely
+        // still missing on an otherwise-matched release.
+        const tracklist = await fetchTracklist(row.musicbrainz_release_id);
+        if (tracklist) {
+          const trackCount = tracklist.length;
+          await saveAlbumMetadata(artist, req.params.name, {
+            musicbrainzReleaseId: row.musicbrainz_release_id,
+            releaseDate: row.release_date,
+            trackCount,
+            tracklist,
+          }).catch((err: unknown) => {
+            console.error("[albums] could not record tracklist backfill:", err);
+          });
+          row = { ...row, tracklist, track_count: trackCount };
+        }
       }
 
       res.setHeader("Cache-Control", "private, max-age=300");
-      res.json({ releaseDate: row.release_date, trackCount: row.track_count });
+      res.json({
+        releaseDate: row.release_date,
+        trackCount: row.track_count,
+        tracklist: row.tracklist,
+      });
     })
   );
 

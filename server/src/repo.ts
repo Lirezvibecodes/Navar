@@ -7,6 +7,7 @@ import {
   evaluateSocialTags,
 } from "./tagEvaluator";
 import { TAG_CATALOGUE, TAG_BY_ID, MAX_EQUIPPED_TAGS, type TagState } from "./tags";
+import type { TracklistEntry } from "./musicbrainz-provider";
 import type {
   EquippedTagSummary,
   Playlist,
@@ -681,6 +682,7 @@ export interface AlbumMetadataRow {
   musicbrainz_release_id: string | null;
   release_date: string | null;
   track_count: number | null;
+  tracklist: TracklistEntry[] | null;
   fetched_at: Date;
 }
 
@@ -696,7 +698,7 @@ export async function getAlbumMetadata(
   album: string
 ): Promise<AlbumMetadataRow | null> {
   const { rows } = await getPool().query<AlbumMetadataRow>(
-    `SELECT musicbrainz_release_id, release_date, track_count, fetched_at
+    `SELECT musicbrainz_release_id, release_date, track_count, tracklist, fetched_at
      FROM album_metadata
      WHERE lower(artist_name) = lower($1) AND lower(album_title) = lower($2)`,
     [artist, album]
@@ -716,18 +718,27 @@ export async function saveAlbumMetadata(
     musicbrainzReleaseId: string | null;
     releaseDate: string | null;
     trackCount: number | null;
+    tracklist: TracklistEntry[] | null;
   }
 ): Promise<void> {
   await getPool().query(
-    `INSERT INTO album_metadata (artist_name, album_title, musicbrainz_release_id, release_date, track_count)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO album_metadata (artist_name, album_title, musicbrainz_release_id, release_date, track_count, tracklist)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
      ON CONFLICT (lower(artist_name), lower(album_title))
      DO UPDATE SET musicbrainz_release_id = EXCLUDED.musicbrainz_release_id,
                    release_date = EXCLUDED.release_date,
                    track_count = EXCLUDED.track_count,
+                   tracklist = EXCLUDED.tracklist,
                    fetched_at = now(),
                    updated_at = now()`,
-    [artist, album, meta.musicbrainzReleaseId, meta.releaseDate, meta.trackCount]
+    [
+      artist,
+      album,
+      meta.musicbrainzReleaseId,
+      meta.releaseDate,
+      meta.trackCount,
+      meta.tracklist ? JSON.stringify(meta.tracklist) : null,
+    ]
   );
 }
 
