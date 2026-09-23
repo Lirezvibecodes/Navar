@@ -79,11 +79,13 @@ function AlbumMeta({ name, savedCount }: { name: string; savedCount: number }) {
   );
 }
 
-/** The story card's own 9:16 proportions, scaled down — this is a fixed
- *  viewport backdrop, not a sharable image, so it only has to be big enough
- *  that `cover`-fit upscaling stays smooth. */
+/** The wash only ever shows behind the header band now (see
+ *  `albumBackdropStyle`), not the full page, so its own target is a squarer
+ *  crop rather than a tall 9:16 page — closer to the cover's own shape means
+ *  the pixelation's cover-fit crop (`pixelWash.ts`) chops far less of the
+ *  sleeve away, instead of the zoomed-in sliver a portrait target produced. */
 const BACKDROP_W = 480;
-const BACKDROP_H = 854;
+const BACKDROP_H = 400;
 
 /**
  * A full-bleed pixelated wash of the album's own cover, recomputed whenever
@@ -120,23 +122,29 @@ function useAlbumWash(coverUrl: string | null): string | null {
 }
 
 /**
- * The wash, fixed behind the whole screen the way `CoverBackdrop`'s
- * colour-only wash used to sit for an album (`ui.tsx`'s comment on that
- * component explains the DOM-order stacking this relies on). The scrim
- * carries the same curve as the story card's own (`storyCard.ts`) — light
- * enough near the top that the mosaic still reads as the cover, darkening
- * as it goes — but pushed all the way to a solid `#030303` by the bottom of
- * the viewport rather than stopping at that card's .92, since a page has no
- * edge of its own for the eye to stop the fade at.
+ * The wash sits fixed behind the whole screen the way `CoverBackdrop`'s
+ * colour-only wash used to for an album (`ui.tsx`'s comment on that
+ * component explains the DOM-order stacking this relies on) — but the photo
+ * itself (the second `backgroundSize`/`backgroundPosition` layer) is only
+ * ever drawn across roughly the top two-fifths of the viewport, the same "a
+ * third of the screen, or a bit more" band the header sits in. The scrim
+ * above it starts dark enough on its own not to fight the header text, and
+ * reaches the app's own flat background (`--color-nav-bg`) a little past the
+ * one-third mark — well before the photo layer's own lower edge — so
+ * everything below that is plain background, not a fading image.
  */
 function albumBackdropStyle(washUrl: string): React.CSSProperties {
   return {
     position: "fixed",
     inset: 0,
     pointerEvents: "none",
-    background:
-      `linear-gradient(180deg, rgba(3,3,3,.35) 0%, rgba(3,3,3,.55) 55%, ` +
-      `rgba(3,3,3,.92) 85%, #030303 100%), url(${washUrl}) center/cover no-repeat`,
+    backgroundImage:
+      `linear-gradient(180deg, rgba(3,3,3,.55) 0%, rgba(3,3,3,.78) 20%, ` +
+      `rgba(3,3,3,.95) 32%, var(--color-nav-bg) 40%, var(--color-nav-bg) 100%), ` +
+      `url(${washUrl})`,
+    backgroundSize: "100% 100%, 100% 46%",
+    backgroundPosition: "0 0, top center",
+    backgroundRepeat: "no-repeat, no-repeat",
   };
 }
 
