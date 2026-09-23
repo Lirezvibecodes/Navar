@@ -214,11 +214,6 @@ export function unfollowPlaylist(id: string): Promise<void> {
   return request<void>(`/api/playlists/${id}/follow`, { method: "DELETE" });
 }
 
-/** Who has saved this playlist to their own library. */
-export function listPlaylistFollowers(id: string): Promise<Person[]> {
-  return request<Person[]>(`/api/playlists/${id}/followers`);
-}
-
 export function createPlaylist(name: string): Promise<Playlist> {
   return request<Playlist>("/api/playlists", {
     method: "POST",

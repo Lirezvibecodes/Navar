@@ -1281,19 +1281,6 @@ export async function unfollowPlaylist(
   );
 }
 
-/** Who has saved this playlist to their own library, most recent first. */
-export async function listPlaylistFollowers(playlistId: string): Promise<PersonSummary[]> {
-  const { rows } = await getPool().query<PersonSummary>(
-    `SELECT u.telegram_user_id, u.username, u.handle, (u.avatar_file_id IS NOT NULL) AS has_avatar
-     FROM playlist_follows pf
-     JOIN users u ON u.telegram_user_id = pf.follower_telegram_id
-     WHERE pf.playlist_id = $1
-     ORDER BY pf.created_at DESC`,
-    [playlistId]
-  );
-  return rows;
-}
-
 /**
  * The playlists this person has followed, in the same shape Home already
  * hands back a friend's playlist in — whose it is, no share slug. Visibility

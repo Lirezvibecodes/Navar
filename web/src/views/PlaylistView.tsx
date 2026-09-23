@@ -14,7 +14,6 @@ import {
   Sheet,
   SheetDivider,
   SheetItem,
-  Skeleton,
 } from "../components/ui";
 import {
   CheckIcon,
@@ -32,8 +31,7 @@ import { cacheKey, ttl, useCached } from "../lib/cache";
 import { formatListened, trackTitle } from "../lib/format";
 import { usePaletteForUrl } from "../lib/palette";
 import { haptic } from "../telegram";
-import type { Person, PlaylistVisibility, Track } from "../types";
-import { PersonRow } from "./SocialView";
+import type { PlaylistVisibility, Track } from "../types";
 
 /**
  * One playlist.
@@ -78,7 +76,6 @@ export function PlaylistView({
   const fileRef = useRef<HTMLInputElement>(null);
   const [describing, setDescribing] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [followersOpen, setFollowersOpen] = useState(false);
 
   // listPlaylists returns your own playlists and nothing else, so finding it
   // here IS the ownership test. A friend's shared playlist, or one reached
@@ -289,9 +286,7 @@ export function PlaylistView({
               {durationSeconds > 0 ? <> · {formatListened(durationSeconds)}</> : null}
             </div>
             <div style={{ marginTop: 3 }}>
-              <SubtleLink onClick={() => setFollowersOpen(true)}>
-                {followerCount} {followerCount === 1 ? "follower" : "followers"}
-              </SubtleLink>
+              {followerCount} {followerCount === 1 ? "follower" : "followers"}
             </div>
             <div style={{ marginTop: 3 }}>
               Playlist by{" "}
@@ -466,13 +461,6 @@ export function PlaylistView({
         onChange={putPlaylist}
       />
 
-      <FollowersSheet
-        nav={nav}
-        playlistId={id}
-        open={followersOpen}
-        onClose={() => setFollowersOpen(false)}
-      />
-
       <NameSheet
         open={renaming}
         title="Rename playlist"
@@ -590,11 +578,11 @@ export function CoverPicker({
 }
 
 /**
- * A piece of text in the header's meta lines that opens something — the
- * follower count and the owner's name. Coloured with the app's one accent and
- * given a thin, lighter-toned underline rather than turned into a pill or a
- * chip: enough to read as tappable at a glance, without becoming its own
- * visual event on a screen that is mostly about the tracks below it.
+ * The owner's name in the header's meta lines, tappable through to their
+ * profile. Coloured with the app's one accent and given a thin, lighter-toned
+ * underline rather than turned into a pill or a chip: enough to read as
+ * tappable at a glance, without becoming its own visual event on a screen
+ * that is mostly about the tracks below it.
  */
 function SubtleLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
@@ -618,64 +606,5 @@ function SubtleLink({ onClick, children }: { onClick: () => void; children: Reac
     >
       {children}
     </button>
-  );
-}
-
-/**
- * Who has saved this playlist to their own library — the same rows and the
- * same tap-to-open-their-profile pattern `FriendsSheet` uses on a person's
- * page (`PersonRow`, exported from `SocialView`), fetched fresh on every open
- * rather than cached, since it isn't worth a cache key of its own.
- */
-function FollowersSheet({
-  nav,
-  playlistId,
-  open,
-  onClose,
-}: {
-  nav: Navigation;
-  playlistId: string;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const [followers, setFollowers] = useState<Person[] | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setFollowers(null);
-    void api.listPlaylistFollowers(playlistId).then((list) => {
-      if (!cancelled) setFollowers(list);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, playlistId]);
-
-  return (
-    <Sheet open={open} onClose={onClose} title="Followers">
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "2px 12px 10px" }}>
-        {followers === null ? (
-          <Skeleton rows={4} />
-        ) : followers.length === 0 ? (
-          <Empty
-            title="No followers yet"
-            body="Nobody has saved this playlist to their library yet."
-          />
-        ) : (
-          followers.map((person, i) => (
-            <PersonRow
-              key={person.telegram_user_id}
-              person={person}
-              index={i}
-              onOpen={() => {
-                onClose();
-                nav.push({ type: "profile", userId: Number(person.telegram_user_id) });
-              }}
-            />
-          ))
-        )}
-      </div>
-    </Sheet>
   );
 }
