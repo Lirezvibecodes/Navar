@@ -2966,11 +2966,33 @@ export async function setListeningPrivacy(
  * returns nothing at all — there is no row saying somebody is hidden, because
  * a placeholder for a person who opted out tells you exactly the thing they
  * opted out of telling you.
+ *
+ * `includeSelf` adds the viewer's own row alongside their friends', for the
+ * one caller (the Social feed) where "who is listening" is meant to include
+ * "you are". It bypasses `is_public` for that row: the toggle governs whether
+ * *friends* see your status, and showing it back to you is not the thing it
+ * protects against. The Home shelf and the standalone `/friends/listening`
+ * route both leave this off, since a "friend activity" shelf naming the
+ * viewer as one of their own friends would be a bug, not a feature.
  */
 export async function listFriendsListening(
   viewerTelegramId: number,
-  windowMinutes: number = LISTENING_WINDOW_MINUTES
+  windowMinutes: number = LISTENING_WINDOW_MINUTES,
+  includeSelf: boolean = false
 ): Promise<ListeningNow[]> {
+  const friendClause = `(
+    ls.is_public
+    AND EXISTS (
+      SELECT 1 FROM friendships f
+      WHERE f.status = 'accepted'
+        AND ((f.requester_id = $1 AND f.addressee_id = ls.telegram_user_id)
+          OR (f.requester_id = ls.telegram_user_id AND f.addressee_id = $1))
+    )
+  )`;
+  const visible = includeSelf
+    ? `(ls.telegram_user_id = $1 OR ${friendClause})`
+    : friendClause;
+
   const { rows } = await getPool().query<Record<string, unknown>>(
     `SELECT ${personColumns("u", "person")},
        t.id AS track_id, t.title, t.artist,
@@ -2980,15 +3002,9 @@ export async function listFriendsListening(
      FROM listen_status ls
      JOIN users u ON u.telegram_user_id = ls.telegram_user_id
      JOIN tracks t ON t.id = ls.track_id
-     WHERE ls.is_public
-       AND ls.updated_at > now() - interval '${windowMinutes} minutes'
+     WHERE ls.updated_at > now() - interval '${windowMinutes} minutes'
        AND ${LIVE_T}
-       AND EXISTS (
-         SELECT 1 FROM friendships f
-         WHERE f.status = 'accepted'
-           AND ((f.requester_id = $1 AND f.addressee_id = ls.telegram_user_id)
-             OR (f.requester_id = ls.telegram_user_id AND f.addressee_id = $1))
-       )
+       AND ${visible}
      ORDER BY ls.updated_at DESC`,
     [viewerTelegramId]
   );
@@ -3154,7 +3170,8 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
 }
 
 /**
- * Playlists the people this viewer knows have opened up lately.
+ * Playlists the people this viewer knows — themself included — have opened
+ * up lately.
  *
  * Ordered by when the playlist last changed, which is the nearest thing
  * recorded to when it was shared — a visibility change bumps `updated_at`, and
@@ -3166,7 +3183,8 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
  * same one the playlist reads use, so the feed can never advertise something
  * that would 404 when tapped — but it passes any link-shared playlist, and
  * "anyone holding the link may open this" is not "everybody should be told
- * about it, by name". `canSeePerson` is what keeps a stranger out of the feed.
+ * about it, by name". `canSeePerson` is what keeps a stranger out of the feed,
+ * and passes the viewer's own id for the same reason it passes a friend's.
  */
 async function listRecentShares(
   viewerTelegramId: number
@@ -3178,8 +3196,7 @@ async function listRecentShares(
        ${PLAYLIST_COVER}
      FROM playlists p
      JOIN users u ON u.telegram_user_id = p.owner_telegram_id
-     WHERE p.owner_telegram_id <> $1
-       AND p.visibility <> 'private'
+     WHERE p.visibility <> 'private'
        AND p.group_chat_id IS NULL
        AND p.updated_at > now() - interval '${ACTIVITY_WINDOW_DAYS} days'
        AND ${playlistVisibleTo("$1")}
@@ -3206,7 +3223,8 @@ async function listRecentShares(
 }
 
 /**
- * Tracks the people this viewer knows have kept from somebody.
+ * Tracks the people this viewer knows — themself included — have kept from
+ * somebody.
  *
  * The second name is the point of the row and also its one hazard, so the
  * join that fetches it carries the visibility test in its own ON clause: when
@@ -3233,8 +3251,7 @@ async function listRecentSaves(
      LEFT JOIN users o
        ON o.telegram_user_id = ts.origin_id
        AND ${canSeePerson("$1", "ts.origin_id")}
-     WHERE ts.saver_id <> $1
-       AND ts.created_at > now() - interval '${ACTIVITY_WINDOW_DAYS} days'
+     WHERE ts.created_at > now() - interval '${ACTIVITY_WINDOW_DAYS} days'
        AND ${LIVE_T}
        AND ${canSeePerson("$1", "ts.saver_id")}
      ORDER BY ts.created_at DESC
@@ -3258,7 +3275,8 @@ async function listRecentSaves(
 }
 
 /**
- * The Social feed: who is listening, what has been shared, what has been kept.
+ * The Social feed: who is listening, what has been shared, what has been kept
+ * — the viewer's own activity included, alongside their friends'.
  *
  * Three queries rather than one union, because the three have almost nothing
  * in common but their ordering — a union would have to pad each branch with
@@ -3276,7 +3294,7 @@ export async function listSocialActivity(
   viewerTelegramId: number
 ): Promise<ActivityItem[]> {
   const [listening, shared, saved] = await Promise.all([
-    listFriendsListening(viewerTelegramId, SOCIAL_LIVE_LOOKBACK_MINUTES),
+    listFriendsListening(viewerTelegramId, SOCIAL_LIVE_LOOKBACK_MINUTES, true),
     listRecentShares(viewerTelegramId),
     listRecentSaves(viewerTelegramId),
   ]);

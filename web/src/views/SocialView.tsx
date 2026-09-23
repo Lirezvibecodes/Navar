@@ -25,6 +25,7 @@ import {
   UserPlusIcon,
 } from "../icons";
 import type { IconProps } from "../icons";
+import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import {
   cached,
@@ -74,6 +75,14 @@ const SEARCH_DEBOUNCE_MS = 250;
 /** How many suggestions show inline before "See all" is worth offering. */
 const SUGGESTION_PREVIEW = 3;
 
+/** Whether a person in a feed row is the viewer themself. */
+function isMe(
+  meId: string | number | null | undefined,
+  personId: string | number
+): boolean {
+  return meId != null && String(personId) === String(meId);
+}
+
 export function SocialView({
   nav,
   searchOpen,
@@ -85,6 +94,7 @@ export function SocialView({
   onCloseSearch: () => void;
 }) {
   const { toast, errorToast } = useToast();
+  const { me } = useLibrary();
   // Seeded from the cache so that opening this tab a second time shows the
   // feed that was there when it closed, rather than a skeleton over the same
   // rows. Whatever is seeded is then revalidated by the load below.
@@ -360,6 +370,7 @@ export function SocialView({
                 <PersonTile
                   key={row.person.telegram_user_id}
                   person={row.person}
+                  name={isMe(me?.id, row.person.telegram_user_id) ? "You" : undefined}
                   line={
                     age.live
                       ? row.track
@@ -393,6 +404,7 @@ export function SocialView({
             <ActivityRow
               key={item.kind + item.person.telegram_user_id + item.at}
               item={item}
+              meId={me?.id}
               index={i}
               onOpen={() => {
                 if (item.kind === "shared" && item.playlist) {
@@ -632,13 +644,19 @@ const KIND_GLYPH: Record<
  * from — and the second is here only if the server sent it. It leaves that
  * name out for anybody the viewer cannot already see, so there is no branch
  * here deciding whether a stranger may be introduced: the row simply says less.
+ *
+ * The feed carries the viewer's own shares and saves too, so either name on
+ * the row can be theirs — "You" reads better there than their own handle
+ * would, the same way a chat shows "You" for your own messages.
  */
 function ActivityRow({
   item,
+  meId,
   index,
   onOpen,
 }: {
   item: ActivityItem;
+  meId: string | number | null | undefined;
   index: number;
   onOpen: () => void;
 }) {
@@ -648,7 +666,10 @@ function ActivityRow({
       ? trackTitle(item.track)
       : "Something";
   const verb = item.kind === "shared" ? "shared a playlist" : "saved a track";
-  const credit = item.from ? " · from " + personName(item.from) : "";
+  const who = isMe(meId, item.person.telegram_user_id) ? "You" : personName(item.person);
+  const credit = item.from
+    ? " · from " + (isMe(meId, item.from.telegram_user_id) ? "you" : personName(item.from))
+    : "";
   const kind = KIND_GLYPH[item.kind];
 
   return (
@@ -711,7 +732,7 @@ function ActivityRow({
             marginTop: 2,
           }}
         >
-          {personName(item.person)} {verb}
+          {who} {verb}
           {credit}
         </span>
       </span>

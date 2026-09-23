@@ -14,6 +14,7 @@ import { haptic } from "../telegram";
  */
 export function PersonTile({
   person,
+  name,
   line,
   live,
   dim,
@@ -21,6 +22,8 @@ export function PersonTile({
   onOpen,
 }: {
   person: Person;
+  /** Overrides `personName(person)`, for a tile that is the viewer's own. */
+  name?: string;
   /** Whatever they are doing — usually a track title. Empty renders nothing. */
   line?: string;
   /** A track is playing right now, not just was. Draws the lime corner dot. */
@@ -30,15 +33,16 @@ export function PersonTile({
   index: number;
   onOpen: () => void;
 }) {
+  const label = name ?? personName(person);
   return (
     <button
       className="nav-press nav-row-in"
       aria-label={
         live
-          ? personName(person) + ", listening now" + (line ? " to " + line : "")
+          ? label + ", listening now" + (line ? " to " + line : "")
           : line
-            ? personName(person) + ", " + line
-            : personName(person)
+            ? label + ", " + line
+            : label
       }
       onClick={() => {
         haptic.tap();
@@ -87,7 +91,7 @@ export function PersonTile({
           marginTop: 6,
         }}
       >
-        {personName(person)}
+        {label}
       </span>
       {line ? (
         <span
