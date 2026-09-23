@@ -5,6 +5,7 @@ import { AddFriendButton, PersonRow } from "./SocialView";
 import { Avatar } from "../components/Avatar";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
+import { RankSection } from "../components/RankSection";
 import { TagPlaque } from "../components/TagCard";
 import { TagDetailSheet } from "../components/TagDetailSheet";
 import {
@@ -255,7 +256,10 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
                   <FriendsChip count={profile.friend_count} onClick={() => setFriendsOpen(true)} />
                 ) : null}
                 {stats && stats.totalListenedSeconds > 0 ? (
-                  <ListenChip seconds={stats.totalListenedSeconds} onClick={() => setStatsOpen(true)} />
+                  <ListenChip
+                    seconds={stats.totalListenedSeconds}
+                    onClick={() => (isMe ? nav.push({ type: "stats" }) : setStatsOpen(true))}
+                  />
                 ) : null}
               </div>
 
@@ -653,7 +657,7 @@ function ListenSheet({
           <div style={{ ...EYEBROW, fontSize: 10, marginTop: 6 }}>Lifetime listening</div>
         </div>
 
-        <StatRankSection
+        <RankSection
           label="Top tracks"
           items={stats.topTracks}
           profileUserId={profileUserId}
@@ -662,7 +666,7 @@ function ListenSheet({
           coverOf={(t) => t.cover_track_id}
         />
 
-        <StatRankSection
+        <RankSection
           label="Top artists"
           items={stats.topArtists}
           profileUserId={profileUserId}
@@ -672,84 +676,6 @@ function ListenSheet({
         />
       </div>
     </Sheet>
-  );
-}
-
-/** One ranked list inside `ListenSheet` — tracks and artists share the exact
- *  same row shape, so the two sections are one generic component rather than
- *  two near-identical copies. */
-function StatRankSection<T extends { plays: number }>({
-  label,
-  items,
-  profileUserId,
-  renderTitle,
-  renderSubtitle,
-  coverOf,
-}: {
-  label: string;
-  items: T[];
-  profileUserId: number;
-  renderTitle: (item: T) => string;
-  renderSubtitle: (item: T) => string | null;
-  coverOf: (item: T) => string | null;
-}) {
-  return (
-    <div>
-      <span style={{ ...EYEBROW, fontSize: 10 }}>{label}</span>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-        {items.length === 0 ? (
-          <Empty title="Nothing recent" body="Keep listening and this will fill in." />
-        ) : (
-          items.map((item, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span
-                className="nav-numeral"
-                style={{ flex: "none", width: 14, fontSize: 13, textAlign: "center", color: "var(--color-nav-muted)" }}
-              >
-                {i + 1}
-              </span>
-              {coverOf(item) ? (
-                <CollectionArt
-                  name={renderTitle(item)}
-                  coverTrackId={coverOf(item)!}
-                  src={api.trackCoverUrl(coverOf(item)!, profileUserId)}
-                  size={38}
-                  radius={7}
-                />
-              ) : (
-                <span
-                  style={{
-                    display: "flex",
-                    flex: "none",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 38,
-                    height: 38,
-                    borderRadius: 7,
-                    background: "rgba(255,255,255,.08)",
-                  }}
-                >
-                  <StarIcon size={14} style={{ color: "var(--color-nav-muted)" }} />
-                </span>
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="nav-clip" style={{ fontSize: 13, fontWeight: 600 }}>
-                  {renderTitle(item)}
-                </div>
-                {renderSubtitle(item) ? (
-                  <div className="nav-clip" style={{ fontSize: 11, color: "var(--color-nav-muted)", marginTop: 1 }}>
-                    {renderSubtitle(item)}
-                  </div>
-                ) : null}
-              </div>
-              <span style={{ flex: "none", fontSize: 11, color: "var(--color-nav-muted)" }}>
-                <Counted count={item.plays} one="play" many="plays" />
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
   );
 }
 

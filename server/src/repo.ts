@@ -2803,10 +2803,14 @@ const SOCIAL_LIVE_SHELF_LIMIT = 20;
  *
  * `plays` is the only table here that grows without bound, and there is no
  * cron on a free instance that sleeps — so the prune rides along with the
- * insert. Ninety days is well past anything the app shows and keeps the table
- * a fixed size rather than a slowly filling one.
+ * insert. 400 days is long enough that the listening-stats page's 1-year
+ * period always has real per-play data to draw its charts from — a
+ * production check of this table found 349 rows / 120 kB after roughly a
+ * month of use, against a 500 MB budget dominated by cover art (the tracks
+ * table alone was 6.2 MB), so a multi-year supply of rows at this rate is
+ * still negligible.
  */
-const PLAY_RETENTION_DAYS = 90;
+const PLAY_RETENTION_DAYS = 400;
 
 /** How far back the activity feed looks, and how many rows it will carry. */
 const ACTIVITY_WINDOW_DAYS = 30;
@@ -3052,8 +3056,8 @@ export async function recordPlay(
        WHERE played_at < now() - interval '${PLAY_RETENTION_DAYS} days'
      ),
      inserted AS (
-       INSERT INTO plays (telegram_user_id, track_id)
-       SELECT $1, t.id
+       INSERT INTO plays (telegram_user_id, track_id, local_date, local_minute_of_day)
+       SELECT $1, t.id, $3, $4
        FROM tracks t
        WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
        RETURNING track_id
@@ -3063,7 +3067,7 @@ export async function recordPlay(
      FROM inserted i
      JOIN tracks t ON t.id = i.track_id
      WHERE u.telegram_user_id = $1`,
-    [telegramUserId, trackId]
+    [telegramUserId, trackId, opts.localDate ?? null, opts.localMinuteOfDay ?? null]
   );
   const landed = (rowCount ?? 0) > 0;
   if (landed) {
@@ -3166,6 +3170,361 @@ export async function getListeningStats(telegramUserId: number): Promise<Listeni
       cover_track_id: coverFor(name),
       plays: count,
     })),
+  };
+}
+
+/** The six periods the Listening Stats page can be scoped to. */
+export type StatsRange = "today" | "7d" | "30d" | "3m" | "1y" | "all";
+
+/**
+ * Fixed-length windows rather than calendar day/month/year boundaries — a
+ * calendar month comparison would make "this period vs. the last one" an
+ * uneven comparison (28 days against 31), and the app has no per-user
+ * timezone to anchor a calendar boundary to in the first place. `start` is
+ * null only for "all", which has no lower bound beyond retention itself.
+ */
+function statsRangeBounds(
+  range: StatsRange,
+  now: Date
+): { start: Date | null; end: Date; prevStart: Date | null; prevEnd: Date | null } {
+  const end = now;
+  if (range === "all") return { start: null, end, prevStart: null, prevEnd: null };
+  if (range === "today") {
+    const start = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    );
+    const dayMs = 24 * 60 * 60 * 1000;
+    return { start, end, prevStart: new Date(start.getTime() - dayMs), prevEnd: start };
+  }
+  const days = { "7d": 7, "30d": 30, "3m": 90, "1y": 365 }[range];
+  const ms = days * 24 * 60 * 60 * 1000;
+  const start = new Date(end.getTime() - ms);
+  return { start, end, prevStart: new Date(start.getTime() - ms), prevEnd: start };
+}
+
+/** Calendar-bucket granularity the activity chart uses for a given range. */
+function activityBucketUnit(range: StatsRange): "hour" | "day" | "week" | "month" {
+  if (range === "today") return "hour";
+  if (range === "7d" || range === "30d") return "day";
+  if (range === "3m") return "week";
+  return "month";
+}
+
+interface StatsPlayRow {
+  track_id: string;
+  title: string | null;
+  artist: string | null;
+  has_cover: boolean;
+  duration_seconds: number;
+  /** `pg` parses TIMESTAMPTZ as a native Date by default (unlike the bare
+   *  DATE columns below, which are cast to text to sidestep that parser). */
+  played_at: Date;
+  /** `'YYYY-MM-DD'` in the listener's own local time, or null for a play
+   *  recorded before local_date existed on this table. */
+  local_date: string | null;
+  local_minute_of_day: number | null;
+}
+
+/** The bucket key a play falls into, in local time when known, UTC otherwise
+ *  — the same fallback rule `user_tag_listening_days` already uses. */
+function bucketKeyFor(row: StatsPlayRow, unit: "hour" | "day" | "week" | "month"): string {
+  const localDate = row.local_date ?? row.played_at.toISOString().slice(0, 10);
+  if (unit === "hour") {
+    const hour =
+      row.local_minute_of_day != null
+        ? Math.floor(row.local_minute_of_day / 60)
+        : row.played_at.getUTCHours();
+    return String(hour).padStart(2, "0");
+  }
+  if (unit === "month") return localDate.slice(0, 7);
+  if (unit === "day") return localDate;
+  // Week: the Monday of the week localDate falls in, as a stable sort key.
+  const d = new Date(`${localDate}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7; // Monday = 0
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Every bucket key the period spans, in order, so a quiet day still draws a
+ *  zero bar instead of the chart skipping straight past it. */
+function activityBucketKeys(
+  unit: "hour" | "day" | "week" | "month",
+  start: Date,
+  end: Date
+): string[] {
+  if (unit === "hour") return Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0"));
+  const keys: string[] = [];
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const stepDays = unit === "week" ? 7 : 1;
+  if (unit === "month") {
+    const cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    const last = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+    while (cur.getTime() <= last.getTime()) {
+      keys.push(cur.toISOString().slice(0, 7));
+      cur.setUTCMonth(cur.getUTCMonth() + 1);
+    }
+    return keys;
+  }
+  if (unit === "week") {
+    const dow = (cursor.getUTCDay() + 6) % 7;
+    cursor.setUTCDate(cursor.getUTCDate() - dow);
+  }
+  while (cursor.getTime() < end.getTime()) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + stepDays);
+  }
+  return keys;
+}
+
+export interface ListeningStatsPage {
+  range: StatsRange;
+  periodStart: string | null;
+  periodEnd: string;
+  totalListenedSeconds: number;
+  totalPlays: number;
+  previous: { totalListenedSeconds: number; totalPlays: number } | null;
+  topTracks: Array<ActivityTrack & { plays: number; seconds: number }>;
+  topArtists: Array<{ name: string; cover_track_id: string | null; plays: number; seconds: number }>;
+  activity: Array<{ bucket: string; seconds: number; plays: number }>;
+  /** 24 hourly buckets (local time when known), play counts. */
+  timeOfDay: number[];
+  /** 7 buckets, Monday first, play counts. */
+  dayOfWeek: number[];
+  /** Share of distinct tracks played this period that weren't a first-ever
+   *  listen — 0 when the period had no plays. */
+  repeatRate: number;
+  /** Distinct tracks played this period whose first-ever play falls in it. */
+  discoveryCount: number;
+  /** Distinct tracks played this period ÷ the listener's live owned tracks. */
+  libraryCoveragePct: number;
+  onRepeat: (ActivityTrack & { plays: number }) | null;
+  /** Null when no session in the period clears the "meaningful" floor. */
+  longestSessionMinutes: number | null;
+  currentStreakDays: number;
+}
+
+const LONGEST_SESSION_GAP_MINUTES = 30;
+const LONGEST_SESSION_FLOOR_MINUTES = 20;
+
+export async function getListeningStatsPage(
+  telegramUserId: number,
+  range: StatsRange
+): Promise<ListeningStatsPage> {
+  const { start, end, prevStart, prevEnd } = statsRangeBounds(range, new Date());
+  const periodFloor = start ?? new Date(0);
+
+  const [{ rows }, previousTotals, libraryTrackCount] = await Promise.all([
+    getPool().query<StatsPlayRow>(
+      `SELECT p.track_id, t.title, t.artist, ${HAS_COVER_T} AS has_cover,
+         COALESCE(t.duration_seconds, 0) AS duration_seconds,
+         p.played_at, p.local_date::text AS local_date, p.local_minute_of_day
+       FROM plays p
+       JOIN tracks t ON t.id = p.track_id
+       WHERE p.telegram_user_id = $1 AND p.played_at >= $2 AND p.played_at < $3
+         AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
+       ORDER BY p.played_at ASC`,
+      [telegramUserId, periodFloor, end]
+    ),
+    prevStart == null || prevEnd == null
+      ? Promise.resolve(null)
+      : getPool()
+          .query<{ total_plays: string; total_seconds: string }>(
+            `SELECT COUNT(*)::int AS total_plays,
+               COALESCE(SUM(COALESCE(t.duration_seconds, 0)), 0)::bigint AS total_seconds
+             FROM plays p
+             JOIN tracks t ON t.id = p.track_id
+             WHERE p.telegram_user_id = $1 AND p.played_at >= $2 AND p.played_at < $3
+               AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}`,
+            [telegramUserId, prevStart, prevEnd]
+          )
+          .then((r) => ({
+            totalPlays: Number(r.rows[0]?.total_plays ?? 0),
+            totalListenedSeconds: Number(r.rows[0]?.total_seconds ?? 0),
+          })),
+    getPool()
+      .query<{ track_count: string }>(
+        `SELECT COUNT(*) AS track_count FROM tracks WHERE owner_telegram_id = $1 AND ${LIVE}`,
+        [telegramUserId]
+      )
+      .then((r) => Number(r.rows[0]?.track_count ?? 0)),
+  ]);
+
+  let totalPlays = 0;
+  let totalListenedSeconds = 0;
+  const trackAgg = new Map<string, { plays: number; seconds: number; row: StatsPlayRow }>();
+  const artistAgg = new Map<string, { plays: number; seconds: number }>();
+  const timeOfDay = new Array(24).fill(0);
+  const dayOfWeek = new Array(7).fill(0);
+  const unit = activityBucketUnit(range);
+  const bucketAgg = new Map<string, { plays: number; seconds: number }>();
+
+  for (const row of rows) {
+    totalPlays += 1;
+    totalListenedSeconds += row.duration_seconds;
+
+    const t = trackAgg.get(row.track_id) ?? { plays: 0, seconds: 0, row };
+    t.plays += 1;
+    t.seconds += row.duration_seconds;
+    trackAgg.set(row.track_id, t);
+
+    for (const name of splitArtists(row.artist ?? "")) {
+      const a = artistAgg.get(name) ?? { plays: 0, seconds: 0 };
+      a.plays += 1;
+      a.seconds += row.duration_seconds;
+      artistAgg.set(name, a);
+    }
+
+    if (row.local_minute_of_day != null) {
+      timeOfDay[Math.floor(row.local_minute_of_day / 60)] += 1;
+    }
+    const localDate = row.local_date ?? row.played_at.toISOString().slice(0, 10);
+    if (row.local_date != null) {
+      const dow = (new Date(`${localDate}T00:00:00Z`).getUTCDay() + 6) % 7;
+      dayOfWeek[dow] += 1;
+    }
+
+    const key = bucketKeyFor(row, unit);
+    const b = bucketAgg.get(key) ?? { plays: 0, seconds: 0 };
+    b.plays += 1;
+    b.seconds += row.duration_seconds;
+    bucketAgg.set(key, b);
+  }
+
+  const coverFor = (artist: string) =>
+    rows.find((row) => row.has_cover && splitArtists(row.artist ?? "").includes(artist))
+      ?.track_id ?? null;
+
+  const rankedTracks = [...trackAgg.entries()].sort((a, b) => b[1].plays - a[1].plays);
+  const rankedArtists = [...artistAgg.entries()].sort((a, b) => b[1].plays - a[1].plays);
+
+  const activityKeys = activityBucketKeys(unit, periodFloor, end);
+  const activity = activityKeys.map((bucket) => ({
+    bucket,
+    plays: bucketAgg.get(bucket)?.plays ?? 0,
+    seconds: bucketAgg.get(bucket)?.seconds ?? 0,
+  }));
+
+  // TIMESTAMPTZ, not a bare DATE — `pg` parses this OID as a real JS Date
+  // (the UTC-midnight pitfall is specific to the DATE type), so it's
+  // compared as a Date rather than as text.
+  const distinctTrackIds = [...trackAgg.keys()];
+  const firstPlayedRows = distinctTrackIds.length
+    ? await getPool().query<{ track_id: string; first_played_at: Date }>(
+        `SELECT track_id, first_played_at
+         FROM user_tag_track_stats
+         WHERE telegram_user_id = $1 AND track_id = ANY($2::uuid[])`,
+        [telegramUserId, distinctTrackIds]
+      )
+    : { rows: [] as Array<{ track_id: string; first_played_at: Date }> };
+  const firstPlayedAt = new Map(firstPlayedRows.rows.map((r) => [r.track_id, r.first_played_at]));
+  const periodStartIso = start?.toISOString() ?? null;
+  const discoveryCount = distinctTrackIds.filter((id) => {
+    const first = firstPlayedAt.get(id);
+    if (first == null) return false;
+    const firstMs = first.getTime();
+    return (start == null || firstMs >= start.getTime()) && firstMs < end.getTime();
+  }).length;
+  const repeatRate =
+    distinctTrackIds.length > 0
+      ? (distinctTrackIds.length - discoveryCount) / distinctTrackIds.length
+      : 0;
+
+  // "Still on repeat" means spread across more than one day this period, not
+  // just the most-played track from a single binge.
+  const onRepeatCandidate = rankedTracks[0];
+  const onRepeatDays = onRepeatCandidate
+    ? new Set(
+        rows
+          .filter((r) => r.track_id === onRepeatCandidate[0])
+          .map((r) => r.local_date ?? r.played_at.toISOString().slice(0, 10))
+      ).size
+    : 0;
+
+  let longestSessionMinutes: number | null = null;
+  if (rows.length > 0) {
+    const gapMs = LONGEST_SESSION_GAP_MINUTES * 60 * 1000;
+    let sessionStart = rows[0].played_at.getTime();
+    let sessionEnd = sessionStart + rows[0].duration_seconds * 1000;
+    let best = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const playedAt = rows[i].played_at.getTime();
+      if (playedAt - sessionEnd > gapMs) {
+        best = Math.max(best, sessionEnd - sessionStart);
+        sessionStart = playedAt;
+      }
+      sessionEnd = Math.max(sessionEnd, playedAt + rows[i].duration_seconds * 1000);
+    }
+    best = Math.max(best, sessionEnd - sessionStart);
+    const minutes = Math.round(best / 60000);
+    longestSessionMinutes = minutes >= LONGEST_SESSION_FLOOR_MINUTES ? minutes : null;
+  }
+
+  const streakRows = await getPool().query<{ day: string }>(
+    `SELECT day::text AS day FROM user_tag_listening_days
+     WHERE telegram_user_id = $1 ORDER BY day DESC LIMIT ${PLAY_RETENTION_DAYS + 1}`,
+    [telegramUserId]
+  );
+  let currentStreakDays = 0;
+  {
+    const days = streakRows.rows.map((r) => r.day);
+    if (days.length > 0) {
+      const todayIso = end.toISOString().slice(0, 10);
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      let cursor = new Date(`${todayIso}T00:00:00Z`).getTime();
+      // Today not yet having a play doesn't break a streak that is still
+      // "current" as of yesterday.
+      if (days[0] !== todayIso) cursor -= oneDayMs;
+      for (const day of days) {
+        const dayTime = new Date(`${day}T00:00:00Z`).getTime();
+        if (dayTime === cursor) {
+          currentStreakDays += 1;
+          cursor -= oneDayMs;
+        } else if (dayTime < cursor) {
+          break;
+        }
+      }
+    }
+  }
+
+  return {
+    range,
+    periodStart: periodStartIso,
+    periodEnd: end.toISOString(),
+    totalListenedSeconds,
+    totalPlays,
+    previous: previousTotals,
+    topTracks: rankedTracks.slice(0, 10).map(([id, agg]) => ({
+      id,
+      title: agg.row.title,
+      artist: agg.row.artist,
+      cover_track_id: agg.row.has_cover ? id : null,
+      plays: agg.plays,
+      seconds: agg.seconds,
+    })),
+    topArtists: rankedArtists.slice(0, 10).map(([name, agg]) => ({
+      name,
+      cover_track_id: coverFor(name),
+      plays: agg.plays,
+      seconds: agg.seconds,
+    })),
+    activity,
+    timeOfDay,
+    dayOfWeek,
+    repeatRate,
+    discoveryCount,
+    libraryCoveragePct: libraryTrackCount > 0 ? distinctTrackIds.length / libraryTrackCount : 0,
+    onRepeat:
+      onRepeatCandidate && onRepeatDays > 1
+        ? {
+            id: onRepeatCandidate[0],
+            title: onRepeatCandidate[1].row.title,
+            artist: onRepeatCandidate[1].row.artist,
+            cover_track_id: onRepeatCandidate[1].row.has_cover ? onRepeatCandidate[0] : null,
+            plays: onRepeatCandidate[1].plays,
+          }
+        : null,
+    longestSessionMinutes,
+    currentStreakDays,
   };
 }
 

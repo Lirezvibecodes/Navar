@@ -4,6 +4,7 @@ import type {
   FriendPlaylist,
   HomePayload,
   ListeningNow,
+  ListeningStatsPage,
   Me,
   Person,
   PersonResult,
@@ -12,6 +13,7 @@ import type {
   SharedPlaylist,
   SharedPlaylistPage,
   SharedTrack,
+  StatsRange,
   Suggestion,
   TagState,
   Track,
@@ -631,4 +633,12 @@ export function setEquippedTags(tagIds: string[]): Promise<TagState[]> {
     writeCache(cacheKey.tags, tags);
     return tags;
   });
+}
+
+// --- Listening Stats ----------------------------------------------------------
+
+/** The full Listening Stats page, scoped to one of the six periods. Always
+ *  the caller's own data — there is no userId, unlike ListeningStats. */
+export function getListeningStatsPage(range: StatsRange): Promise<ListeningStatsPage> {
+  return request<ListeningStatsPage>(`/api/me/stats?range=${range}`);
 }

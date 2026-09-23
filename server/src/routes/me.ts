@@ -4,7 +4,7 @@ import { requireAuth, AuthedRequest } from "../middleware";
 import { asyncHandler } from "../asyncHandler";
 import {
   ACCENT_PRESETS,
-  getListeningStats,
+  getListeningStatsPage,
   getPerson,
   getTrackForListener,
   recordPlay,
@@ -14,6 +14,7 @@ import {
   setListeningPrivacy,
   setListeningStatus,
   setProfileBackground,
+  StatsRange,
 } from "../repo";
 import { captionOf, personLabel, postCoverVideo } from "../channels";
 import { storeCover } from "./covers";
@@ -23,6 +24,8 @@ import { HANDLE_RULE, normaliseHandle } from "../handles";
 
 /** Same allowlist the playlist and track cover uploads use. */
 const COVER_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const STATS_RANGES = new Set(["today", "7d", "30d", "3m", "1y", "all"]);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -353,12 +356,19 @@ export function meRouter(): Router {
     })
   );
 
-  /** What this person has been listening to — top track, top artist, play count. */
+  /** The Listening Stats page, scoped to one of the six periods. */
   router.get(
     "/stats",
     requireAuth,
     asyncHandler(async (req, res) => {
-      res.json(await getListeningStats((req as AuthedRequest).telegramUserId));
+      const range = String(req.query.range ?? "30d");
+      if (!STATS_RANGES.has(range)) {
+        res.status(400).json({ error: "Invalid range" });
+        return;
+      }
+      res.json(
+        await getListeningStatsPage((req as AuthedRequest).telegramUserId, range as StatsRange)
+      );
     })
   );
 

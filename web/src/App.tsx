@@ -29,6 +29,7 @@ import { SearchView } from "./views/SearchView";
 import { SettingsView } from "./views/SettingsView";
 import { SharedView } from "./views/SharedView";
 import { TagsView } from "./views/TagsView";
+import { ListeningStatsView } from "./views/ListeningStatsView";
 import { hideSplash } from "./lib/splash";
 import { peek, cacheKey, revalidate } from "./lib/cache";
 import {
@@ -84,6 +85,7 @@ const TITLES: Record<View["type"], string> = {
   friendLibrary: "Their Library",
   settings: "Settings",
   tags: "Tags",
+  stats: "Listening Stats",
 };
 
 /**
@@ -259,6 +261,8 @@ function Shell({ me }: { me: Me }) {
         return <SettingsView nav={nav} />;
       case "tags":
         return <TagsView nav={nav} />;
+      case "stats":
+        return <ListeningStatsView nav={nav} />;
     }
   };
 

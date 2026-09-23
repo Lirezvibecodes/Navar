@@ -55,6 +55,7 @@ export const cacheKey = {
   palette: (id: string) => `palette:${id}`,
   tags: "tags",
   albumMeta: (name: string) => `album:${name}:meta`,
+  listeningStats: (range: string) => `stats:${range}`,
 } as const;
 
 /**
@@ -88,6 +89,9 @@ export const ttl = {
   /** A MusicBrainz fact about a release does not change within a session —
    *  same reasoning as palette. */
   albumMeta: Infinity,
+  /** Only your own listening writes to this, so it only needs a short
+   *  backstop against a play recorded elsewhere in the same session. */
+  listeningStats: 60_000,
 } as const;
 
 /** What is held for this key right now, without asking for any of it. */

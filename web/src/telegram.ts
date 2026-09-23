@@ -501,3 +501,29 @@ export function shareToStory(mediaUrl: string, appLink?: string): boolean {
   app.shareToStory(mediaUrl, appLink ? { widget_link: { url: appLink, name: "Navaar" } } : undefined);
   return true;
 }
+
+/**
+ * Falls back to the platform's own share/save picker when `shareToStory`
+ * isn't available (Telegram < 7.8, or outside Telegram entirely): the Web
+ * Share API with a real `File` when the browser supports sharing files, or a
+ * plain anchor download otherwise. Returns which path was taken so a caller
+ * can toast accordingly.
+ */
+export async function saveOrShareBlob(blob: Blob, filename: string): Promise<"shared" | "saved"> {
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return "shared";
+    } catch {
+      // Fall through to the download path — a cancelled share is not an error.
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  return "saved";
+}

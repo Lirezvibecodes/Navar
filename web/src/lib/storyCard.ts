@@ -1,6 +1,7 @@
 import { trackCoverUrl } from "../api";
 import { drawPixelatedWash as drawWash } from "./pixelWash";
-import type { Track } from "../types";
+import { formatListened } from "./format";
+import type { ListeningStatsPage, Track } from "../types";
 
 /**
  * Renders a track as a Telegram/Instagram story: cover art over a pixelated
@@ -237,6 +238,34 @@ export async function renderStoryCard(
 
   drawStoryFrame(ctx, track, cover, { mode: "static", lines: lyricLines });
 
+  return blobFromCanvas(canvas);
+}
+
+/**
+ * The three Listening Stats share-card templates (Overview, Top Track, Top
+ * Artists) — a family with the lyric card above rather than a new design
+ * language: same 1080×1920 canvas, same black fill / pixelated wash / scrim
+ * background, same Pixelify Sans + General Sans pairing, same wordmark
+ * placement.
+ */
+
+const STATS_HERO_FONT = '700 128px "Pixelify Sans"';
+const STATS_CAPTION_FONT = '400 34px "General Sans"';
+const STATS_LINE_FONT = '400 38px "General Sans"';
+const STATS_RANK_FONT = '700 40px "Pixelify Sans"';
+const ARTIST_ROW_HEIGHT = 132;
+const ARTIST_ART_SIZE = 96;
+
+function newCanvas(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  const canvas = document.createElement("canvas");
+  canvas.width = WIDTH;
+  canvas.height = HEIGHT;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+  return { canvas, ctx };
+}
+
+function blobFromCanvas(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new Error("Could not render card"))),
@@ -244,4 +273,184 @@ export async function renderStoryCard(
       0.92
     );
   });
+}
+
+function drawWordmark(ctx: CanvasRenderingContext2D): void {
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,245,245,.5)";
+  ctx.font = '700 46px "Pixelify Sans"';
+  ctx.fillText("NAVAAR", WIDTH / 2, HEIGHT - 170);
+}
+
+/** Same black-fill / wash / scrim background as `drawStoryFrame`, factored
+ *  out so every stats card starts from the same look even with no cover art
+ *  to wash (an account with no top track or artist cover still gets a card). */
+function drawStatsBackground(ctx: CanvasRenderingContext2D, cover: HTMLImageElement | null): void {
+  ctx.fillStyle = "#030303";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  if (cover) {
+    drawPixelatedWash(ctx, cover);
+  }
+
+  const scrim = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  scrim.addColorStop(0, "rgba(3,3,3,.4)");
+  scrim.addColorStop(0.55, "rgba(3,3,3,.6)");
+  scrim.addColorStop(1, "rgba(3,3,3,.94)");
+  ctx.fillStyle = scrim;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+}
+
+function rangeCaption(range: ListeningStatsPage["range"]): string {
+  switch (range) {
+    case "today":
+      return "TODAY";
+    case "7d":
+      return "THIS WEEK";
+    case "30d":
+      return "THIS MONTH";
+    case "3m":
+      return "THESE 3 MONTHS";
+    case "1y":
+      return "THIS YEAR";
+    case "all":
+      return "ALL TIME";
+  }
+}
+
+export async function drawStatsOverviewCard(data: ListeningStatsPage, profileUserId: number): Promise<Blob> {
+  await loadStoryFonts();
+
+  const coverId = data.topTracks[0]?.cover_track_id ?? data.topArtists[0]?.cover_track_id ?? null;
+  const cover = coverId ? await loadImage(trackCoverUrl(coverId, profileUserId)) : null;
+
+  const { canvas, ctx } = newCanvas();
+  drawStatsBackground(ctx, cover);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,245,245,.6)";
+  ctx.font = STATS_CAPTION_FONT;
+  ctx.fillText(`LISTENED ${rangeCaption(data.range)}`, WIDTH / 2, 840);
+
+  ctx.fillStyle = "#f5f5f5";
+  ctx.font = STATS_HERO_FONT;
+  ctx.fillText(formatListened(data.totalListenedSeconds), WIDTH / 2, 1010, WIDTH - 100);
+
+  ctx.fillStyle = "rgba(245,245,245,.65)";
+  ctx.font = STATS_LINE_FONT;
+  ctx.fillText(`${data.totalPlays} plays`, WIDTH / 2, 1080);
+
+  const topTrack = data.topTracks[0];
+  if (topTrack) {
+    ctx.font = STATS_LINE_FONT;
+    const rows = wrapLines(ctx, `Most played: ${topTrack.title ?? "Untitled"}`, WIDTH - 200, 2);
+    let y = 1620;
+    for (const row of rows) {
+      ctx.fillStyle = "rgba(245,245,245,.78)";
+      ctx.fillText(row, WIDTH / 2, y, WIDTH - 200);
+      y += 48;
+    }
+  }
+
+  drawWordmark(ctx);
+  return blobFromCanvas(canvas);
+}
+
+export async function drawStatsTopTrackCard(data: ListeningStatsPage, profileUserId: number): Promise<Blob> {
+  await loadStoryFonts();
+
+  const track = data.topTracks[0];
+  const cover = track?.cover_track_id ? await loadImage(trackCoverUrl(track.cover_track_id, profileUserId)) : null;
+
+  const { canvas, ctx } = newCanvas();
+  drawStatsBackground(ctx, cover);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,245,245,.6)";
+  ctx.font = STATS_CAPTION_FONT;
+  ctx.fillText(`TOP TRACK, ${rangeCaption(data.range)}`, WIDTH / 2, COVER_Y - 60);
+
+  const coverX = (WIDTH - COVER_SIZE) / 2;
+  if (cover) {
+    drawCoverFit(ctx, cover, coverX, COVER_Y, COVER_SIZE);
+  } else {
+    ctx.fillStyle = "rgba(255,255,255,.08)";
+    roundedRectPath(ctx, coverX, COVER_Y, COVER_SIZE, COVER_SIZE, COVER_RADIUS);
+    ctx.fill();
+  }
+
+  const titleY = COVER_Y + COVER_SIZE + 100;
+  ctx.fillStyle = "#f5f5f5";
+  ctx.font = '700 52px "Pixelify Sans"';
+  ctx.fillText(track?.title ?? "Untitled", WIDTH / 2, titleY, WIDTH - 140);
+
+  if (track?.artist) {
+    ctx.fillStyle = "rgba(245,245,245,.65)";
+    ctx.font = '400 38px "General Sans"';
+    ctx.fillText(track.artist, WIDTH / 2, titleY + 58, WIDTH - 140);
+  }
+
+  if (track) {
+    ctx.fillStyle = "rgba(245,245,245,.5)";
+    ctx.font = STATS_LINE_FONT;
+    ctx.fillText(`${track.plays} plays`, WIDTH / 2, titleY + 130);
+  }
+
+  drawWordmark(ctx);
+  return blobFromCanvas(canvas);
+}
+
+export async function drawStatsTopArtistsCard(data: ListeningStatsPage, profileUserId: number): Promise<Blob> {
+  await loadStoryFonts();
+
+  const artists = data.topArtists.slice(0, 5);
+  const washId = artists.find((a) => a.cover_track_id)?.cover_track_id ?? null;
+  const cover = washId ? await loadImage(trackCoverUrl(washId, profileUserId)) : null;
+
+  const { canvas, ctx } = newCanvas();
+  drawStatsBackground(ctx, cover);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(245,245,245,.6)";
+  ctx.font = STATS_CAPTION_FONT;
+  ctx.fillText(`TOP ARTISTS, ${rangeCaption(data.range)}`, WIDTH / 2, 340);
+
+  const listTop = 460;
+  const listX = 140;
+  const art = await Promise.all(
+    artists.map((a) => (a.cover_track_id ? loadImage(trackCoverUrl(a.cover_track_id, profileUserId)) : null))
+  );
+
+  ctx.textAlign = "left";
+  artists.forEach((a, i) => {
+    const rowY = listTop + i * ARTIST_ROW_HEIGHT;
+
+    ctx.fillStyle = "rgba(245,245,245,.5)";
+    ctx.font = STATS_RANK_FONT;
+    ctx.textAlign = "right";
+    ctx.fillText(String(i + 1), listX - 30, rowY + ARTIST_ART_SIZE / 2 + 14);
+    ctx.textAlign = "left";
+
+    const img = art[i];
+    if (img) {
+      drawCoverFit(ctx, img, listX, rowY, ARTIST_ART_SIZE);
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,.08)";
+      roundedRectPath(ctx, listX, rowY, ARTIST_ART_SIZE, ARTIST_ART_SIZE, 16);
+      ctx.fill();
+    }
+
+    const textX = listX + ARTIST_ART_SIZE + 32;
+    ctx.fillStyle = "#f5f5f5";
+    ctx.font = '700 44px "Pixelify Sans"';
+    const [nameLine] = wrapLines(ctx, a.name, WIDTH - textX - 60, 1);
+    ctx.fillText(nameLine ?? a.name, textX, rowY + ARTIST_ART_SIZE / 2 - 6);
+
+    ctx.fillStyle = "rgba(245,245,245,.55)";
+    ctx.font = STATS_LINE_FONT;
+    ctx.fillText(`${a.plays} plays`, textX, rowY + ARTIST_ART_SIZE / 2 + 38);
+  });
+
+  drawWordmark(ctx);
+  return blobFromCanvas(canvas);
 }

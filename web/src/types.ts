@@ -219,6 +219,41 @@ export interface ListeningStats {
   topArtists: Array<{ name: string; cover_track_id: string | null; plays: number }>;
 }
 
+/** The six periods the Listening Stats page can be scoped to. */
+export type StatsRange = "today" | "7d" | "30d" | "3m" | "1y" | "all";
+
+/** The full first-person Listening Stats page — mirrors `ListeningStatsPage`
+ *  in `server/src/repo.ts`. */
+export interface ListeningStatsPage {
+  range: StatsRange;
+  /** Null only for "all". */
+  periodStart: string | null;
+  periodEnd: string;
+  totalListenedSeconds: number;
+  totalPlays: number;
+  /** Same-length window immediately before this period; null for "all". */
+  previous: { totalListenedSeconds: number; totalPlays: number } | null;
+  topTracks: Array<ActivityTrack & { plays: number; seconds: number }>;
+  topArtists: Array<{ name: string; cover_track_id: string | null; plays: number; seconds: number }>;
+  /** Day buckets, or hour buckets when `range` is "today". */
+  activity: Array<{ bucket: string; seconds: number; plays: number }>;
+  /** 24 hourly buckets (local time when known), play counts. */
+  timeOfDay: number[];
+  /** 7 buckets, Monday first, play counts. */
+  dayOfWeek: number[];
+  /** 0..1, share of this period's distinct tracks that aren't a first-ever
+   *  listen. */
+  repeatRate: number;
+  /** Distinct tracks played this period whose first-ever play falls in it. */
+  discoveryCount: number;
+  /** Distinct tracks played this period ÷ the listener's live owned tracks. */
+  libraryCoveragePct: number;
+  onRepeat: (ActivityTrack & { plays: number }) | null;
+  /** Null when no session in the period clears the "meaningful" floor. */
+  longestSessionMinutes: number | null;
+  currentStreakDays: number;
+}
+
 /**
  * One person's page.
  *

@@ -55,7 +55,11 @@ export type View =
   /** Reached only from your own profile: name, photo, accent, privacy. */
   | { type: "settings" }
   /** Reached only by pushing from Profile — not a 4th bottom-nav tab. */
-  | { type: "tags" };
+  | { type: "tags" }
+  /** Reached only from your own profile's listen chip — a friend's profile
+   *  keeps the lifetime-stats sheet instead, since this page is first-person
+   *  throughout and always scoped to whoever is signed in. */
+  | { type: "stats" };
 
 /** The three destinations the bottom nav and the sidebar offer. */
 export type RootTab = "home" | "library" | "social";
@@ -81,6 +85,7 @@ export function rootTabFor(view: View): RootTab {
     case "friendLibrary":
     case "settings":
     case "tags":
+    case "stats":
       return "social";
   }
 }
