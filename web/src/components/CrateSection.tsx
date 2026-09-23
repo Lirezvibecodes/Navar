@@ -1,20 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { TrackRow } from "./TrackRow";
 import { TrackMenu, AddToPlaylistSheet } from "./TrackMenu";
 import type { TrackMenuTarget } from "./TrackMenu";
-import {
-  ActionButton,
-  Chip,
-  ChipRow,
-  Empty,
-  GhostButton,
-  Num,
-  Portal,
-  TextField,
-} from "./ui";
-import { CloseIcon, ListIcon, SearchIcon, ShuffleIcon, TrashIcon } from "../icons";
+import { ActionButton, Empty, GhostButton, Num, Portal, SubBar } from "./ui";
+import { ListIcon, ShuffleIcon, TrashIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
@@ -28,7 +19,7 @@ import type { CrateFilter } from "../view";
  * The Crate — everything you own, in one list.
  *
  * It is not a playlist and there is no row for it in the database. It is the
- * library itself, and the two chips are filters over the same rows. Unsorted
+ * library itself, and the two subbar tabs are filters over the same rows. Unsorted
  * is the tracks that are in no playlist yet, which is the pile the app is
  * quietly asking you to deal with. Favourites left this screen for its own —
  * see FavoritesView — once it started looking enough like a playlist to want
@@ -36,12 +27,12 @@ import type { CrateFilter } from "../view";
  *
  * This renders as a tab of the Library screen rather than a screen of its
  * own, so which cut is showing is state LibraryView holds and hands down as
- * `filter`/`onFilterChange` — the same track list, chip row and search field
- * as before, just without a page of its own to carry them.
+ * `filter`/`onFilterChange` — the same subbar and track list as before, just
+ * without a page of its own to carry them.
  *
- * Search is local. Every track you own is already in memory, so filtering as
- * you type costs nothing and works while the server is asleep; a search that
- * round-trips would be slower than reading the list.
+ * Searching the Crate happens on the shared Search screen now, reached from
+ * the icon beside the profile picture — this section only shows the two
+ * filters over what's already loaded.
  *
  * Selection mode lives only here. Selecting across a playlist or an album
  * raises questions about what "remove" means that this app does not need to
@@ -60,12 +51,10 @@ export function CrateSection({
   nav,
   filter,
   onFilterChange,
-  autoSearch = false,
 }: {
   nav: Navigation;
   filter: CrateFilter;
   onFilterChange: (filter: CrateFilter) => void;
-  autoSearch?: boolean;
 }) {
   const { tracks, owns, setFavorite, dropTracks, putTrack, playlists } =
     useLibrary();
@@ -73,16 +62,9 @@ export function CrateSection({
   const { errorToast, undoToast, setToastLift } = useToast();
 
   const [sort, setSort] = usePersistedState<Sort>("crate:sort", "recent");
-  const [searching, setSearching] = useState(autoSearch);
-  const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);
   const [selection, setSelection] = useState<Set<string> | null>(null);
   const [addingSelection, setAddingSelection] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (searching) searchRef.current?.focus();
-  }, [searching]);
 
   // The contextual action bar covers the Now Playing bar, so the snackbar has
   // to clear whichever of the two is actually on screen.
@@ -97,16 +79,7 @@ export function CrateSection({
   );
 
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list = filter === "unsorted" ? tracks.filter((t) => !t.in_playlist) : tracks;
-    if (q) {
-      list = list.filter(
-        (t) =>
-          trackTitle(t).toLowerCase().includes(q) ||
-          trackArtist(t).toLowerCase().includes(q) ||
-          (t.album ?? "").toLowerCase().includes(q)
-      );
-    }
+    const list = filter === "unsorted" ? tracks.filter((t) => !t.in_playlist) : tracks;
     const sorted = [...list];
     if (sort === "title") {
       sorted.sort((a, b) => trackTitle(a).localeCompare(trackTitle(b)));
@@ -120,15 +93,15 @@ export function CrateSection({
       sorted.sort((a, b) => b.created_at.localeCompare(a.created_at));
     }
     return sorted;
-  }, [tracks, filter, query, sort]);
+  }, [tracks, filter, sort]);
 
   const source = useMemo(
     () => ({
       label: filter === "unsorted" ? "Unsorted" : "The Crate",
-      key: `crate:${filter}:${sort}:${query}`,
+      key: `crate:${filter}:${sort}`,
       tracks: rows,
     }),
-    [filter, sort, query, rows]
+    [filter, sort, rows]
   );
 
   const selected = selection ?? new Set<string>();
@@ -165,89 +138,48 @@ export function CrateSection({
 
   return (
     <>
-      <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <ChipRow>
-          <Chip
-            compact
-            label="All"
-            count={tracks.length}
-            active={filter === "all"}
-            onClick={() => onFilterChange("all")}
-          />
-          <Chip
-            compact
-            label="Unsorted"
-            count={unsortedCount}
-            active={filter === "unsorted"}
-            onClick={() => onFilterChange("unsorted")}
-          />
-        </ChipRow>
-        <span style={{ flex: 1 }} />
-        <SortControl sort={sort} onChange={setSort} />
-      </div>
+      <SubBar
+        items={[
+          { key: "all", label: "All", count: tracks.length },
+          { key: "unsorted", label: "Unsorted", count: unsortedCount },
+        ]}
+        active={filter}
+        onSelect={(key) => onFilterChange(key as CrateFilter)}
+        trailing={<SortControl sort={sort} onChange={setSort} />}
+      />
 
-      {searching ? (
-        <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <TextField
-            ref={searchRef}
-            value={query}
-            onChange={setQuery}
-            placeholder="Search your crate"
-            height={38}
-            autoCorrect={false}
-          />
-          <GhostButton
-            icon={CloseIcon}
-            label="Close search"
-            width={44}
-            onClick={() => {
-              setQuery("");
-              setSearching(false);
-            }}
-          />
-        </div>
-      ) : (
-        <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <ActionButton
-            onClick={() => rows.length > 0 && playFrom(source)}
-            disabled={rows.length === 0}
-          >
-            Play all
-          </ActionButton>
-          <GhostButton
-            icon={ShuffleIcon}
-            label="Shuffle"
-            width={44}
-            onClick={() => {
-              if (rows.length === 0) return;
-              playFrom(source, undefined, true);
-            }}
-          />
-          <GhostButton
-            icon={SearchIcon}
-            label="Search"
-            width={44}
-            onClick={() => setSearching(true)}
-          />
-          <GhostButton
-            icon={ListIcon}
-            label="Select tracks"
-            width={44}
-            onClick={() => setSelection(new Set())}
-          />
-        </div>
-      )}
+      <div className="nav-rise" style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <ActionButton
+          onClick={() => rows.length > 0 && playFrom(source)}
+          disabled={rows.length === 0}
+        >
+          Play all
+        </ActionButton>
+        <GhostButton
+          icon={ShuffleIcon}
+          label="Shuffle"
+          width={44}
+          onClick={() => {
+            if (rows.length === 0) return;
+            playFrom(source, undefined, true);
+          }}
+        />
+        <GhostButton
+          icon={ListIcon}
+          label="Select tracks"
+          width={44}
+          onClick={() => setSelection(new Set())}
+        />
+      </div>
 
       <div style={{ marginTop: 14 }}>
         {rows.length === 0 ? (
           <Empty
-            title={query ? "Nothing matched" : "Nothing here yet"}
+            title="Nothing here yet"
             body={
-              query
-                ? "Try part of a title, an artist or an album."
-                : filter === "unsorted"
-                  ? "Every track you own is in a playlist. Nothing left to file."
-                  : "Forward any audio file to the bot and it lands here, tagged and playable."
+              filter === "unsorted"
+                ? "Every track you own is in a playlist. Nothing left to file."
+                : "Forward any audio file to the bot and it lands here, tagged and playable."
             }
           />
         ) : (
@@ -259,7 +191,6 @@ export function CrateSection({
               playing={current?.id === track.id && isPlaying}
               owned={owns(track)}
               favorited={track.favorited_at != null}
-              query={query}
               selectable={selection != null}
               selected={selected.has(track.id)}
               onSelect={() => toggleSelect(track)}

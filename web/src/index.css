@@ -1009,6 +1009,20 @@ button {
   animation: nav-rise 220ms var(--ease) both;
 }
 
+/* A slower, held-back rise for a subbar that follows its parent row in,
+   rather than popping in alongside it — the delay gives the eye time to
+   register the row above before the subbar settles in under it. */
+@keyframes nav-subrise {
+  from {
+    transform: translate3d(0, 10px, 0);
+    opacity: 0;
+  }
+}
+.nav-subrise {
+  animation: nav-subrise 440ms var(--ease-settle) both;
+  animation-delay: 90ms;
+}
+
 @keyframes nav-fade {
   from {
     opacity: 0;

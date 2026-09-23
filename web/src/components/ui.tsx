@@ -485,17 +485,102 @@ export function TextArea({
 /**
  * The chips scroll, and a scroller clips. .nav-shelf-bleed is the room the
  * active chip's glow needs on all four sides, given back to the layout as
- * negative margin so the row still sits where it looks like it sits — plus a
- * few extra pixels of left padding on top of that, since a row of rounded
- * pills reads as short of the straight edges above and below it otherwise.
+ * negative margin so the row still sits where it looks like it sits — its
+ * first chip lands flush on the screen's own left edge, matching every other
+ * piece of content on the grid.
  */
 export function ChipRow({ children }: { children: ReactNode }) {
   return (
-    <div
-      className="nav-shelf nav-shelf-bleed"
-      style={{ gap: 7, paddingLeft: 18 }}
-    >
+    <div className="nav-shelf nav-shelf-bleed" style={{ gap: 7 }}>
       {children}
+    </div>
+  );
+}
+
+/**
+ * The subbar: an underline-tab row that sits beneath a chip row (The Crate's
+ * All/Unsorted, Playlists' By you/By friends), styled as its own idiom rather
+ * than a smaller cut of the chips above it, so the two rows read as distinct
+ * layers instead of a repeat of the same control. It rises in on its own
+ * delay via `.nav-subrise`, arriving after the row above it rather than
+ * alongside it. `inset` lines its first item up under wherever the chip it
+ * belongs to starts; `trailing` holds a row-level control like the Crate's
+ * sort toggle, pinned to the right.
+ */
+export function SubBar({
+  items,
+  active,
+  onSelect,
+  inset = 0,
+  trailing,
+}: {
+  items: { key: string; label: string; count?: number }[];
+  active: string;
+  onSelect: (key: string) => void;
+  inset?: number;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div
+      className="nav-subrise"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 20,
+        marginLeft: inset,
+      }}
+    >
+      {items.map((item) => {
+        const isActive = active === item.key;
+        return (
+          <button
+            key={item.key}
+            className="nav-press"
+            aria-pressed={isActive}
+            onClick={() => {
+              haptic.select();
+              onSelect(item.key);
+            }}
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "baseline",
+              gap: 5,
+              height: 30,
+              paddingBottom: 8,
+              fontSize: 12.5,
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              color: isActive ? "#fff" : "var(--color-nav-muted)",
+              transition: "color var(--dur-state) var(--ease)",
+            }}
+          >
+            {item.label}
+            {item.count == null ? null : (
+              <span style={{ opacity: 0.55, fontWeight: 600 }}>
+                <Num>{item.count}</Num>
+              </span>
+            )}
+            <span
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: 2,
+                borderRadius: 1,
+                background: "var(--color-nav-action)",
+                transform: isActive ? "scaleX(1)" : "scaleX(0)",
+                opacity: isActive ? 1 : 0,
+                transition:
+                  "transform var(--dur-state) var(--ease), opacity var(--dur-state) var(--ease)",
+              }}
+            />
+          </button>
+        );
+      })}
+      {trailing ? <span style={{ flex: 1 }} /> : null}
+      {trailing}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { CollectionArt } from "../components/PixelArt";
@@ -12,6 +12,7 @@ import {
   Screen,
   SectionHeader,
   Skeleton,
+  SubBar,
 } from "../components/ui";
 import {
   albumsOf,
@@ -41,21 +42,18 @@ type Tab = "playlists" | "albums" | "artists" | "crate";
  * endpoints for both, and they are what the pages for somebody else's library
  * use.
  *
- * `openCrate`/`openSearch` are launch intent carried on the push itself
- * (Home's "unsorted" nudge, the shared search icon) rather than live signals,
- * since by the time either would fire this screen may not be mounted yet. A
- * push that carries `openCrate` wins over whatever tab was showing last; a
- * plain tab reselect or a pop restores it instead — see the `restoring`
- * argument on each `usePersistedState` below.
+ * `openCrate` is launch intent carried on the push itself (Home's "unsorted"
+ * nudge) rather than a live signal, since by the time it fires this screen
+ * may not be mounted yet. A push that carries it wins over whatever tab was
+ * showing last; a plain tab reselect or a pop restores it instead — see the
+ * `restoring` argument on each `usePersistedState` below.
  */
 export function LibraryView({
   nav,
   openCrate,
-  openSearch,
 }: {
   nav: Navigation;
   openCrate?: CrateFilter;
-  openSearch?: boolean;
 }) {
   const { me, tracks, playlists, followedPlaylists, loading, putPlaylist } = useLibrary();
   const { errorToast } = useToast();
@@ -73,13 +71,6 @@ export function LibraryView({
     openCrate ?? "all",
     nav.direction === "pop" || openCrate == null
   );
-  // Spent on first render: switching to the Crate tab locally later, or
-  // returning to this same mount another way, should not reopen search.
-  const [autoSearch, setAutoSearch] = useState(openSearch ?? false);
-  useEffect(() => {
-    if (autoSearch) setAutoSearch(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   // You or friends, never both — a chip toggles itself back off rather than
   // onto the other, since "both" already has its own state: neither chosen.
   const [playlistFilter, setPlaylistFilter] = useState<PlaylistFilter>(null);
@@ -168,26 +159,18 @@ export function LibraryView({
 
       {tab === "playlists" ? (
         <>
-          <div
-            className="nav-rise"
-            style={{ marginTop: 14, marginLeft: playlistsInset }}
-          >
-            <ChipRow>
-              <Chip
-                compact
-                label="By you"
-                active={playlistFilter === "you"}
-                onClick={() => setPlaylistFilter((f) => (f === "you" ? null : "you"))}
-              />
-              <Chip
-                compact
-                label="By friends"
-                active={playlistFilter === "friends"}
-                onClick={() =>
-                  setPlaylistFilter((f) => (f === "friends" ? null : "friends"))
-                }
-              />
-            </ChipRow>
+          <div style={{ marginTop: 14 }}>
+            <SubBar
+              items={[
+                { key: "you", label: "By you" },
+                { key: "friends", label: "By friends" },
+              ]}
+              active={playlistFilter ?? ""}
+              onSelect={(key) =>
+                setPlaylistFilter((f) => (f === key ? null : (key as PlaylistFilter)))
+              }
+              inset={playlistsInset}
+            />
           </div>
 
           <SectionHeader
@@ -269,12 +252,7 @@ export function LibraryView({
         )
       ) : (
         <div style={{ marginTop: 14 }}>
-          <CrateSection
-            nav={nav}
-            filter={crateSub}
-            onFilterChange={setCrateSub}
-            autoSearch={autoSearch}
-          />
+          <CrateSection nav={nav} filter={crateSub} onFilterChange={setCrateSub} />
         </div>
       )}
 

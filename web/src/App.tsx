@@ -25,6 +25,7 @@ import { SocialView } from "./views/SocialView";
 import { ProfileView } from "./views/ProfileView";
 import { FriendLibraryView } from "./views/FriendLibraryView";
 import { PlayerView } from "./views/PlayerView";
+import { SearchView } from "./views/SearchView";
 import { SettingsView } from "./views/SettingsView";
 import { SharedView } from "./views/SharedView";
 import { TagsView } from "./views/TagsView";
@@ -73,6 +74,7 @@ export interface Navigation {
 const TITLES: Record<View["type"], string> = {
   home: "Navaar",
   library: "Your Library",
+  search: "Search",
   playlist: "Playlist",
   artist: "Artist",
   album: "Album",
@@ -231,9 +233,9 @@ function Shell({ me }: { me: Me }) {
       case "home":
         return <HomeView nav={nav} />;
       case "library":
-        return (
-          <LibraryView nav={nav} openCrate={view.openCrate} openSearch={view.openSearch} />
-        );
+        return <LibraryView nav={nav} openCrate={view.openCrate} />;
+      case "search":
+        return <SearchView nav={nav} />;
       case "playlist":
         return <PlaylistView nav={nav} id={view.id} name={view.name} />;
       case "artist":
@@ -293,17 +295,18 @@ function Shell({ me }: { me: Me }) {
         subdued={named}
         me={me}
         onSearch={
-          // The Crate's own search field lives inside Library now, so the
-          // shared bar's icon, which only knows how to jump there, would be a
-          // second entry point into the same field once already on that
-          // screen. Social's field also lives in place, but its trigger stays
-          // in the shared bar beside the avatar; it just steps aside once the
-          // field is open, since the field's own close button takes over.
-          view.type === "library" || (view.type === "social" && socialSearchOpen)
+          // Every screen jumps to the shared Search screen, which is scoped
+          // to the whole library rather than to wherever the icon was tapped
+          // from — except the Search screen itself, which has its own field
+          // already open. Social's search stays where it is instead: a
+          // friend isn't in the library, so it has its own trigger and its
+          // own field, which just steps aside once open since the field's
+          // own close button takes over.
+          view.type === "search" || (view.type === "social" && socialSearchOpen)
             ? undefined
             : view.type === "social"
               ? () => setSocialSearchOpen(true)
-              : () => push({ type: "library", openCrate: "all", openSearch: true })
+              : () => push({ type: "search" })
         }
         onProfile={() => push({ type: "profile", userId: me.id })}
         ownProfile={onOwnProfile}
