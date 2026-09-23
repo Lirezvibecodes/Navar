@@ -269,9 +269,15 @@ export interface Grouped {
   name: string;
   track_count: number;
   cover_track_id: string | null;
+  /** The tracks' own artist tag, carried along for albums — unset for artist groups. */
+  artist?: string | null;
 }
 
-function groupBy(tracks: Track[], key: (t: Track) => string | null): Grouped[] {
+function groupBy(
+  tracks: Track[],
+  key: (t: Track) => string | null,
+  artistOf?: (t: Track) => string | null
+): Grouped[] {
   const groups = new Map<string, Grouped>();
   for (const track of tracks) {
     const name = key(track)?.trim();
@@ -280,11 +286,13 @@ function groupBy(tracks: Track[], key: (t: Track) => string | null): Grouped[] {
     if (existing) {
       existing.track_count += 1;
       existing.cover_track_id ??= track.has_cover ? track.id : null;
+      if (artistOf) existing.artist ??= artistOf(track)?.trim() || null;
     } else {
       groups.set(name, {
         name,
         track_count: 1,
         cover_track_id: track.has_cover ? track.id : null,
+        artist: artistOf ? artistOf(track)?.trim() || null : undefined,
       });
     }
   }
@@ -297,7 +305,7 @@ function groupBy(tracks: Track[], key: (t: Track) => string | null): Grouped[] {
  * carry an album tag.
  */
 export function albumsOf(tracks: Track[]): Grouped[] {
-  return groupBy(tracks, (t) => t.album).filter((g) => g.track_count > 1);
+  return groupBy(tracks, (t) => t.album, (t) => t.artist).filter((g) => g.track_count > 1);
 }
 
 export function artistsOf(tracks: Track[]): Grouped[] {

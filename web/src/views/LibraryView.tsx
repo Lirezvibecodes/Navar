@@ -217,7 +217,7 @@ export function LibraryView({
                 key: a.name,
                 name: a.name,
                 cover: a.cover_track_id,
-                caption: <Counted count={a.track_count} one="track" />,
+                caption: a.artist || <Counted count={a.track_count} one="track" />,
                 to: { type: "album", name: a.name } as View,
               }))}
               nav={nav}

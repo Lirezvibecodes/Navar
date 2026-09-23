@@ -160,7 +160,7 @@ export function SearchView({ nav }: { nav: Navigation }) {
                   key={a.name}
                   name={a.name}
                   cover={a.cover_track_id}
-                  caption={<Counted count={a.track_count} one="track" />}
+                  caption={a.artist || <Counted count={a.track_count} one="track" />}
                   onPress={() => nav.push({ type: "album", name: a.name })}
                 />
               ))}
