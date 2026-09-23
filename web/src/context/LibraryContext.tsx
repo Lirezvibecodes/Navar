@@ -273,39 +273,52 @@ export interface Grouped {
   artist?: string | null;
 }
 
-function groupBy(
-  tracks: Track[],
-  key: (t: Track) => string | null,
-  artistOf?: (t: Track) => string | null
-): Grouped[] {
-  const groups = new Map<string, Grouped>();
-  for (const track of tracks) {
-    const name = key(track)?.trim();
-    if (!name) continue;
-    const existing = groups.get(name);
-    if (existing) {
-      existing.track_count += 1;
-      existing.cover_track_id ??= track.has_cover ? track.id : null;
-      if (artistOf) existing.artist ??= artistOf(track)?.trim() || null;
-    } else {
-      groups.set(name, {
-        name,
-        track_count: 1,
-        cover_track_id: track.has_cover ? track.id : null,
-        artist: artistOf ? artistOf(track)?.trim() || null : undefined,
-      });
-    }
-  }
-  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
-}
-
 /**
  * An album needs more than one track to be worth a shelf of its own — a
  * single-track "album" is indistinguishable from a single that happened to
  * carry an album tag.
  */
 export function albumsOf(tracks: Track[]): Grouped[] {
-  return groupBy(tracks, (t) => t.album, (t) => t.artist).filter((g) => g.track_count > 1);
+  const byAlbum = new Map<string, Track[]>();
+  for (const track of tracks) {
+    const name = track.album?.trim();
+    if (!name) continue;
+    const existing = byAlbum.get(name);
+    if (existing) existing.push(track);
+    else byAlbum.set(name, [track]);
+  }
+  const albums: Grouped[] = [];
+  for (const [name, group] of byAlbum) {
+    if (group.length <= 1) continue;
+    albums.push({
+      name,
+      track_count: group.length,
+      cover_track_id: group.find((t) => t.has_cover)?.id ?? null,
+      artist: albumArtistOf(group),
+    });
+  }
+  return albums.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The name (or names) an album is credited to: artist tags split into their
+ * individual names (so "Kid A feat. Thom Yorke" is ["Kid A", "Thom Yorke"]),
+ * kept only where every tagged track in the album agrees. A single guest
+ * verse on one song is a feature credit, not a co-artist for the whole
+ * record, so it drops out unless it's on every track. With only one tagged
+ * track to go on, there's nothing to confirm a co-artist against, so only
+ * that track's primary name is credited.
+ */
+function albumArtistOf(group: Track[]): string | null {
+  const perTrack = group
+    .map((t) => t.artist?.trim())
+    .filter((a): a is string => !!a)
+    .map(splitArtists);
+  if (perTrack.length === 0) return null;
+  const [first, ...rest] = perTrack;
+  if (rest.length === 0) return first[0] ?? null;
+  const common = first.filter((name) => rest.every((names) => names.includes(name)));
+  return (common.length > 0 ? common : first.slice(0, 1)).join(", ");
 }
 
 export function artistsOf(tracks: Track[]): Grouped[] {
