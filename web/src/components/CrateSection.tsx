@@ -28,11 +28,11 @@ import type { CrateFilter } from "../view";
  * The Crate — everything you own, in one list.
  *
  * It is not a playlist and there is no row for it in the database. It is the
- * library itself, and the three chips are filters over the same rows.
- * Unsorted is the tracks that are in no playlist yet, which is the pile the app
- * is quietly asking you to deal with. Favourites is the other end of it: the
- * heart has always been on every row and in the player, and this is the first
- * screen that reads it back.
+ * library itself, and the two chips are filters over the same rows. Unsorted
+ * is the tracks that are in no playlist yet, which is the pile the app is
+ * quietly asking you to deal with. Favourites left this screen for its own —
+ * see FavoritesView — once it started looking enough like a playlist to want
+ * a playlist's header instead of a filter chip.
  *
  * This renders as a tab of the Library screen rather than a screen of its
  * own, so which cut is showing is state LibraryView holds and hands down as
@@ -96,21 +96,9 @@ export function CrateSection({
     [tracks]
   );
 
-  const favoritesCount = useMemo(
-    () => tracks.filter((t) => t.favorited_at != null).length,
-    [tracks]
-  );
-
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // Filtered here rather than fetched: LibraryContext already holds every
-    // track you own, and a favourite is a column on one of them.
-    let list =
-      filter === "unsorted"
-        ? tracks.filter((t) => !t.in_playlist)
-        : filter === "favorites"
-          ? tracks.filter((t) => t.favorited_at != null)
-          : tracks;
+    let list = filter === "unsorted" ? tracks.filter((t) => !t.in_playlist) : tracks;
     if (q) {
       list = list.filter(
         (t) =>
@@ -136,12 +124,7 @@ export function CrateSection({
 
   const source = useMemo(
     () => ({
-      label:
-        filter === "unsorted"
-          ? "Unsorted"
-          : filter === "favorites"
-            ? "Favourites"
-            : "The Crate",
+      label: filter === "unsorted" ? "Unsorted" : "The Crate",
       key: `crate:${filter}:${sort}:${query}`,
       tracks: rows,
     }),
@@ -182,25 +165,21 @@ export function CrateSection({
 
   return (
     <>
-      <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
+      <div className="nav-rise" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <ChipRow>
           <Chip
+            compact
             label="All"
             count={tracks.length}
             active={filter === "all"}
             onClick={() => onFilterChange("all")}
           />
           <Chip
+            compact
             label="Unsorted"
             count={unsortedCount}
             active={filter === "unsorted"}
             onClick={() => onFilterChange("unsorted")}
-          />
-          <Chip
-            label="Favourites"
-            count={favoritesCount}
-            active={filter === "favorites"}
-            onClick={() => onFilterChange("favorites")}
           />
         </ChipRow>
         <span style={{ flex: 1 }} />
@@ -262,21 +241,13 @@ export function CrateSection({
       <div style={{ marginTop: 14 }}>
         {rows.length === 0 ? (
           <Empty
-            title={
-              query
-                ? "Nothing matched"
-                : filter === "favorites"
-                  ? "No favourites yet"
-                  : "Nothing here yet"
-            }
+            title={query ? "Nothing matched" : "Nothing here yet"}
             body={
               query
                 ? "Try part of a title, an artist or an album."
                 : filter === "unsorted"
                   ? "Every track you own is in a playlist. Nothing left to file."
-                  : filter === "favorites"
-                    ? "Tap the heart on any track and it turns up here."
-                    : "Forward any audio file to the bot and it lands here, tagged and playable."
+                  : "Forward any audio file to the bot and it lands here, tagged and playable."
             }
           />
         ) : (

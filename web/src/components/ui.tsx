@@ -307,6 +307,8 @@ export function Chip({
   onClick,
   icon: Icon,
   className = "",
+  compact = false,
+  ref,
   ...rest
 }: {
   label: string;
@@ -316,12 +318,16 @@ export function Chip({
   /** A chip that goes somewhere rather than filtering carries its own glyph. */
   icon?: (props: IconProps) => ReactNode;
   className?: string;
+  /** A smaller cut of the same chip, for a subbar sitting under a full-size row. */
+  compact?: boolean;
+  ref?: React.Ref<HTMLButtonElement>;
 } & Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
   "onClick" | "className" | "style"
 >) {
   return (
     <button
+      ref={ref}
       {...rest}
       className={`nav-press ${active ? "" : "nav-glass"} ${className}`}
       aria-pressed={active}
@@ -333,11 +339,17 @@ export function Chip({
         display: "flex",
         alignItems: "center",
         gap: 6,
-        height: 32,
-        padding: Icon ? "0 13px 0 11px" : "0 13px",
-        borderRadius: 16,
+        height: compact ? 27 : 32,
+        padding: compact
+          ? Icon
+            ? "0 11px 0 9px"
+            : "0 11px"
+          : Icon
+            ? "0 13px 0 11px"
+            : "0 13px",
+        borderRadius: compact ? 13.5 : 16,
         flex: "none",
-        fontSize: 12,
+        fontSize: compact ? 11 : 12,
         fontWeight: 600,
         letterSpacing: "-0.01em",
         color: active ? "#0A0A0A" : "rgba(255,255,255,.72)",
@@ -348,7 +360,7 @@ export function Chip({
         transition: "background-color var(--dur-state) var(--ease), color var(--dur-state) var(--ease), box-shadow var(--dur-state) var(--ease)",
       }}
     >
-      {Icon ? <Icon size={14} style={{ flex: "none" }} /> : null}
+      {Icon ? <Icon size={compact ? 12 : 14} style={{ flex: "none" }} /> : null}
       <span>
         {label}
         {count == null ? null : (
@@ -473,11 +485,16 @@ export function TextArea({
 /**
  * The chips scroll, and a scroller clips. .nav-shelf-bleed is the room the
  * active chip's glow needs on all four sides, given back to the layout as
- * negative margin so the row still sits where it looks like it sits.
+ * negative margin so the row still sits where it looks like it sits — plus a
+ * few extra pixels of left padding on top of that, since a row of rounded
+ * pills reads as short of the straight edges above and below it otherwise.
  */
 export function ChipRow({ children }: { children: ReactNode }) {
   return (
-    <div className="nav-shelf nav-shelf-bleed" style={{ gap: 7 }}>
+    <div
+      className="nav-shelf nav-shelf-bleed"
+      style={{ gap: 7, paddingLeft: 18 }}
+    >
       {children}
     </div>
   );

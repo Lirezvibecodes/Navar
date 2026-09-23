@@ -5,11 +5,12 @@
  * pushed and popped by the shell, with Telegram's own back button popping it.
  */
 /**
- * The three cuts of the Crate. `favorites` is the newest and the one that had
- * nowhere to go: every heart in the app writes `favorited_at`, and until there
- * was a filter for it, nothing ever read that back.
+ * The two cuts of the Crate. Favourites used to be a third — a filter over
+ * the same rows — but it now behaves enough like a playlist (its own screen,
+ * its own tile in Library's Playlists grid) that it left the Crate for a
+ * `View` of its own below.
  */
-export type CrateFilter = "all" | "unsorted" | "favorites";
+export type CrateFilter = "all" | "unsorted";
 
 export type View =
   | { type: "home" }
@@ -33,6 +34,13 @@ export type View =
   | { type: "playlist"; id: string; name?: string }
   | { type: "artist"; name: string }
   | { type: "album"; name: string }
+  /**
+   * Every track you have hearted, shown the way a playlist is. It has no row
+   * of its own — membership is `favorited_at` on a track you own — which is
+   * exactly what keeps it from being shared, renamed or added to by hand: the
+   * heart on a row is the only door in or out.
+   */
+  | { type: "favorites" }
   | { type: "social" }
   /** One view serves both your own profile and somebody else's; the edit
    *  affordances turn on when userId is you. */
@@ -59,6 +67,7 @@ export function rootTabFor(view: View): RootTab {
     case "playlist":
     case "artist":
     case "album":
+    case "favorites":
       return "library";
     case "social":
     case "profile":

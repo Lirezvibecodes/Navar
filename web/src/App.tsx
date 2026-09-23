@@ -20,6 +20,7 @@ import { HomeView } from "./views/HomeView";
 import { LibraryView } from "./views/LibraryView";
 import { PlaylistView } from "./views/PlaylistView";
 import { CollectionView } from "./views/CollectionView";
+import { FavoritesView } from "./views/FavoritesView";
 import { SocialView } from "./views/SocialView";
 import { ProfileView } from "./views/ProfileView";
 import { FriendLibraryView } from "./views/FriendLibraryView";
@@ -75,6 +76,7 @@ const TITLES: Record<View["type"], string> = {
   playlist: "Playlist",
   artist: "Artist",
   album: "Album",
+  favorites: "Playlist",
   social: "Social",
   profile: "Profile",
   friendLibrary: "Their Library",
@@ -237,6 +239,8 @@ function Shell({ me }: { me: Me }) {
       case "artist":
       case "album":
         return <CollectionView nav={nav} kind={view.type} name={view.name} />;
+      case "favorites":
+        return <FavoritesView nav={nav} />;
       case "social":
         return (
           <SocialView
@@ -261,7 +265,10 @@ function Shell({ me }: { me: Me }) {
   // below in a bigger face, and saying it twice makes the reader stop to check
   // whether the two are the same thing.
   const named =
-    view.type === "playlist" || view.type === "artist" || view.type === "album";
+    view.type === "playlist" ||
+    view.type === "artist" ||
+    view.type === "album" ||
+    view.type === "favorites";
   const title = TITLES[view.type];
   // The top bar's own-profile shortcut is pointless while already on that
   // exact page — swapped for a Settings shortcut instead, see TopBar.
