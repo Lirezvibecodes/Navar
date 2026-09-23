@@ -42,27 +42,26 @@ function AlbumMeta({
   const trackCount = data?.trackCount ?? null;
   const complete = trackCount != null && savedCount >= trackCount;
 
+  // A miss (data resolved but trackCount stayed null) reads exactly like the
+  // still-loading state — a plain count — rather than as "10 / — tracks",
+  // since there's nothing meaningful to put after the slash.
   const countLine =
-    data === undefined ? (
-      <Counted count={savedCount} one="track" />
-    ) : trackCount != null ? (
-      <>
+    data !== undefined && trackCount != null ? (
+      <span style={{ display: "inline-flex", alignItems: "center" }}>
         <Num>{savedCount}</Num> / <Num>{trackCount}</Num> tracks
         {complete ? (
           <CheckIcon
             size={12}
             style={{
               marginLeft: 4,
-              verticalAlign: -1.5,
+              flex: "none",
               color: "var(--color-nav-action)",
             }}
           />
         ) : null}
-      </>
+      </span>
     ) : (
-      <>
-        <Num>{savedCount}</Num> / — tracks
-      </>
+      <Counted count={savedCount} one="track" />
     );
 
   return (
@@ -84,8 +83,8 @@ function AlbumMeta({
           countLine
         )}
       </div>
-      <div style={{ marginTop: 3 }}>
-        {data === undefined ? (
+      {data === undefined ? (
+        <div style={{ marginTop: 3 }}>
           <span
             aria-hidden="true"
             style={{
@@ -96,12 +95,10 @@ function AlbumMeta({
               background: "rgba(255,255,255,.07)",
             }}
           />
-        ) : data.releaseDate ? (
-          formatReleaseDate(data.releaseDate)
-        ) : (
-          "Release date unavailable"
-        )}
-      </div>
+        </div>
+      ) : data.releaseDate ? (
+        <div style={{ marginTop: 3 }}>{formatReleaseDate(data.releaseDate)}</div>
+      ) : null}
     </>
   );
 }
@@ -238,8 +235,13 @@ export function CollectionView({
   const hasMissingTracks =
     !!tracklistMatch && tracklistMatch.matched.some((entry) => !entry.track);
 
-  const artist =
-    kind === "album" ? rows.find((t) => t.artist)?.artist : null;
+  // The header names the release's lead artist, not the full per-track
+  // credit — a track tagged "Drake feat. Travis Scott" would otherwise print
+  // the feature right into the album's own byline. Mirrors the primary-name
+  // rule the metadata route already applies for its MusicBrainz lookup
+  // (`server/src/routes/collections.ts`).
+  const rawArtist = kind === "album" ? rows.find((t) => t.artist)?.artist : undefined;
+  const artist = rawArtist ? splitArtists(rawArtist)[0] ?? null : null;
   const coverTrackId = rows.find((t) => t.has_cover)?.id;
 
   // Artists have no cover of their own to take a wash from — an album's own
