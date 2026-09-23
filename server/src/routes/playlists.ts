@@ -13,6 +13,7 @@ import {
   getPlaylist,
   getPlaylistCover,
   listFollowedPlaylists,
+  listPlaylistFollowers,
   listPlaylists,
   listPlaylistTracksForListener,
   playlistVisibleToRequester,
@@ -280,6 +281,25 @@ export function playlistsRouter(): Router {
     asyncHandler(async (req, res) => {
       await unfollowPlaylist((req as AuthedRequest).telegramUserId, req.params.id);
       res.status(204).end();
+    })
+  );
+
+  /**
+   * Who has saved this playlist — read-scoped like /:id/tracks, so opening
+   * the list behaves the same for your own playlist and one a friend shared
+   * with you.
+   */
+  router.get(
+    "/:id/followers",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const requesterId = (req as AuthedRequest).telegramUserId;
+      const playlist = await playlistVisibleToRequester(req.params.id, requesterId);
+      if (!playlist) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(await listPlaylistFollowers(req.params.id));
     })
   );
 
