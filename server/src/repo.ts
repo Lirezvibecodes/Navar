@@ -5,6 +5,7 @@ import {
   evaluateLibraryTags,
   evaluatePlaylistTags,
   evaluateSocialTags,
+  grantNewcomerTag,
 } from "./tagEvaluator";
 import { TAG_CATALOGUE, TAG_BY_ID, MAX_EQUIPPED_TAGS, type TagState } from "./tags";
 import type { TracklistEntry } from "./musicbrainz-provider";
@@ -61,6 +62,7 @@ export async function ensureUser(
     accent_color: string;
     language: Lang | null;
     language_confirmed: boolean;
+    inserted: boolean;
   }>(
     `INSERT INTO users (telegram_user_id, username, language)
      VALUES ($1, $2, $3)
@@ -70,9 +72,13 @@ export async function ensureUser(
      RETURNING handle, accent_color, language, language_confirmed,
        COALESCE((SELECT ls.is_public FROM listen_status ls
                  WHERE ls.telegram_user_id = users.telegram_user_id), true)
-         AS listening_public`,
+         AS listening_public,
+       (xmax = 0) AS inserted`,
     [telegramUserId, username ?? null, seedLanguage]
   );
+  // Every brand-new row gets the unconditional Newcomer tag so the profile
+  // never shows an empty tag slot — fire-and-forget, never blocks /start.
+  if (rows[0]?.inserted) void grantNewcomerTag(telegramUserId);
   return {
     handle: rows[0]?.handle ?? null,
     listeningPublic: rows[0]?.listening_public ?? true,

@@ -83,12 +83,26 @@ export interface TagDefinition {
 }
 
 /**
- * All 30 launch tags. Ids, names, tiers and copy are verbatim from the
- * product spec — this is the one place they are written down, so a threshold
- * or a line of flavor text is never re-typed (and never drifts) anywhere else.
+ * The 30 launch tags (ids, names, tiers and copy verbatim from the product
+ * spec — this is the one place they are written down, so a threshold or a
+ * line of flavor text is never re-typed and never drifts anywhere else),
+ * plus Newcomer: an unconditional 31st tag granted to every user at signup
+ * so no profile is ever left with nothing equipped (see grantNewcomerTag in
+ * tagEvaluator.ts).
  */
 export const TAG_CATALOGUE: readonly TagDefinition[] = [
   // ---- Listening ----------------------------------------------------
+  // Newcomer is granted unconditionally at signup (see grantNewcomerTag in
+  // tagEvaluator.ts) so every profile has at least one tag to show, even
+  // before a single play, save or friend request happens.
+  {
+    id: "newcomer",
+    name: "Newcomer",
+    category: "listening",
+    tier: "copper",
+    flavor: "Welcome to Navaar.",
+    lockedClue: "Open Navaar for the first time.",
+  },
   {
     id: "first_spin",
     name: "First Spin",

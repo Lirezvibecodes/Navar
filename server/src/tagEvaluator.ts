@@ -49,6 +49,30 @@ async function unlockTags(telegramUserId: number, tagIds: string[]): Promise<voi
 }
 
 /**
+ * Grants and equips the unconditional "newcomer" tag for a brand-new user, so
+ * every profile has at least one tag to show from the moment it exists —
+ * called once, fire-and-forget, right after ensureUser() inserts a genuinely
+ * new row (repo.ts). The equip step only ever fires into an empty equipped
+ * set, so it can never clobber a curated equip list on an existing user.
+ */
+export async function grantNewcomerTag(telegramUserId: number): Promise<void> {
+  try {
+    await unlockTags(telegramUserId, ["newcomer"]);
+    await getPool().query(
+      `INSERT INTO user_equipped_tags (telegram_user_id, tag_id, position)
+       SELECT $1, 'newcomer', 0
+       WHERE NOT EXISTS (
+         SELECT 1 FROM user_equipped_tags WHERE telegram_user_id = $1
+       )
+       ON CONFLICT DO NOTHING`,
+      [telegramUserId]
+    );
+  } catch (err) {
+    console.error("tag evaluation (newcomer grant) failed", err);
+  }
+}
+
+/**
  * The eight listening/aggregate tags (including the two secret ones whose
  * condition is a pure counter threshold: Obsessive and, via evaluateLibraryTags,
  * Archivist) — recomputed from durable state after every qualified play.
