@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import * as api from "../api";
 import type { Navigation } from "../App";
 import { CollectionArt } from "../components/PixelArt";
@@ -84,17 +84,6 @@ export function LibraryView({
   );
   const favoritesArt = useFavoritesArt(me?.id ?? null);
 
-  // The Playlists subbar starts under "Playlists" itself rather than under the
-  // top bar's own left edge, so it reads as that chip's filter rather than a
-  // second, disconnected row. Measured off "The Crate" instead of hard-coded,
-  // since its width is its icon plus its label plus the row's own padding —
-  // three things nobody wants to keep a magic number in sync with by hand.
-  const crateChipRef = useRef<HTMLButtonElement>(null);
-  const [playlistsInset, setPlaylistsInset] = useState(0);
-  useLayoutEffect(() => {
-    if (crateChipRef.current) setPlaylistsInset(crateChipRef.current.offsetWidth + 7);
-  }, []);
-
   const newPlaylist = async (name: string) => {
     try {
       const playlist = await api.createPlaylist(name);
@@ -125,7 +114,6 @@ export function LibraryView({
     <Screen scrollKey="library">
       <ChipRow>
         <Chip
-          ref={crateChipRef}
           label="The Crate"
           icon={CrateIcon}
           active={tab === "crate"}
@@ -157,74 +145,73 @@ export function LibraryView({
 
       {tab === "playlists" ? (
         <>
-          <div style={{ marginTop: 14 }}>
-            <SubBar
-              items={[
-                { key: "you", label: "By you" },
-                { key: "friends", label: "By friends" },
-              ]}
-              active={playlistFilter ?? ""}
-              onSelect={(key) =>
-                setPlaylistFilter((f) => (f === key ? null : (key as PlaylistFilter)))
-              }
-              inset={playlistsInset}
-            />
-          </div>
-
           <SectionHeader
             title="Playlists"
             action="+ New"
             onAction={() => setNaming(true)}
             spaceAbove={14}
           />
-          <Grid
+          <SubBar
             items={[
-              // Favourites is a cut of your own library, never a friend's, so
-              // it belongs only alongside your own playlists — pinned first
-              // among them rather than fixed regardless of the chips.
-              ...(showOwn
-                ? [
-                    {
-                      key: "favorites",
-                      name: "Favourites",
-                      art: favoritesArt,
-                      caption: <Counted count={favorites} one="track" />,
-                      to: { type: "favorites" } as View,
-                    },
-                    ...playlists.map((p) => ({
+              { key: "you", label: "By you" },
+              { key: "friends", label: "By friends" },
+            ]}
+            active={playlistFilter ?? ""}
+            onSelect={(key) =>
+              setPlaylistFilter((f) => (f === key ? null : (key as PlaylistFilter)))
+            }
+          />
+          <div style={{ marginTop: 14 }}>
+            <Grid
+              items={[
+                // Favourites is a cut of your own library, never a friend's, so
+                // it belongs only alongside your own playlists — pinned first
+                // among them rather than fixed regardless of the chips.
+                ...(showOwn
+                  ? [
+                      {
+                        key: "favorites",
+                        name: "Favourites",
+                        art: favoritesArt,
+                        caption: <Counted count={favorites} one="track" />,
+                        to: { type: "favorites" } as View,
+                      },
+                      ...playlists.map((p) => ({
+                        key: p.id,
+                        name: p.name,
+                        cover: p.cover_track_id,
+                        art: api.playlistArtworkUrl(p),
+                        caption: <Counted count={p.track_count ?? 0} one="track" />,
+                        to: { type: "playlist", id: p.id, name: p.name } as View,
+                      })),
+                    ]
+                  : []),
+                // Yours says how much is in it, theirs says whose it is — same
+                // rule HomeView's shelf cards already follow.
+                ...(showFriends
+                  ? followedPlaylists.map((p) => ({
                       key: p.id,
                       name: p.name,
                       cover: p.cover_track_id,
                       art: api.playlistArtworkUrl(p),
-                      caption: <Counted count={p.track_count ?? 0} one="track" />,
+                      caption: personName(p.person),
                       to: { type: "playlist", id: p.id, name: p.name } as View,
-                    })),
-                  ]
-                : []),
-              // Yours says how much is in it, theirs says whose it is — same
-              // rule HomeView's shelf cards already follow.
-              ...(showFriends
-                ? followedPlaylists.map((p) => ({
-                    key: p.id,
-                    name: p.name,
-                    cover: p.cover_track_id,
-                    art: api.playlistArtworkUrl(p),
-                    caption: personName(p.person),
-                    to: { type: "playlist", id: p.id, name: p.name } as View,
-                  }))
-                : []),
-            ]}
-            nav={nav}
-          />
+                    }))
+                  : []),
+              ]}
+              nav={nav}
+            />
+          </div>
         </>
       ) : tab === "albums" ? (
-        albums.length === 0 ? (
-          <Empty
-            title="No albums yet"
-            body="Albums appear once your tracks carry an album tag. Edit any track to add one."
-          />
-        ) : (
-          <div style={{ marginTop: 16 }}>
+        <>
+          <SectionHeader title="Albums" spaceAbove={14} />
+          {albums.length === 0 ? (
+            <Empty
+              title="No albums yet"
+              body="Albums appear once your tracks carry an album tag. Edit any track to add one."
+            />
+          ) : (
             <Grid
               items={albums.map((a) => ({
                 key: a.name,
@@ -235,23 +222,22 @@ export function LibraryView({
               }))}
               nav={nav}
             />
-          </div>
-        )
+          )}
+        </>
       ) : tab === "artists" ? (
-        artists.length === 0 ? (
-          <Empty
-            title="No artists yet"
-            body="Artists appear once your tracks carry an artist tag."
-          />
-        ) : (
-          <div style={{ marginTop: 16 }}>
+        <>
+          <SectionHeader title="Artists" spaceAbove={14} />
+          {artists.length === 0 ? (
+            <Empty
+              title="No artists yet"
+              body="Artists appear once your tracks carry an artist tag."
+            />
+          ) : (
             <Circles artists={artists} nav={nav} wrap />
-          </div>
-        )
+          )}
+        </>
       ) : (
-        <div style={{ marginTop: 14 }}>
-          <CrateSection nav={nav} filter={crateSub} onFilterChange={setCrateSub} />
-        </div>
+        <CrateSection nav={nav} filter={crateSub} onFilterChange={setCrateSub} />
       )}
 
       <NameSheet

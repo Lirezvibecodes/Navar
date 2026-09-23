@@ -4,7 +4,7 @@ import type { Navigation } from "../App";
 import { TrackRow } from "./TrackRow";
 import { TrackMenu, AddToPlaylistSheet } from "./TrackMenu";
 import type { TrackMenuTarget } from "./TrackMenu";
-import { ActionButton, Empty, GhostButton, Num, Portal, SubBar } from "./ui";
+import { ActionButton, Empty, GhostButton, Num, Portal, SectionHeader, SubBar } from "./ui";
 import { ListIcon, ShuffleIcon, TrashIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
@@ -138,6 +138,7 @@ export function CrateSection({
 
   return (
     <>
+      <SectionHeader title="The Crate" spaceAbove={14} />
       <SubBar
         items={[
           { key: "all", label: "All", count: tracks.length },
