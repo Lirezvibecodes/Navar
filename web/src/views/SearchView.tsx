@@ -82,7 +82,7 @@ export function SearchView({ nav }: { nav: Navigation }) {
         value={query}
         onChange={setQuery}
         placeholder="Search your library"
-        height={44}
+        height={38}
         autoCorrect={false}
       />
 
@@ -95,6 +95,30 @@ export function SearchView({ nav }: { nav: Navigation }) {
         />
       ) : (
         <>
+          {matchedTracks.length > 0 ? (
+            <>
+              <SectionHeader title="Tracks" spaceAbove={22} />
+              {matchedTracks.map((track, i) => (
+                <TrackRow
+                  key={track.id}
+                  track={track}
+                  index={i}
+                  playing={current?.id === track.id && isPlaying}
+                  owned={owns(track)}
+                  favorited={track.favorited_at != null}
+                  query={query}
+                  onPlay={() => playFrom(source, track)}
+                  onMenu={() => setMenu({ track })}
+                  onToggleFavorite={() =>
+                    void setFavorite(track, track.favorited_at == null)
+                  }
+                  onQueueNext={() => queueNext(track)}
+                  onQueueLast={() => queueLast(track)}
+                />
+              ))}
+            </>
+          ) : null}
+
           {matchedOwnPlaylists.length > 0 || matchedFriendPlaylists.length > 0 ? (
             <>
               <SectionHeader title="Playlists" spaceAbove={22} />
@@ -147,30 +171,6 @@ export function SearchView({ nav }: { nav: Navigation }) {
                   round
                   caption={<Counted count={a.track_count} one="track" />}
                   onPress={() => nav.push({ type: "artist", name: a.name })}
-                />
-              ))}
-            </>
-          ) : null}
-
-          {matchedTracks.length > 0 ? (
-            <>
-              <SectionHeader title="Tracks" spaceAbove={22} />
-              {matchedTracks.map((track, i) => (
-                <TrackRow
-                  key={track.id}
-                  track={track}
-                  index={i}
-                  playing={current?.id === track.id && isPlaying}
-                  owned={owns(track)}
-                  favorited={track.favorited_at != null}
-                  query={query}
-                  onPlay={() => playFrom(source, track)}
-                  onMenu={() => setMenu({ track })}
-                  onToggleFavorite={() =>
-                    void setFavorite(track, track.favorited_at == null)
-                  }
-                  onQueueNext={() => queueNext(track)}
-                  onQueueLast={() => queueLast(track)}
                 />
               ))}
             </>
