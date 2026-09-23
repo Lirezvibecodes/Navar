@@ -515,6 +515,42 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
       assert.ok(row, "the friend's playlist should be in the feed");
       assert.equal(String(row.person.telegram_user_id), String(FRIEND));
     });
+
+    test("your own share is in your own feed", async () => {
+      const feed = await repo.listSocialActivity(OWNER);
+      const row = feed.find(
+        (item) => item.kind === "shared" && item.playlist?.name === "link-shared"
+      );
+      assert.ok(row, "the viewer's own playlist should be in their own feed");
+      assert.equal(String(row.person.telegram_user_id), String(OWNER));
+    });
+
+    test("your own save is in your own feed", async () => {
+      const feed = await repo.listSocialActivity(OWNER);
+      const row = feed.find(
+        (item) => item.kind === "saved" && item.track?.id === friendSaveId
+      );
+      assert.ok(row, "the viewer's own save should be in their own feed");
+      assert.equal(String(row.person.telegram_user_id), String(OWNER));
+    });
+
+    test("your own listening is in your own feed even while private", async () => {
+      // is_public is what keeps a status out of a *friend's* feed. It was left
+      // off by an earlier test in this block, and setListeningStatus does not
+      // touch it — so this also proves the self row does not wait for it.
+      await repo.setListeningStatus(OWNER, trackIds.friendsOnly);
+
+      const feed = await repo.listSocialActivity(OWNER);
+      const row = feed.find(
+        (item) =>
+          item.kind === "listening" &&
+          String(item.person.telegram_user_id) === String(OWNER)
+      );
+      assert.ok(row, "the viewer's own status should show in their own feed");
+      assert.equal(row.track?.id, trackIds.friendsOnly);
+
+      assert.deepEqual(await repo.listFriendsListening(FRIEND), []);
+    });
   });
 
   /**
