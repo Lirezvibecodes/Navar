@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import type { Navigation } from "../App";
+import * as api from "../api";
 import { Avatar } from "../components/Avatar";
 import { LyricStrip, LyricsPane, useLyrics } from "../components/Lyrics";
 import { Cover } from "../components/PixelArt";
@@ -32,6 +33,7 @@ import {
   NextIcon,
   PauseIcon,
   PlayIcon,
+  PlusIcon,
   PrevIcon,
   RepeatIcon,
   ShuffleIcon,
@@ -76,8 +78,8 @@ type Pane = "player" | "lyrics" | "queue";
  * It leaves the same way it came: dragged down. See `useDragToDismiss`.
  */
 export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => void }) {
-  const { me, owns, setFavorite } = useLibrary();
-  const { toast } = useToast();
+  const { me, owns, setFavorite, tracks, putTrack } = useLibrary();
+  const { toast, errorToast } = useToast();
   const {
     current,
     upNext,
@@ -135,6 +137,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     return () => window.clearInterval(id);
   }, [sleepAt]);
   const [hearted, setHearted] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // The focal grow. Measured in a layout effect so the hero has its final box
   // before the delta is computed, and cleared afterwards so a later re-render
@@ -396,7 +399,44 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               >
                 <HeartIcon size={21} />
               </button>
-            ) : null}
+            ) : (
+              // Somebody else's track has nothing here to heart — a favourite
+              // is a fact about your own Crate, and this one is not in it yet.
+              // What belongs here instead is the way it gets there.
+              <button
+                className={`nav-press ${hearted ? "nav-pop" : ""}`}
+                aria-label="Save to my Crate"
+                disabled={saving}
+                onAnimationEnd={() => setHearted(false)}
+                onClick={() => {
+                  const track = current;
+                  haptic.tap();
+                  setHearted(true);
+                  setSaving(true);
+                  void api
+                    .saveTrack(track.id)
+                    .then((copy) => {
+                      const had = tracks.some((row) => row.id === copy.id);
+                      putTrack(copy);
+                      haptic.success();
+                      toast(had ? "Already in your Crate" : `Saved ${trackTitle(track)}`);
+                    })
+                    .catch((err) => errorToast(err, "Could not save that"))
+                    .finally(() => setSaving(false));
+                }}
+                style={{
+                  width: 44,
+                  height: 44,
+                  flex: "none",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--color-nav-muted)",
+                  opacity: saving ? 0.5 : 1,
+                }}
+              >
+                <PlusIcon size={21} />
+              </button>
+            )}
           </div>
 
           <Scrubber position={position} duration={duration} onSeek={seek} />

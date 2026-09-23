@@ -569,8 +569,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // Both are fire-and-forget. Nothing on screen reads either of them back, so
   // a failed one is not retried and never becomes a message.
 
-  const { me } = useLibrary();
+  const { me, tracks } = useLibrary();
   const listeningPublic = me?.listening_public ?? false;
+
+  /**
+   * `current` is a snapshot taken when a track starts playing, so a heart or an
+   * edit made anywhere else in the app — the Crate, a playlist, the player's
+   * own heart button — would otherwise sit invisible on this screen until the
+   * next track loads and replaces it. Library rows keep their identity across
+   * an update (see `putTrack`), so a reference change here means the row
+   * genuinely changed and the player should pick it up; nothing else re-runs
+   * this on every unrelated library edit.
+   */
+  useEffect(() => {
+    if (!current) return;
+    const fresh = tracks.find((t) => t.id === current.id);
+    if (fresh && fresh !== current) setCurrent(fresh);
+  }, [tracks, current]);
 
   /**
    * What you are playing, while you are playing it.

@@ -49,11 +49,12 @@ import { StoryOutputSheet, type StoryPick } from "./StoryOutputSheet";
  * know which list is about to lose a track.
  *
  * What is missing is as deliberate: a track you do not own offers the queue
- * actions, keeping it, and the collections it belongs to, and nothing else.
- * There is no greyed-out `Edit` teaching you about a permission you cannot
- * have. Keeping it comes first in that group because it is the only item there
- * that changes anything, and it is the whole reason for listening to somebody
- * else's playlist in the first place.
+ * actions, keeping it — outright, or straight into one of your playlists,
+ * which keeps it as a side effect — and the collections it belongs to, and
+ * nothing else. There is no greyed-out `Edit` teaching you about a permission
+ * you cannot have. Keeping it comes first in that group because those are the
+ * only items there that change anything, and doing so is the whole reason for
+ * listening to somebody else's playlist in the first place.
  */
 
 export interface TrackMenuTarget {
@@ -122,6 +123,27 @@ export function TrackMenu({
       putTrack(copy);
       haptic.success();
       toast(had ? "Already in your Crate" : `Saved ${trackTitle(t)}`);
+    } catch (err) {
+      errorToast(err, "Could not save that");
+    }
+  };
+
+  /**
+   * Filing a track into one of your playlists. A playlist can only hold rows
+   * you own — see `addPlaylistTracksBulk` on the server, which silently drops
+   * ids it does not — so a track that is not yours yet is saved to the Crate
+   * first, the same copy `saveToLibrary` makes, and the picker opens on that
+   * copy instead of the original.
+   */
+  const addToPlaylist = async (t: Track) => {
+    if (owns(t)) {
+      setAdding(t);
+      return;
+    }
+    try {
+      const copy = await api.saveTrack(t.id);
+      putTrack(copy);
+      setAdding(copy);
     } catch (err) {
       errorToast(err, "Could not save that");
     }
@@ -203,13 +225,11 @@ export function TrackMenu({
                 onClick={() => void saveToLibrary(track)}
               />
             )}
-            {owned ? (
-              <SheetItem
-                icon={PlaylistIcon}
-                label="Add to playlist"
-                onClick={() => setAdding(track)}
-              />
-            ) : null}
+            <SheetItem
+              icon={PlaylistIcon}
+              label="Add to playlist"
+              onClick={() => void addToPlaylist(track)}
+            />
             {owned ? (
               <SheetItem
                 icon={ShareIcon}
