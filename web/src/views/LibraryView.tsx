@@ -145,13 +145,11 @@ export function LibraryView({
         />
         <Chip
           label="Albums"
-          count={albums.length}
           active={tab === "albums"}
           onClick={() => setTab("albums")}
         />
         <Chip
           label="Artists"
-          count={artists.length}
           active={tab === "artists"}
           onClick={() => setTab("artists")}
         />
