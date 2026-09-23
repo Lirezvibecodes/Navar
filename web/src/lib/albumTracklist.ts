@@ -4,15 +4,16 @@ import { trackTitle } from "./format";
 
 /**
  * A title reduced to the part that should match across sources: MusicBrainz
- * spells a featured artist into the track title itself ("Off Deep End (feat.
- * Kenny Mason)"), which a locally-tagged file frequently drops, capitalizes
- * differently, or punctuates differently. Matching only needs "is this the
- * same song," so everything past that is discarded rather than reconciled.
+ * spells a featured or joint artist into the track title itself ("Off Deep
+ * End (feat. Kenny Mason)", "Off Deep End (with Kenny Mason)"), which a
+ * locally-tagged file frequently drops, capitalizes differently, or
+ * punctuates differently. Matching only needs "is this the same song," so
+ * everything past that is discarded rather than reconciled.
  */
 function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
-    .replace(/[([][^)\]]*\b(feat\.?|ft\.?|featuring)\b[^)\]]*[)\]]/gi, " ")
+    .replace(/[([][^)\]]*\b(feat\.?|ft\.?|featuring|with)\b[^)\]]*[)\]]/gi, " ")
     .replace(/\b(feat\.?|ft\.?|featuring)\b.*$/i, " ")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
