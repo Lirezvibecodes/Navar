@@ -1038,15 +1038,16 @@ export function Sheet({
           than pinned inset: 0. A fixed element resolves against the layout
           viewport, which on Android does not shrink when the keyboard opens —
           so a sheet justified to flex-end was laying its content out behind
-          the keyboard. --tg-viewport-height tracks the visual viewport, so the
-          sheet shrinks with it and its contents stay reachable. */}
+          the keyboard. --nav-keyboard-height tracks the visual viewport on
+          Android (and --tg-viewport-height everywhere else), so the sheet
+          shrinks with it and its contents stay reachable. */}
       <div
         style={{
           position: "fixed",
           top: 0,
           left: 0,
           right: 0,
-          height: "var(--tg-viewport-height, 100%)",
+          height: "var(--nav-keyboard-height, var(--tg-viewport-height, 100%))",
           zIndex: "var(--z-sheet)",
           display: "flex",
           flexDirection: "column",

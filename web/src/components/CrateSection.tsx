@@ -296,15 +296,15 @@ function SelectionBar({
           bottom edge is the bottom of the layout viewport, and Android does not
           shrink that for its own keyboard — so this bar sat behind the keyboard
           the moment the search field took focus, which is exactly when it is
-          most likely to be open. --tg-viewport-height follows the visual
-          viewport instead. */}
+          most likely to be open. --nav-keyboard-height follows the visual
+          viewport on Android (and --tg-viewport-height everywhere else). */}
       <div
         style={{
           position: "fixed",
           top: 0,
           left: 0,
           right: 0,
-          height: "var(--tg-viewport-height, 100%)",
+          height: "var(--nav-keyboard-height, var(--tg-viewport-height, 100%))",
           zIndex: "var(--z-action-bar)",
           display: "flex",
           flexDirection: "column",

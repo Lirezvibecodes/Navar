@@ -201,9 +201,10 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         right: 0,
         // Not inset: 0. A fixed box resolves against the layout viewport, which
         // Android does not shrink for its own keyboard; the player would lay
-        // itself out behind it. --tg-viewport-height follows the visual
-        // viewport instead. See applyViewport in telegram.ts.
-        height: "var(--tg-viewport-height, 100%)",
+        // itself out behind it. --nav-keyboard-height follows the visual
+        // viewport on Android (and --tg-viewport-height everywhere else). See
+        // applyViewport in telegram.ts.
+        height: "var(--nav-keyboard-height, var(--tg-viewport-height, 100%))",
         zIndex: "var(--z-player)",
         display: "flex",
         flexDirection: "column",

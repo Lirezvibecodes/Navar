@@ -117,6 +117,7 @@
   --tg-safe-top: max(var(--tg-safe-top-tg), env(safe-area-inset-top, 0px));
   --tg-safe-bottom: max(var(--tg-safe-bottom-tg), env(safe-area-inset-bottom, 0px));
   --tg-content-top: 0px;
+  --tg-content-bottom: 0px;
 
   /* The two are additive, and nothing in the app may use either on its own.
      In the ordinary Mini App the viewport already starts below the status bar,
@@ -207,9 +208,12 @@ body {
 
 /* Not 100%. 100% of what the WebView claims to be, which on Android is
    routinely taller than the part of it Telegram is actually showing — which is
-   how the bottom nav ended up under the gesture bar and every sheet ended up
-   under the keyboard. --tg-viewport-height is the measured live height (see
-   applyViewport in telegram.ts); outside Telegram nothing writes it and the
+   how the bottom nav ended up under the gesture bar. --tg-viewport-height is
+   the measured shell height (see applyViewport in telegram.ts): live on iOS,
+   but held stable on Android so the keyboard opening doesn't drag the whole
+   shell around with it — the handful of surfaces that do need to dodge the
+   keyboard use --nav-keyboard-height instead (see the Android section near
+   the end of this file). Outside Telegram nothing writes either and the
    fallback is the old behaviour exactly. */
 #root {
   height: var(--tg-viewport-height, 100%);
@@ -1252,6 +1256,81 @@ button {
 
 .nav-lyric-big[data-far="true"] {
   filter: blur(1.5px);
+}
+
+/* ---------------------------------------------------------------------------
+   Android platform layer
+
+   Telegram for Android is the one WebView this app has to hand different
+   numbers to: a keyboard that resizes the layout viewport but not the visual
+   one reliably, an occasional single-frame 1px visualViewport reading during
+   a WebView transition, and glass/mask rendering that isn't as forgiving as
+   iOS's. Everything below is reached only through .nav-platform-android — set
+   once in initTelegramPlatform, only when Telegram reports platform
+   "android" (see telegram.ts) — so iOS and desktop are never touched by it.
+   --------------------------------------------------------------------------- */
+
+html.nav-platform-android {
+  --glass-android-blur: blur(18px) saturate(165%);
+  --glass-android-floor: linear-gradient(
+    180deg,
+    rgba(24, 24, 25, 0.93),
+    rgba(36, 36, 38, 0.94)
+  );
+
+  /* contentSafeAreaInset can carry a bottom figure too (floating fullscreen
+     chrome), which nothing previously read. Folding it into the one variable
+     every bottom-padded component already reserves once changes nothing on
+     the devices that don't need it, since Telegram reports 0 there. */
+  --tg-safe-bottom: max(
+    var(--tg-safe-bottom-tg),
+    var(--tg-content-bottom),
+    env(safe-area-inset-bottom, 0px)
+  );
+
+  /* --tg-viewport-height here is the stable shell figure (see applyViewport);
+     the surfaces that genuinely need to shrink with the keyboard — Sheet,
+     the toast layer, PlayerView, CrateSection's selection bar — read this
+     instead. Undefined on iOS, where they fall back to --tg-viewport-height
+     itself and get the exact behaviour they always had. */
+  --nav-keyboard-height: var(--nav-android-visible-height);
+}
+
+html.nav-platform-android .nav-screen-bg {
+  /* The grain and gradients never move independently of the layer's own
+     content, so nothing outside this box needs to repaint when it does. */
+  contain: paint;
+}
+
+html.nav-platform-android .nav-glass,
+html.nav-platform-android .nav-bar-glass,
+html.nav-platform-android .nav-sheet {
+  backdrop-filter: var(--glass-android-blur);
+  -webkit-backdrop-filter: var(--glass-android-blur);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  html.nav-platform-android .nav-glass,
+  html.nav-platform-android .nav-bar-glass,
+  html.nav-platform-android .nav-sheet {
+    background: var(--glass-android-floor);
+  }
+}
+
+/* .nav-topbar::before normally stacks backdrop-filter, a mask-image fade and
+   a gradient — the combination most likely to misrender in an Android
+   WebView. This keeps the same fade from a gradient alone, so a broken mask
+   can't leave the bar as a hard-edged band or an opaque one. */
+html.nav-platform-android .nav-topbar::before {
+  background: linear-gradient(
+    180deg,
+    rgba(3, 3, 3, 0.88),
+    rgba(3, 3, 3, 0.28) 65%,
+    rgba(3, 3, 3, 0) 100%
+  );
+  backdrop-filter: var(--glass-android-blur);
+  -webkit-backdrop-filter: var(--glass-android-blur);
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
 /* ---------------------------------------------------------------------------

@@ -112,6 +112,15 @@ export function getTelegramWebApp(): TelegramWebApp | undefined {
   return window.Telegram?.WebApp;
 }
 
+/**
+ * Whether the host is Telegram for Android — the one platform whose WebView
+ * needs layout numbers iOS never did. See applyViewport and index.css's
+ * .nav-platform-android section for what actually changes because of it.
+ */
+export function isAndroidTelegram(): boolean {
+  return getTelegramWebApp()?.platform === "android";
+}
+
 /** Runs `fn` against the host, quietly, if the host is new enough for it. */
 function call(minVersion: string, fn: (tg: TelegramWebApp) => void): void {
   const tg = getTelegramWebApp();
@@ -153,31 +162,77 @@ function applyInsets(tg: TelegramWebApp): void {
   root.setProperty("--tg-safe-top-tg", px(safe?.top));
   root.setProperty("--tg-safe-bottom-tg", px(safe?.bottom));
   root.setProperty("--tg-content-top", px(content?.top));
+  root.setProperty("--tg-content-bottom", px(content?.bottom));
 }
+
+/** Rejects a viewport reading that is missing or transiently tiny — Android's
+ *  WebView can report as little as 1px for a single frame mid-transition —
+ *  and falls back to the last figure that was actually usable. */
+function usableHeight(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  const rounded = Math.round(value);
+  return rounded >= 200 ? rounded : fallback;
+}
+
+// The last Android shell height that passed usableHeight's floor, kept so a
+// single bad reading has something better than 0 to fall back to.
+let lastAndroidShellHeight = 0;
+let lastLoggedAndroidShell = 0;
 
 /**
  * Publishes how much of the WebView Telegram is actually showing.
  *
- * Two numbers, because the app needs both. `--tg-viewport-stable-height` is
- * the keyboard-free figure: the floor for anything that must not leap up the
- * screen the moment a search field takes focus. `--tg-viewport-height` is the
- * live one, and it is what #root and every fixed overlay size themselves to.
+ * iOS and every other non-Android platform keep the original two numbers,
+ * unchanged: `--tg-viewport-stable-height` is the keyboard-free figure, and
+ * `--tg-viewport-height` is live — min() of stable and visual — and is what
+ * #root and the fixed overlays size themselves to. That's fine on iOS, whose
+ * visualViewport is well-behaved and where nothing needs to dodge a keyboard
+ * that also resizes the WebView.
  *
- * The visual viewport is in there because Android Telegram does not reliably
- * fire `viewportChanged` when its own keyboard opens, while
- * `window.visualViewport` always does — an overlay pinned to the stable
- * height simply sits underneath the keyboard there. min() of the two, so a
- * WebView that is taller than the part Telegram is showing cannot win.
+ * Android's visualViewport is the only reliable keyboard signal (Telegram
+ * doesn't always fire `viewportChanged` when its own keyboard opens), but it
+ * can also report a transient sub-200px height for a frame during a WebView
+ * transition, and folding either straight into `--tg-viewport-height` used to
+ * drag the whole shell — #root, the top bar, both bottom bars — around with
+ * every keyboard open/close instead of just the handful of surfaces that
+ * actually need to dodge it. So on Android, `--tg-viewport-height` stays the
+ * stable shell figure and the keyboard-following number moves to its own
+ * variable, `--nav-android-visible-height`, which only index.css's
+ * `.nav-platform-android` override (`--nav-keyboard-height`) hands to those
+ * surfaces. See Sheet in ui.tsx, ToastContext, PlayerView and CrateSection.
  */
 function applyViewport(tg: TelegramWebApp): void {
-  const stable = tg.viewportStableHeight || tg.viewportHeight || window.innerHeight;
-  const visible = window.visualViewport?.height ?? stable;
+  const stableRaw = tg.viewportStableHeight || tg.viewportHeight || window.innerHeight;
   const root = document.documentElement.style;
-  root.setProperty("--tg-viewport-stable-height", `${Math.round(stable)}px`);
-  root.setProperty(
-    "--tg-viewport-height",
-    `${Math.round(Math.min(stable, visible))}px`
+
+  if (tg.platform !== "android") {
+    const visible = window.visualViewport?.height ?? stableRaw;
+    root.setProperty("--tg-viewport-stable-height", `${Math.round(stableRaw)}px`);
+    root.setProperty(
+      "--tg-viewport-height",
+      `${Math.round(Math.min(stableRaw, visible))}px`
+    );
+    return;
+  }
+
+  const fallback = Math.max(
+    window.innerHeight || 0,
+    document.documentElement.clientHeight || 0,
+    lastAndroidShellHeight
   );
+  const shell = usableHeight(stableRaw, fallback);
+  lastAndroidShellHeight = shell;
+  const visible = Math.min(shell, usableHeight(window.visualViewport?.height, shell));
+
+  root.setProperty("--tg-viewport-stable-height", `${shell}px`);
+  root.setProperty("--tg-viewport-height", `${shell}px`);
+  root.setProperty("--nav-android-visible-height", `${visible}px`);
+  root.setProperty("--nav-android-keyboard-overlap", `${shell - visible}px`);
+
+  if (import.meta.env.DEV && shell !== lastLoggedAndroidShell) {
+    lastLoggedAndroidShell = shell;
+    console.debug("[telegram] android viewport", { shell, visible, overlap: shell - visible });
+  }
 }
 
 /**
@@ -187,6 +242,10 @@ function applyViewport(tg: TelegramWebApp): void {
 export function initTelegramPlatform(): () => void {
   const tg = getTelegramWebApp();
   if (!tg) return () => {};
+
+  // The one class every Android-only rule in index.css is gated behind.
+  const android = tg.platform === "android";
+  document.documentElement.classList.toggle("nav-platform-android", android);
 
   tg.ready();
   tg.expand();
@@ -222,6 +281,7 @@ export function initTelegramPlatform(): () => void {
   vv?.addEventListener("scroll", onVisualViewport);
 
   return () => {
+    document.documentElement.classList.remove("nav-platform-android");
     tg.offEvent("safeAreaChanged", onSafeArea);
     tg.offEvent("contentSafeAreaChanged", onSafeArea);
     tg.offEvent("viewportChanged", onViewport);

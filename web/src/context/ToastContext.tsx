@@ -140,16 +140,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         // The toast measures its offset from the bottom of the screen, and a
         // fixed element's bottom is the bottom of the *layout* viewport, which
         // Android does not shrink for its own keyboard — so a toast raised
-        // above the nav still ended up behind it. This column is the viewport
-        // Telegram is actually showing, from the top down, and the toast is
-        // simply the last thing in it.
+        // above the nav still ended up behind it. --nav-keyboard-height is
+        // the viewport Telegram is actually showing on Android (and
+        // --tg-viewport-height everywhere else), from the top down, and the
+        // toast is simply the last thing in it.
         <div
           style={{
             position: "fixed",
             top: 0,
             left: 0,
             right: 0,
-            height: "var(--tg-viewport-height, 100%)",
+            height: "var(--nav-keyboard-height, var(--tg-viewport-height, 100%))",
             zIndex: "var(--z-toast)",
             display: "flex",
             flexDirection: "column",
