@@ -5,9 +5,10 @@ import { CollectionArt } from "../components/PixelArt";
 import { TrackMenu } from "../components/TrackMenu";
 import type { TrackMenuTarget } from "../components/TrackMenu";
 import { TrackRow } from "../components/TrackRow";
-import { Counted, Empty, Screen, SectionHeader, TextField } from "../components/ui";
+import { Counted, Empty, GhostButton, Screen, SectionHeader, TextField } from "../components/ui";
 import { albumsOf, artistsOf, useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
+import { CloseIcon } from "../icons";
 import { personName, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
 
@@ -77,14 +78,20 @@ export function SearchView({ nav }: { nav: Navigation }) {
 
   return (
     <Screen scrollKey="search">
-      <TextField
-        ref={inputRef}
-        value={query}
-        onChange={setQuery}
-        placeholder="Search your library"
-        height={38}
-        autoCorrect={false}
-      />
+      <div
+        className="nav-rise"
+        style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}
+      >
+        <TextField
+          ref={inputRef}
+          value={query}
+          onChange={setQuery}
+          placeholder="Search your library"
+          height={38}
+          autoCorrect={false}
+        />
+        <GhostButton icon={CloseIcon} label="Close search" width={44} onClick={() => nav.pop()} />
+      </div>
 
       {!q ? (
         <Empty title="Search your library" body="Find a track, playlist, album or artist." />
