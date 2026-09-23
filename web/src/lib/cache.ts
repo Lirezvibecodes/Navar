@@ -54,6 +54,7 @@ export const cacheKey = {
   activity: "social:activity",
   palette: (id: string) => `palette:${id}`,
   tags: "tags",
+  albumMeta: (name: string) => `album:${name}:meta`,
 } as const;
 
 /**
@@ -84,6 +85,9 @@ export const ttl = {
   /** Dropped explicitly by every mutation that could unlock one, so this only
    *  covers a tag unlocked by something this phone did not do the asking for. */
   tags: 60_000,
+  /** A MusicBrainz fact about a release does not change within a session —
+   *  same reasoning as palette. */
+  albumMeta: Infinity,
 } as const;
 
 /** What is held for this key right now, without asking for any of it. */

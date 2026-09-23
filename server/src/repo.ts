@@ -677,6 +677,60 @@ export async function recordLyricsLookup(
   );
 }
 
+export interface AlbumMetadataRow {
+  musicbrainz_release_id: string | null;
+  release_date: string | null;
+  track_count: number | null;
+  fetched_at: Date;
+}
+
+/**
+ * The cached MusicBrainz answer for one artist + album, or null if nobody has
+ * ever asked. Keyed case-insensitively and globally — not per owner — because
+ * this is a fact about a real-world release, the same for every Navaar user
+ * who has it. See migration 024 for why a row with every field null still
+ * counts as an answer.
+ */
+export async function getAlbumMetadata(
+  artist: string,
+  album: string
+): Promise<AlbumMetadataRow | null> {
+  const { rows } = await getPool().query<AlbumMetadataRow>(
+    `SELECT musicbrainz_release_id, release_date, track_count, fetched_at
+     FROM album_metadata
+     WHERE lower(artist_name) = lower($1) AND lower(album_title) = lower($2)`,
+    [artist, album]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * File what MusicBrainz said, hit or miss. Written whether or not a release
+ * was found, because the point of the row is to make a miss cost one lookup
+ * per album ever, not one per open.
+ */
+export async function saveAlbumMetadata(
+  artist: string,
+  album: string,
+  meta: {
+    musicbrainzReleaseId: string | null;
+    releaseDate: string | null;
+    trackCount: number | null;
+  }
+): Promise<void> {
+  await getPool().query(
+    `INSERT INTO album_metadata (artist_name, album_title, musicbrainz_release_id, release_date, track_count)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (lower(artist_name), lower(album_title))
+     DO UPDATE SET musicbrainz_release_id = EXCLUDED.musicbrainz_release_id,
+                   release_date = EXCLUDED.release_date,
+                   track_count = EXCLUDED.track_count,
+                   fetched_at = now(),
+                   updated_at = now()`,
+    [artist, album, meta.musicbrainzReleaseId, meta.releaseDate, meta.trackCount]
+  );
+}
+
 /**
  * Where a cover's bytes are.
  *

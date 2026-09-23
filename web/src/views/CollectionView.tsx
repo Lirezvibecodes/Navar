@@ -1,13 +1,82 @@
 import { useMemo } from "react";
 import type { Navigation } from "../App";
+import * as api from "../api";
 import { trackCoverUrl } from "../api";
 import { CollectionArt } from "../components/PixelArt";
 import { TrackListScreen } from "../components/TrackListScreen";
 import { useLibrary } from "../context/LibraryContext";
-import { Counted, CoverBackdrop } from "../components/ui";
+import { Counted, CoverBackdrop, Num } from "../components/ui";
+import { CheckIcon } from "../icons";
+import { cacheKey, ttl, useCached } from "../lib/cache";
 import { splitArtists } from "../lib/artists";
-import { trackTitle } from "../lib/format";
+import { formatReleaseDate, trackTitle } from "../lib/format";
 import { usePaletteForUrl } from "../lib/palette";
+
+/**
+ * The album header's second line: total tracks and release date, both sourced
+ * from MusicBrainz and cached server-side (see `/api/albums/:name/metadata`).
+ *
+ * `savedCount` (X) is never blocked on this — it's the caller's own live count
+ * from `LibraryContext`, rendered as a plain `Counted` line until the request
+ * lands, then folded into "X / Y tracks" once it has. A miss or a MusicBrainz
+ * failure both come back as `trackCount: null`, which reads as "X / — tracks"
+ * rather than as an error.
+ */
+function AlbumMeta({ name, savedCount }: { name: string; savedCount: number }) {
+  const { data } = useCached(
+    cacheKey.albumMeta(name),
+    () => api.getAlbumMetadata(name),
+    ttl.albumMeta
+  );
+  const trackCount = data?.trackCount ?? null;
+  const complete = trackCount != null && savedCount >= trackCount;
+
+  return (
+    <>
+      <div>
+        {data === undefined ? (
+          <Counted count={savedCount} one="track" />
+        ) : trackCount != null ? (
+          <>
+            <Num>{savedCount}</Num> / <Num>{trackCount}</Num> tracks
+            {complete ? (
+              <CheckIcon
+                size={12}
+                style={{
+                  marginLeft: 4,
+                  verticalAlign: -1.5,
+                  color: "var(--color-nav-action)",
+                }}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Num>{savedCount}</Num> / — tracks
+          </>
+        )}
+      </div>
+      <div style={{ marginTop: 3 }}>
+        {data === undefined ? (
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              width: 92,
+              height: 9,
+              borderRadius: 5,
+              background: "rgba(255,255,255,.07)",
+            }}
+          />
+        ) : data.releaseDate ? (
+          formatReleaseDate(data.releaseDate)
+        ) : (
+          "Release date unavailable"
+        )}
+      </div>
+    </>
+  );
+}
 
 /**
  * An album or an artist.
@@ -70,10 +139,14 @@ export function CollectionView({
         }
         name={name}
         subtitle={
-          <>
-            {artist ? <>{artist}{" · "}</> : null}
+          kind === "album" ? (
+            <>
+              {artist ? <div>{artist}</div> : null}
+              <AlbumMeta name={name} savedCount={rows.length} />
+            </>
+          ) : (
             <Counted count={rows.length} one="track" />
-          </>
+          )
         }
         tracks={rows}
         sourceKey={`${kind}:${name}`}

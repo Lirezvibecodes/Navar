@@ -351,6 +351,15 @@ export function listArtistTracks(name: string): Promise<Track[]> {
   return request<Track[]>(`/api/artists/${encodeURIComponent(name)}/tracks`);
 }
 
+export interface AlbumMetadata {
+  releaseDate: string | null;
+  trackCount: number | null;
+}
+
+export function getAlbumMetadata(name: string): Promise<AlbumMetadata> {
+  return request<AlbumMetadata>(`/api/albums/${encodeURIComponent(name)}/metadata`);
+}
+
 // --- Friends ----------------------------------------------------------------
 
 export function listFriends(): Promise<Person[]> {

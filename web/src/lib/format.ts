@@ -68,6 +68,30 @@ export function pluralise(count: number, one: string, many = `${one}s`): string 
 }
 
 /**
+ * A release date at whatever precision the metadata provider gave it:
+ * "April 14, 2017" for a full date, "April 2017" for year and month only,
+ * "2017" for a bare year. Never invents the parts that are missing.
+ */
+export function formatReleaseDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const [year, month, day] = iso.split("-");
+  if (day) {
+    return new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
+  if (month) {
+    return new Date(`${iso}-01T00:00:00`).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+    });
+  }
+  return year;
+}
+
+/**
  * Who put this track into Navaar, if there is anybody the viewer may be told
  * about. Null covers both halves of that: a listing that does not resolve the
  * name at all, and one that resolved it to nobody because naming them would
