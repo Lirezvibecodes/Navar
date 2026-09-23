@@ -42,7 +42,10 @@ export function TrackListScreen({
   actions,
 }: {
   nav: Navigation;
-  art: ReactNode;
+  /** Omitted when the screen's own background already carries the art — an
+   *  album's pixelated cover wash, for instance — so the details do not
+   *  repeat it in a thumbnail beside them. */
+  art?: ReactNode;
   name: string;
   subtitle: ReactNode;
   /** A line under the header — a playlist owner's description. */
