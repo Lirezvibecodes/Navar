@@ -193,7 +193,7 @@ written to — but the intended production setup has both.
    it doesn't auto-detect, create a new **Web Service** manually with:
    - Root directory: `server`
    - Build command: `npm install && npm run build`
-   - Start command: `npm run start`
+   - Start command: `npm run migrate && npm run start`
    - Health check path: `/health`
 4. In the service's **Environment** tab, fill in the env vars left blank by
    `render.yaml` (`BOT_TOKEN`, `MINI_APP_URL`, `DATABASE_URL`, `JWT_SECRET`)

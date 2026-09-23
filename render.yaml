@@ -5,7 +5,7 @@ services:
     plan: free
     rootDir: server
     buildCommand: npm install && npm run build
-    startCommand: npm run start
+    startCommand: npm run migrate && npm run start
     healthCheckPath: /health
     # Render only auto-deploys a push that touched rootDir, so a commit that is
     # entirely web/ — most of them, since the server builds the web bundle —
