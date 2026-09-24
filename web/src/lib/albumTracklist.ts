@@ -1,4 +1,4 @@
-import type { AlbumTracklistEntry } from "../api";
+import type { AlbumCopy, AlbumTracklistEntry } from "../api";
 import type { Track } from "../types";
 import { trackTitle } from "./format";
 
@@ -63,4 +63,29 @@ export function matchAlbumTracklist(
   ];
 
   return { matched, ordered };
+}
+
+/**
+ * For each release entry still missing from the Crate, the copy somebody else
+ * has out in a public playlist, keyed by position. `copies` arrives oldest
+ * first, so taking the first title match is what makes the first uploader the
+ * one credited when several people have the same song.
+ */
+export function matchAlbumCopies(
+  matched: AlbumTracklistMatch["matched"],
+  copies: AlbumCopy[]
+): Map<number, AlbumCopy> {
+  const byTitle = new Map<string, AlbumCopy>();
+  for (const copy of copies) {
+    const key = normalizeTitle(trackTitle(copy));
+    if (!byTitle.has(key)) byTitle.set(key, copy);
+  }
+
+  const found = new Map<number, AlbumCopy>();
+  for (const entry of matched) {
+    if (entry.track) continue;
+    const copy = byTitle.get(normalizeTitle(entry.title));
+    if (copy) found.set(entry.position, copy);
+  }
+  return found;
 }

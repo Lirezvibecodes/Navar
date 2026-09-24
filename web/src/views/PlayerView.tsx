@@ -412,13 +412,24 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                   </span>
                 </div>
               ) : uploader ? (
-                <div
+                // Through to their profile the way TrackMenu's "Go to" rows
+                // leave: the player closes first, so the profile is what is
+                // left on screen rather than something opened underneath it.
+                <button
+                  className="nav-press"
+                  onClick={() => {
+                    haptic.tap();
+                    onClose();
+                    nav.push({ type: "profile", userId: Number(uploader.id) });
+                  }}
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: 5,
                     marginTop: 6,
+                    maxWidth: "100%",
                     fontSize: 11,
+                    textAlign: "left",
                     color: "var(--color-nav-muted)",
                     minWidth: 0,
                   }}
@@ -427,7 +438,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                   <span className="nav-clip">
                     Added by {uploader.you ? "you" : `@${uploader.name}`}
                   </span>
-                </div>
+                </button>
               ) : null}
             </div>
             {unavailable ? null : owned ? (

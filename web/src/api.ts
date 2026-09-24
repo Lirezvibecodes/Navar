@@ -370,6 +370,25 @@ export function getAlbumMetadata(name: string): Promise<AlbumMetadata> {
   return request<AlbumMetadata>(`/api/albums/${encodeURIComponent(name)}/metadata`);
 }
 
+/**
+ * Somebody else's copy of one of an album's tracks, sitting in a public
+ * playlist — so saveTrack will take it. `uploader_*` is whoever brought it
+ * into Navaar first, named even when they are a stranger.
+ */
+export interface AlbumCopy {
+  id: string;
+  title: string | null;
+  album: string;
+  uploader_id: string;
+  uploader_name: string | null;
+  uploader_has_avatar: boolean;
+}
+
+/** Oldest first, so the first copy of a title is its first uploader's. */
+export function listAlbumCopies(name: string): Promise<AlbumCopy[]> {
+  return request<AlbumCopy[]>(`/api/albums/${encodeURIComponent(name)}/copies`);
+}
+
 // --- Friends ----------------------------------------------------------------
 
 export function listFriends(): Promise<Person[]> {

@@ -10,7 +10,7 @@ import { Counted, Num } from "../components/ui";
 import { CheckIcon, ChevronRightIcon } from "../icons";
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { splitArtists } from "../lib/artists";
-import { matchAlbumTracklist } from "../lib/albumTracklist";
+import { matchAlbumCopies, matchAlbumTracklist } from "../lib/albumTracklist";
 import { formatReleaseDate, trackTitle } from "../lib/format";
 import { drawPixelatedWash } from "../lib/pixelWash";
 import { loadImage } from "../lib/storyCard";
@@ -235,6 +235,21 @@ export function CollectionView({
   const hasMissingTracks =
     !!tracklistMatch && tracklistMatch.matched.some((entry) => !entry.track);
 
+  // Other people's public copies of the gaps, asked for only once there are
+  // gaps to fill — a complete album never opens the sheet that shows them.
+  const { data: albumCopies } = useCached<api.AlbumCopy[]>(
+    hasMissingTracks ? cacheKey.albumCopies(name) : "album-copies:none",
+    () => (hasMissingTracks ? api.listAlbumCopies(name) : Promise.resolve([])),
+    ttl.albumCopies
+  );
+  const copies = useMemo(
+    () =>
+      tracklistMatch
+        ? matchAlbumCopies(tracklistMatch.matched, albumCopies ?? [])
+        : new Map<number, api.AlbumCopy>(),
+    [tracklistMatch, albumCopies]
+  );
+
   // The header credits the album to whichever artist tags every track
   // agrees on, same as the Library grid — a track tagged "Drake feat. Travis
   // Scott" doesn't get its feature printed into the album's own byline unless
@@ -291,6 +306,7 @@ export function CollectionView({
           onClose={() => setMissingOpen(false)}
           albumName={name}
           matched={tracklistMatch.matched}
+          copies={copies}
         />
       ) : null}
     </>

@@ -189,6 +189,56 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
     assert.equal(await repo.areFriends(OWNER, STRANGER), false);
   });
 
+  test("album copies offered to others are only the ones in a public playlist", async () => {
+    // Its own tracks and playlists, so the shared fixtures keep their null
+    // album tags; all of it cascades off OWNER in teardown.
+    const pool = db.getPool();
+    const make = async (title: string, artist: string, album: string, visibility: string | null) => {
+      const id = randomUUID();
+      await repo.createTrack({
+        id,
+        ownerTelegramId: OWNER,
+        title,
+        artist,
+        album,
+        durationSeconds: null,
+        telegramFileId: `fixture-copy-${title}`,
+        mimeType: "audio/mpeg",
+        coverImage: null,
+        coverMimeType: null,
+        coverFileId: null,
+        originAdderId: OWNER,
+      });
+      if (visibility) {
+        const { rows } = await pool.query<{ id: string }>(
+          `INSERT INTO playlists (owner_telegram_id, name, visibility)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [OWNER, `copies ${title}`, visibility]
+        );
+        await pool.query(
+          `INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES ($1, $2, 0)`,
+          [rows[0].id, id]
+        );
+      }
+      return id;
+    };
+
+    const shared = await make("shared", "Fixture Artist feat. Guest", "fixture album", "public");
+    await make("friends", "Fixture Artist", "Fixture Album", "friends");
+    await make("unshared", "Fixture Artist", "Fixture Album", null);
+    await make("other artist", "Someone Else", "Fixture Album", "public");
+
+    const copies = await repo.listPublicAlbumCopies(STRANGER, "Fixture Album", "Fixture Artist");
+    assert.deepEqual(
+      copies.map((c) => c.id),
+      [shared]
+    );
+    assert.equal(copies[0].uploader_id, String(OWNER));
+
+    // Your own tracks are never offered back to you.
+    assert.deepEqual(await repo.listPublicAlbumCopies(OWNER, "Fixture Album", "Fixture Artist"), []);
+  });
+
   test("restoring brings a track back", async () => {
     const restored = await repo.restoreTrack(trackIds.deleted, OWNER);
     assert.equal(restored?.id, trackIds.deleted);

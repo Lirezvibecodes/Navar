@@ -317,7 +317,8 @@ export function useKeepTrack() {
   const { owns, tracks, putTrack } = useLibrary();
   const { toast, errorToast } = useToast();
 
-  const save = async (t: Track) => {
+  /** The copy that is now yours, or null when the save failed and said so. */
+  const save = async (t: Pick<Track, "id" | "title">): Promise<Track | null> => {
     try {
       const copy = await api.saveTrack(t.id);
       // Saving something twice is answered with the copy made the first time,
@@ -327,8 +328,10 @@ export function useKeepTrack() {
       putTrack(copy);
       haptic.success();
       toast(had ? "Already in your Crate" : `Saved ${trackTitle(t)}`);
+      return copy;
     } catch (err) {
       errorToast(err, "Could not save that");
+      return null;
     }
   };
 

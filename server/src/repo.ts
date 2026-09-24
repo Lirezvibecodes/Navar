@@ -2013,6 +2013,59 @@ export async function listTracksByTag(
   return rows.filter((row) => splitArtists(row.artist ?? "").includes(value));
 }
 
+export interface AlbumCopy {
+  id: string;
+  title: string | null;
+  album: string;
+  uploader_id: string;
+  uploader_name: string | null;
+  uploader_has_avatar: boolean;
+}
+
+/**
+ * Other people's copies of an album's tracks, for filling the gaps in yours.
+ *
+ * Only tracks sitting in a public playlist count — the same reach a share
+ * link already gives anybody, so this is a search over what is already out in
+ * the open rather than a window into somebody's private Crate. That is also
+ * exactly what /tracks/:id/save lets the caller keep, so every row here can be
+ * saved. The uploader is named whether or not the caller knows them: a public
+ * playlist already credits its owner to strangers, and this is the same kind
+ * of credit.
+ *
+ * The album tag is compared case-insensitively and the lead artist must
+ * agree, so two unrelated "Greatest Hits" never lend each other tracks. Oldest
+ * first, so a title with several copies resolves to whoever got there first.
+ */
+export async function listPublicAlbumCopies(
+  viewerTelegramId: number,
+  album: string,
+  leadArtist: string
+): Promise<AlbumCopy[]> {
+  const { rows } = await getPool().query<AlbumCopy & { artist: string | null }>(
+    `SELECT t.id, t.title, t.album, t.artist,
+       ${UPLOADER_ID_T} AS uploader_id,
+       COALESCE(up.handle, up.username) AS uploader_name,
+       (up.avatar_file_id IS NOT NULL) AS uploader_has_avatar
+     FROM tracks t
+     ${UPLOADER_JOIN_T}
+     WHERE ${LIVE_T}
+       AND t.owner_telegram_id <> $1
+       AND lower(t.album) = lower($2)
+       AND EXISTS (
+         SELECT 1 FROM playlist_tracks pt
+         JOIN playlists p ON p.id = pt.playlist_id
+         WHERE pt.track_id = t.id AND p.visibility = 'public'
+       )
+     ORDER BY t.created_at ASC`,
+    [viewerTelegramId, album]
+  );
+  const lead = leadArtist.toLowerCase();
+  return rows
+    .filter((row) => (splitArtists(row.artist ?? "")[0] ?? "").toLowerCase() === lead)
+    .map(({ artist: _artist, ...copy }) => copy);
+}
+
 /**
  * Renaming an album means rewriting the tag on every track that carries it.
  * There is no album row to update, which is the point: one statement, scoped to

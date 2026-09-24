@@ -9,8 +9,24 @@ import {
   getAlbumMetadata,
   saveAlbumMetadata,
   splitArtists,
+  listPublicAlbumCopies,
 } from "../repo";
 import { lookupAlbum, fetchTracklist } from "../musicbrainz-provider";
+import type { Track } from "../types";
+
+/**
+ * The same rule the album page uses to print an artist under the title, taken
+ * down to just the primary name: a MusicBrainz release is credited to its
+ * lead artist, so searching "JID feat. Kenny Mason" whole finds nothing where
+ * "JID" finds the album. The metadata cache is keyed on this same primary name
+ * for the same reason — two owners tagging the same album's artist field with
+ * different feature billing should still land on one cached row — and it is
+ * also what decides whose copies of an album count as the same album.
+ */
+function leadArtistOf(tracks: Track[]): string | null {
+  const rawArtist = tracks.find((t) => t.artist)?.artist;
+  return rawArtist ? splitArtists(rawArtist)[0] ?? null : null;
+}
 
 /**
  * Albums and artists have no tables. Both views are a GROUP BY over the tags on
@@ -49,6 +65,28 @@ export function albumsRouter(): Router {
   );
 
   /**
+   * Copies of this album's tracks that other people have put in a public
+   * playlist — what the missing-tracks sheet offers to save into the gaps.
+   * Scoped through the caller's own album the same way the metadata route is,
+   * both to find the lead artist and so an album they do not have is a 404
+   * rather than a search over any name they care to type.
+   */
+  router.get(
+    "/:name/copies",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const viewerId = (req as AuthedRequest).telegramUserId;
+      const tracks = await listTracksByTag(viewerId, "album", req.params.name);
+      if (tracks.length === 0) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      const artist = leadArtistOf(tracks);
+      res.json(artist ? await listPublicAlbumCopies(viewerId, req.params.name, artist) : []);
+    })
+  );
+
+  /**
    * The header's total-track-count and release-date fields, sourced from
    * MusicBrainz and cached in album_metadata. Nothing here is user data — see
    * migration 024 — so the only reason this route requires auth and re-derives
@@ -75,15 +113,7 @@ export function albumsRouter(): Router {
         return;
       }
 
-      // The same rule the album page uses to print an artist under the
-      // title, taken down to just the primary name: a MusicBrainz release is
-      // credited to its lead artist, so searching "JID feat. Kenny Mason"
-      // whole finds nothing where "JID" finds the album. The cache is keyed
-      // on this same primary name for the same reason — two owners tagging
-      // the same album's artist field with different feature billing should
-      // still land on one cached row.
-      const rawArtist = tracks.find((t) => t.artist)?.artist;
-      const artist = rawArtist ? splitArtists(rawArtist)[0] ?? null : null;
+      const artist = leadArtistOf(tracks);
       if (!artist) {
         res.json({ releaseDate: null, trackCount: null, tracklist: null });
         return;

@@ -55,6 +55,7 @@ export const cacheKey = {
   palette: (id: string) => `palette:${id}`,
   tags: "tags",
   albumMeta: (name: string) => `album:${name}:meta`,
+  albumCopies: (name: string) => `album:${name}:copies`,
   listeningStats: (range: string) => `stats:${range}`,
 } as const;
 
@@ -89,6 +90,8 @@ export const ttl = {
   /** A MusicBrainz fact about a release does not change within a session —
    *  same reasoning as palette. */
   albumMeta: Infinity,
+  /** Anybody can make a playlist public, or delete a copy out of one. */
+  albumCopies: 60_000,
   /** Only your own listening writes to this, so it only needs a short
    *  backstop against a play recorded elsewhere in the same session. */
   listeningStats: 60_000,
