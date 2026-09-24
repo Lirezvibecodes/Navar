@@ -8,6 +8,7 @@ import {
 import type { Navigation } from "../App";
 import * as api from "../api";
 import { Avatar } from "../components/Avatar";
+import { JamHeader, JamQueuePane } from "../components/Jam";
 import { LyricStrip, LyricsPane, useLyrics } from "../components/Lyrics";
 import { Cover } from "../components/PixelArt";
 import { TrackMenu } from "../components/TrackMenu";
@@ -40,6 +41,7 @@ import {
   TrashIcon,
 } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
+import { useJam } from "../context/JamContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useToast } from "../context/ToastContext";
 import { applyFocalGrow, focalRiseVars } from "../lib/focal";
@@ -107,7 +109,11 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
     setShuffle,
     cycleRepeat,
     setSleepMinutes,
+    jamMode,
   } = usePlayer();
+  const { jam } = useJam();
+  // A guest hears the host's playback and steers none of it but their own pause.
+  const guest = jamMode === "guest";
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
@@ -180,6 +186,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
   const palette = usePalette(current?.id ?? null, current?.has_cover ?? false);
   const loading = status === "loading";
   const failed = status === "failed";
+  const unavailable = status === "unavailable";
   // Fetched here rather than inside the Lyrics pane, because the strip under
   // the transport needs the same words and neither should send the server
   // looking twice for one track.
@@ -243,22 +250,32 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
           label="Close player"
           onClick={dismiss}
         />
-        <span
-          className="nav-clip"
-          style={{
-            flex: 1,
-            textAlign: "center",
-            fontSize: 11,
-            color: "var(--color-nav-muted)",
-          }}
-        >
-          {contextLabel ? `Playing from ${contextLabel}` : "Playing"}
-        </span>
-        <RoundButton
-          icon={DotsIcon}
-          label="Track options"
-          onClick={() => setMenu({ track: current })}
-        />
+        {jam ? (
+          <JamHeader />
+        ) : (
+          <span
+            className="nav-clip"
+            style={{
+              flex: 1,
+              textAlign: "center",
+              fontSize: 11,
+              color: "var(--color-nav-muted)",
+            }}
+          >
+            {contextLabel ? `Playing from ${contextLabel}` : "Playing"}
+          </span>
+        )}
+        {/* A track this listener may not open has no menu to offer — every
+            item in it would be a way into something they cannot see. */}
+        {unavailable ? (
+          <span style={{ width: 44, flex: "none" }} />
+        ) : (
+          <RoundButton
+            icon={DotsIcon}
+            label="Track options"
+            onClick={() => setMenu({ track: current })}
+          />
+        )}
       </div>
 
       <div
@@ -326,7 +343,45 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                   seconds and the transport looks identical either way, so the
                   only account of why nothing is happening lives here, under
                   the title, for as long as it is true. */}
-              {failed ? (
+              {unavailable ? (
+                <div
+                  role="status"
+                  style={{
+                    display: "flex",
+                    gap: 7,
+                    marginTop: 7,
+                    minWidth: 0,
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      flex: "none",
+                      width: 3,
+                      alignSelf: "stretch",
+                      borderRadius: 2,
+                      background: "var(--color-nav-jam)",
+                    }}
+                  />
+                  <span style={{ fontSize: 11.5, lineHeight: 1.4 }}>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: "0.14em",
+                        textTransform: "uppercase",
+                        color: "var(--color-nav-jam-soft)",
+                      }}
+                    >
+                      Track unavailable
+                    </span>
+                    <span style={{ color: "var(--color-nav-muted)" }}>
+                      This track isn't available to you.
+                    </span>
+                  </span>
+                </div>
+              ) : failed ? (
                 <div
                   role="alert"
                   style={{
@@ -375,7 +430,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                 </div>
               ) : null}
             </div>
-            {owned ? (
+            {unavailable ? null : owned ? (
               <button
                 className={`nav-press ${hearted ? "nav-pop" : ""}`}
                 aria-label={favorited ? "Remove from favourites" : "Add to favourites"}
@@ -439,7 +494,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
             )}
           </div>
 
-          <Scrubber position={position} duration={duration} onSeek={seek} />
+          <Scrubber position={position} duration={duration} onSeek={seek} locked={guest} />
 
           <div
             style={{
@@ -453,10 +508,11 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
               icon={ShuffleIcon}
               label="Shuffle"
               size={52}
-              on={shuffle}
+              on={shuffle && !guest}
+              disabled={guest}
               onClick={() => setShuffle(!shuffle)}
             />
-            <TransportButton icon={PrevIcon} label="Previous" size={52} bright onClick={prev} />
+            <TransportButton icon={PrevIcon} label="Previous" size={52} bright disabled={guest} onClick={prev} />
             <button
               className="nav-press"
               aria-label={
@@ -511,12 +567,13 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
                 />
               </span>
             </button>
-            <TransportButton icon={NextIcon} label="Next" size={52} bright onClick={next} />
+            <TransportButton icon={NextIcon} label="Next" size={52} bright disabled={guest} onClick={next} />
             <TransportButton
               icon={RepeatIcon}
               label={`Repeat ${repeat}`}
               size={52}
-              on={repeat !== "off"}
+              disabled={guest}
+              on={repeat !== "off" && !guest}
               badge={repeat === "one" ? "1" : undefined}
               onClick={cycleRepeat}
             />
@@ -559,6 +616,8 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
         </div>
       ) : pane === "lyrics" ? (
         <LyricsPane words={words} position={position} onSeek={seek} />
+      ) : jam ? (
+        <JamQueuePane />
       ) : (
         <QueuePane
           current={current}
@@ -580,7 +639,7 @@ export function PlayerView({ nav, onClose }: { nav: Navigation; onClose: () => v
       <Segments
         pane={pane}
         onSelect={setPane}
-        queueCount={upNext.length + contextNext.length}
+        queueCount={jam ? jam.queue.length : upNext.length + contextNext.length}
       />
 
       <TrackMenu
@@ -866,6 +925,7 @@ function TransportButton({
   bright,
   on,
   badge,
+  disabled,
   onClick,
 }: {
   icon: (props: { size?: number }) => React.ReactNode;
@@ -874,6 +934,8 @@ function TransportButton({
   bright?: boolean;
   on?: boolean;
   badge?: string;
+  /** A jam guest's: the host steers. */
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -881,6 +943,7 @@ function TransportButton({
       className="nav-press"
       aria-label={label}
       aria-pressed={on}
+      disabled={disabled}
       onClick={() => {
         haptic.tap();
         onClick();
@@ -891,6 +954,7 @@ function TransportButton({
         display: "grid",
         placeItems: "center",
         position: "relative",
+        opacity: disabled ? 0.28 : 1,
         color: on
           ? "var(--color-nav-action)"
           : bright
@@ -928,10 +992,13 @@ function Scrubber({
   position,
   duration,
   onSeek,
+  locked,
 }: {
   position: number;
   duration: number;
   onSeek: (seconds: number) => void;
+  /** Shows where the track is without letting anyone move it — a jam guest's. */
+  locked?: boolean;
 }) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
@@ -956,8 +1023,10 @@ function Scrubber({
         aria-valuemin={0}
         aria-valuemax={Math.round(duration)}
         aria-valuenow={Math.round(shown)}
-        tabIndex={0}
+        aria-disabled={locked}
+        tabIndex={locked ? -1 : 0}
         onPointerDown={(e) => {
+          if (locked) return;
           e.currentTarget.setPointerCapture(e.pointerId);
           setDragging(at(e.clientX));
         }}
@@ -978,11 +1047,12 @@ function Scrubber({
         // something else, and this marks them so it lets go.
         data-own-drag
         onKeyDown={(e) => {
+          if (locked) return;
           if (e.key === "ArrowLeft") onSeek(Math.max(0, position - 10));
           if (e.key === "ArrowRight") onSeek(Math.min(duration, position + 10));
         }}
         // A 5px rail with a 44px hit area around it.
-        style={{ padding: "20px 0", cursor: "pointer", touchAction: "none" }}
+        style={{ padding: "20px 0", cursor: locked ? "default" : "pointer", touchAction: "none" }}
       >
         <div
           style={{

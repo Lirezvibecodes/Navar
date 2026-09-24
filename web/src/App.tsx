@@ -14,6 +14,8 @@ import { Empty } from "./components/ui";
 import { FirstRun } from "./components/Welcome";
 import { LibraryProvider, useLibrary } from "./context/LibraryContext";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
+import { JamProvider } from "./context/JamContext";
+import { JamSheets } from "./components/Jam";
 import { ToastProvider, useToast } from "./context/ToastContext";
 import { ThemeEffect } from "./context/ThemeContext";
 import { HomeView } from "./views/HomeView";
@@ -357,6 +359,8 @@ function Shell({ me }: { me: Me }) {
       {playerOpen ? (
         <PlayerView nav={nav} onClose={() => setPlayerOpen(false)} />
       ) : null}
+
+      <JamSheets onJoined={nav.openPlayer} />
     </div>
   );
 }
@@ -458,8 +462,10 @@ function Boot() {
   return (
     <LibraryProvider me={me} setMe={setMe}>
       <PlayerProvider>
-        <ThemeEffect me={me} />
-        <Shell me={me} />
+        <JamProvider>
+          <ThemeEffect me={me} />
+          <Shell me={me} />
+        </JamProvider>
       </PlayerProvider>
     </LibraryProvider>
   );

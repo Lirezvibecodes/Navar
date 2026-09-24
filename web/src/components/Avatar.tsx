@@ -26,6 +26,8 @@ interface AvatarProps {
   /** The lime ring that marks somebody who is listening right now. */
   ring?: boolean;
   className?: string;
+  /** A dot in the theme accent: playing right now, by a fresh listening status. */
+  live?: boolean;
   /** Bumped after this session uploads a new picture, so the browser does not
    *  keep serving the old bytes for the rest of it from its own cache. */
   bust?: number;
@@ -38,6 +40,7 @@ export function Avatar({
   size,
   ring,
   className,
+  live,
   bust,
 }: AvatarProps) {
   const [failed, setFailed] = useState(false);
@@ -45,9 +48,9 @@ export function Avatar({
   const initial = (username?.trim()?.[0] ?? "?").toUpperCase();
   const showImage = hasAvatar && !failed;
 
-  return (
+  const face = (
     <div
-      className={className}
+      className={live ? undefined : className}
       style={{
         width: size,
         height: size,
@@ -77,6 +80,29 @@ export function Avatar({
       ) : (
         initial
       )}
+    </div>
+  );
+  if (!live) return face;
+
+  // The dot sits across the rim, so it lives outside the clipped circle.
+  const dot = Math.max(8, Math.round(size * 0.22));
+  return (
+    <div className={className} style={{ position: "relative", flex: "none", width: size, height: size }}>
+      {face}
+      <span
+        aria-label="Listening now"
+        className="nav-fade"
+        style={{
+          position: "absolute",
+          right: Math.round(size * 0.04),
+          bottom: Math.round(size * 0.04),
+          width: dot,
+          height: dot,
+          borderRadius: "50%",
+          background: "var(--color-nav-action)",
+          boxShadow: "0 0 0 2.5px var(--color-nav-bg), 0 0 12px rgba(var(--color-nav-action-rgb),.45)",
+        }}
+      />
     </div>
   );
 }

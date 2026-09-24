@@ -3,6 +3,7 @@ import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton, PersonRow } from "./SocialView";
 import { Avatar } from "../components/Avatar";
+import { LiveCard, useLiveState } from "../components/Jam";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
 import { RankSection } from "../components/RankSection";
@@ -161,6 +162,10 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   const bgTrackId = profile?.background_track_id ?? profile?.stats?.topTrack?.cover_track_id ?? null;
   const bannerUrl = usePixelatedBanner(bgTrackId ? api.trackCoverUrl(bgTrackId, userId) : null);
 
+  // Only a friend's listening is ever shown, and only while the server calls it fresh.
+  const liveView = useLiveState(userId, !isMe && profile?.state === "friends");
+  const isLive = liveView.state?.live != null;
+
   if (loading) {
     return (
       <Screen>
@@ -225,6 +230,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
               username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
               hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
               size={84}
+              live={isLive}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -317,6 +323,10 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
           ) : null}
         </div>
       </div>
+
+      {!isMe && known && person ? (
+        <LiveCard host={person} view={liveView} onOpenPlayer={nav.openPlayer} />
+      ) : null}
 
       {isMe ? (
         <>

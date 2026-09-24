@@ -3,7 +3,9 @@ import type {
   Collection,
   FriendPlaylist,
   HomePayload,
+  JamPoll,
   ListeningNow,
+  LiveState,
   ListeningStatsPage,
   Me,
   Person,
@@ -425,10 +427,18 @@ export function removeFriend(id: string | number): Promise<void> {
  * expiring, not a message from here. A WebView that is swiped away gets no
  * chance to send a goodbye, so nothing may depend on one arriving.
  */
-export function setListeningStatus(trackId: string | null): Promise<void> {
+/**
+ * `position` and `playing` are what a friend's profile draws its live progress
+ * line from; the server stamps its own clock beside them.
+ */
+export function setListeningStatus(
+  trackId: string | null,
+  position: number | null = null,
+  playing = true
+): Promise<void> {
   return request<void>("/api/me/listening-status", {
     method: "PATCH",
-    body: json({ trackId }),
+    body: json({ trackId, position, playing }),
   });
 }
 
@@ -641,4 +651,66 @@ export function setEquippedTags(tagIds: string[]): Promise<TagState[]> {
  *  the caller's own data — there is no userId, unlike ListeningStats. */
 export function getListeningStatsPage(range: StatsRange): Promise<ListeningStatsPage> {
   return request<ListeningStatsPage>(`/api/me/stats?range=${range}`);
+}
+
+// --- Jam --------------------------------------------------------------------
+//
+// Every jam write answers with the caller's fresh poll, so the client redraws
+// from what the server now holds rather than guessing at the effect.
+
+export function getLiveState(userId: string | number): Promise<LiveState> {
+  return request<LiveState>(`/api/users/${userId}/live`);
+}
+
+export function getJamState(): Promise<JamPoll> {
+  return request<JamPoll>("/api/jam");
+}
+
+export function requestJam(hostId: string | number): Promise<JamPoll> {
+  return request<JamPoll>(`/api/users/${hostId}/jam-request`, { method: "POST" });
+}
+
+export function cancelJamRequest(id: string): Promise<JamPoll> {
+  return request<JamPoll>(`/api/jam/requests/${id}`, { method: "DELETE" });
+}
+
+export function acceptJamRequest(id: string): Promise<JamPoll> {
+  return request<JamPoll>(`/api/jam/requests/${id}/accept`, { method: "POST" });
+}
+
+export function declineJamRequest(id: string): Promise<JamPoll> {
+  return request<JamPoll>(`/api/jam/requests/${id}/decline`, { method: "POST" });
+}
+
+/** The host reports playback. Answered with nothing — the host polls anyway. */
+export function syncJam(body: {
+  trackId: string | null;
+  itemId: string | null;
+  position: number;
+  playing: boolean;
+}): Promise<void> {
+  return request<void>("/api/jam/sync", { method: "POST", body: json(body) });
+}
+
+export function leaveJam(): Promise<JamPoll> {
+  return request<JamPoll>("/api/jam/leave", { method: "POST" });
+}
+
+export function removeJamParticipant(userId: string | number): Promise<JamPoll> {
+  return request<JamPoll>(`/api/jam/participants/${userId}`, { method: "DELETE" });
+}
+
+export function addToJamQueue(trackId: string, next = false): Promise<JamPoll> {
+  return request<JamPoll>("/api/jam/queue", { method: "POST", body: json({ trackId, next }) });
+}
+
+export function removeFromJamQueue(itemId: string): Promise<JamPoll> {
+  return request<JamPoll>(`/api/jam/queue/${itemId}`, { method: "DELETE" });
+}
+
+export function moveJamQueueItem(itemId: string, toIndex: number): Promise<JamPoll> {
+  return request<JamPoll>(`/api/jam/queue/${itemId}`, {
+    method: "PATCH",
+    body: json({ toIndex }),
+  });
 }

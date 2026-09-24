@@ -336,3 +336,90 @@ export interface HomePayload {
   /** Present only once enough unfiled tracks have piled up to be worth saying. */
   unsorted?: number;
 }
+
+// --- Jam --------------------------------------------------------------------
+
+/**
+ * A track as a jam shows it. Everyone in a jam sees the same title and artist,
+ * but only someone who could open the track alone gets `track` to play — joining
+ * never widens what a person may stream.
+ */
+export interface JamTrack {
+  id: string;
+  title: string | null;
+  artist: string | null;
+  duration_seconds: number | null;
+  /** Null when the viewer may not see this cover either. */
+  cover_track_id: string | null;
+  available: boolean;
+  track: Track | null;
+}
+
+export interface JamQueueItem {
+  id: string;
+  track: JamTrack;
+  added_by: Person;
+}
+
+export interface JamParticipant {
+  person: Person;
+  role: "host" | "guest";
+}
+
+export interface JamPlayback {
+  track: JamTrack | null;
+  item_id: string | null;
+  position_seconds: number;
+  /** Server time `position_seconds` was true at. */
+  position_at: string;
+  is_playing: boolean;
+}
+
+export interface JamView {
+  id: string;
+  /** What the viewer is in it. */
+  role: "host" | "guest";
+  host: Person;
+  participants: JamParticipant[];
+  playback: JamPlayback;
+  queue: JamQueueItem[];
+}
+
+export type JamRequestStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
+
+export interface JamRequest {
+  id: string;
+  status: JamRequestStatus;
+  host: Person;
+  requester: Person;
+  created_at: string;
+  expires_at: string;
+}
+
+/** `GET /api/jam` — and the answer to every jam write. */
+export interface JamPoll {
+  server_now: string;
+  jam: JamView | null;
+  /** Requests waiting on the viewer, as a host. */
+  incoming: JamRequest[];
+  /** The viewer's own latest request, while open or just answered. */
+  outgoing: JamRequest | null;
+}
+
+/** `GET /api/users/:id/live` — what a friend is playing right now, if anything. */
+export interface LiveState {
+  server_now: string;
+  live: {
+    track: JamTrack;
+    position_seconds: number;
+    position_at: string;
+    is_playing: boolean;
+  } | null;
+  jam: {
+    id: string;
+    role: "host" | "guest";
+    listener_count: number;
+    viewer_is_member: boolean;
+    host: Person | null;
+  } | null;
+}

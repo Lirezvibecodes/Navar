@@ -12,6 +12,7 @@ import { friendsRouter } from "./routes/friends";
 import { socialRouter } from "./routes/social";
 import { homeRouter } from "./routes/home";
 import { tagsRouter } from "./routes/tags";
+import { jamRouter } from "./routes/jam";
 import { sharedRouter } from "./routes/shared";
 import { trackShareRouter, storyShareRouter, storyVideoRouter } from "./routes/trackShare";
 
@@ -79,6 +80,7 @@ export function createApp(bot: Telegraf | null): Express {
   app.use("/api/social", socialRouter());
   app.use("/api/home", homeRouter());
   app.use("/api/tags", tagsRouter());
+  app.use("/api/jam", jamRouter());
   // Deliberately last, and deliberately without requireAuth: everything above
   // this line knows who is calling and nothing below it does.
   app.use("/api/shared", sharedRouter());

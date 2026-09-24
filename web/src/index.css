@@ -93,6 +93,13 @@
      that failed. Two near-identical reds were in circulation (#FF8A8A and
      #ff8f8f) and nothing distinguished them but the file they were typed in. */
   --color-nav-danger: #ff8f8f;
+  /* Jam Mode, and only Jam Mode: the second voice in a shared session. It
+     never stands alone — it always meets the theme accent in a gradient or
+     sits beside it — so it reads as "together" rather than as a new brand
+     colour. Fixed across themes on purpose. */
+  --color-nav-jam: #a970ff;
+  --color-nav-jam-rgb: 169, 112, 255;
+  --color-nav-jam-soft: #d9c2ff;
 
   --font-display: "Pixelify Sans", monospace;
   --font-sans: "General Sans", ui-sans-serif, system-ui, sans-serif;

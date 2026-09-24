@@ -10,6 +10,8 @@ import {
   searchPeople,
 } from "../repo";
 import { fetchTelegramFileCached } from "../telegram-files";
+import { getJamState, getLiveState, requestJam } from "../jam";
+import { sendJamError } from "./jam";
 
 /** Rejects a path parameter that is not a Telegram user id. */
 function readUserId(raw: string): number | null {
@@ -107,6 +109,49 @@ export function usersRouter(): Router {
         return;
       }
       res.json(profile);
+    })
+  );
+
+  /**
+   * What this person is playing right now, for the live player on their
+   * profile, and the jam they are in if any. Friends only; a stranger, or a
+   * friend who is paused, private or gone quiet, gets nulls — the card
+   * collapses rather than showing a player that is not really playing.
+   */
+  router.get(
+    "/:id/live",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const userId = readUserId(req.params.id);
+      if (!userId) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(await getLiveState((req as AuthedRequest).telegramUserId, userId));
+    })
+  );
+
+  /** Ask to join this person's listening. Answers with the caller's jam poll. */
+  router.post(
+    "/:id/jam-request",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const userId = readUserId(req.params.id);
+      if (!userId) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      const me = (req as AuthedRequest).telegramUserId;
+      if (userId === me) {
+        res.status(400).json({ error: "You can't join yourself" });
+        return;
+      }
+      const result = await requestJam(me, userId);
+      if (!result.ok) {
+        sendJamError(res, result.error);
+        return;
+      }
+      res.json(await getJamState(me));
     })
   );
 

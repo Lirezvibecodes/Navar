@@ -93,15 +93,28 @@ export function meRouter(): Router {
     "/listening-status",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const { trackId } = req.body ?? {};
+      const { trackId, position, playing } = req.body ?? {};
       if (trackId != null && typeof trackId !== "string") {
         res.status(400).json({ error: "trackId must be a track or null" });
+        return;
+      }
+      if (
+        position != null &&
+        (typeof position !== "number" || !Number.isFinite(position) || position < 0)
+      ) {
+        res.status(400).json({ error: "position must be a number of seconds" });
+        return;
+      }
+      if (playing != null && typeof playing !== "boolean") {
+        res.status(400).json({ error: "playing must be true or false" });
         return;
       }
 
       const ok = await setListeningStatus(
         (req as AuthedRequest).telegramUserId,
-        trackId ?? null
+        trackId ?? null,
+        position ?? null,
+        playing ?? true
       );
       if (!ok) {
         res.status(404).json({ error: "Not found" });

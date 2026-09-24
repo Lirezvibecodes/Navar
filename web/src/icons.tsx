@@ -432,3 +432,16 @@ export const NoteIcon = icon(
     <rect x="1" y="21" width="22" height="1" />
   </>
 );
+
+/**
+ * A live signal, for a friend who is playing right now and the jam around
+ * them. The library has no waveform, so it is built the way its equalizer
+ * glyphs are: whole-unit bars on the grid, centred on the middle row.
+ */
+export const WaveIcon = icon(
+  <>
+    {[4, 10, 16, 22, 14, 8, 4].map((h, i) => (
+      <rect key={i} x={2 + i * 3} y={12 - h / 2} width={2} height={h} />
+    ))}
+  </>
+);

@@ -153,7 +153,7 @@ export interface NewTrack {
  * asking only one of them and hiding half the library's artwork.
  */
 const HAS_COVER = `(cover_image IS NOT NULL OR cover_file_id IS NOT NULL)`;
-const HAS_COVER_T = `(t.cover_image IS NOT NULL OR t.cover_file_id IS NOT NULL)`;
+export const HAS_COVER_T = `(t.cover_image IS NOT NULL OR t.cover_file_id IS NOT NULL)`;
 
 // Excludes cover_image so list/get/update calls never pull cover bytes over
 // the wire; the dedicated cover route/query below fetches those on demand.
@@ -164,7 +164,7 @@ const TRACK_COLUMNS = `
 `;
 
 // The same list, qualified, for the queries that join tracks to something else.
-const TRACK_COLUMNS_T = `
+export const TRACK_COLUMNS_T = `
   t.id, t.owner_telegram_id, t.title, t.artist, t.album, t.duration_seconds,
   t.telegram_file_id, t.mime_type, ${HAS_COVER_T} AS has_cover,
   t.origin_adder_id, t.favorited_at, (t.lyrics IS NOT NULL) AS has_lyrics,
@@ -177,7 +177,7 @@ const TRACK_COLUMNS_T = `
  * resurrecting deleted tracks.
  */
 const LIVE = `deleted_at IS NULL`;
-const LIVE_T = `t.deleted_at IS NULL`;
+export const LIVE_T = `t.deleted_at IS NULL`;
 
 /**
  * Whether one person is visible to another at all: themselves, an accepted
@@ -188,7 +188,7 @@ const LIVE_T = `t.deleted_at IS NULL`;
  * into larger queries; both arguments must be placeholders or column
  * references, never anything derived from a request body.
  */
-function canSeePerson(viewer: string, other: string): string {
+export function canSeePerson(viewer: string, other: string): string {
   return `(
     ${other} = ${viewer}
     OR EXISTS (
@@ -391,7 +391,7 @@ export async function areFriends(a: number, b: number): Promise<boolean> {
  * cannot drift into two different answers to the same question. Both arguments
  * must be placeholders or column references.
  */
-function trackVisibleTo(viewer: string, track: string): string {
+export function trackVisibleTo(viewer: string, track: string): string {
   return `(
     ${track}.owner_telegram_id = ${viewer}
     OR EXISTS (
@@ -454,7 +454,7 @@ export async function getTrackForListener(
  * (title, artist, whose it is), so a viewer who may see that *person* may see
  * the picture too, own playlist or not.
  */
-function trackCoverVisibleTo(viewer: string, track: string): string {
+export function trackCoverVisibleTo(viewer: string, track: string): string {
   return `(${trackVisibleTo(viewer, track)} OR ${canSeePerson(viewer, `${track}.owner_telegram_id`)})`;
 }
 
@@ -2824,7 +2824,7 @@ const ACTIVITY_LIMIT = 30;
  * prefix is for — and pairing the SELECT list with the reader below is what
  * stops the two from drifting apart.
  */
-function personColumns(alias: string, prefix: string): string {
+export function personColumns(alias: string, prefix: string): string {
   return `${alias}.telegram_user_id AS ${prefix}_id,
           ${alias}.username AS ${prefix}_username,
           ${alias}.handle AS ${prefix}_handle,
@@ -2832,7 +2832,7 @@ function personColumns(alias: string, prefix: string): string {
 }
 
 /** Reads back what personColumns wrote. Null when the join found nobody. */
-function personFrom(
+export function personFrom(
   row: Record<string, unknown>,
   prefix: string
 ): PersonSummary | null {
@@ -2910,32 +2910,46 @@ export interface ActivityItem {
  *
  * is_public is untouched here. It is set on its own route and must survive a
  * status write, or every track change would quietly re-open the curtains.
+ *
+ * `position` and `playing` are where in the track the listener is and whether
+ * it is moving, stamped with the server's own clock on arrival. A caller that
+ * omits them is reporting plain playback from the start, which is what every
+ * status meant before they existed.
  */
 export async function setListeningStatus(
   telegramUserId: number,
-  trackId: string | null
+  trackId: string | null,
+  position: number | null = null,
+  playing: boolean = true
 ): Promise<boolean> {
   const pool = getPool();
 
   if (trackId === null) {
     await pool.query(
-      `INSERT INTO listen_status (telegram_user_id, track_id, updated_at)
-       VALUES ($1, NULL, now())
+      `INSERT INTO listen_status (telegram_user_id, track_id, is_playing, updated_at)
+       VALUES ($1, NULL, false, now())
        ON CONFLICT (telegram_user_id)
-       DO UPDATE SET track_id = NULL, updated_at = now()`,
+       DO UPDATE SET track_id = NULL, is_playing = false,
+                     position_seconds = NULL, position_at = NULL,
+                     updated_at = now()`,
       [telegramUserId]
     );
     return true;
   }
 
   const { rowCount } = await pool.query(
-    `INSERT INTO listen_status (telegram_user_id, track_id, updated_at)
-     SELECT $1, t.id, now()
+    `INSERT INTO listen_status
+       (telegram_user_id, track_id, position_seconds, position_at, is_playing, updated_at)
+     SELECT $1, t.id, $3, now(), $4, now()
      FROM tracks t
      WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
      ON CONFLICT (telegram_user_id)
-     DO UPDATE SET track_id = EXCLUDED.track_id, updated_at = now()`,
-    [telegramUserId, trackId]
+     DO UPDATE SET track_id = EXCLUDED.track_id,
+                   position_seconds = EXCLUDED.position_seconds,
+                   position_at = EXCLUDED.position_at,
+                   is_playing = EXCLUDED.is_playing,
+                   updated_at = now()`,
+    [telegramUserId, trackId, position ?? 0, playing]
   );
   return (rowCount ?? 0) > 0;
 }

@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Track } from "../types";
+import type { JamTrack, Track } from "../types";
 import {
   recordPlay,
   setListeningStatus,
@@ -52,8 +52,10 @@ export interface PlaybackContextSource {
 
 const RESUME_KEY = "navaar.resume";
 const PROGRESS_SAVE_MS = 5000;
-/** Comfortably inside the ten minutes the server gives a status to live. */
-const STATUS_HEARTBEAT_MS = 4 * 60_000;
+/** Comfortably inside the five minutes the server gives a live status. */
+const STATUS_HEARTBEAT_MS = 2 * 60_000;
+/** How far a jam guest may wander from the host before being put back. */
+const JAM_DRIFT_SECONDS = 1.5;
 /** How much of a track has to be heard before it counts as played. */
 const PLAY_LOG_SECONDS = 30;
 
@@ -65,12 +67,72 @@ const PLAY_LOG_SECONDS = 30;
  * through a stream. Before this existed all three paths ended in
  * `.catch(() => setIsPlaying(false))` and the app drew a play button, so the
  * user pressed it again, and again. `failed` is what lets the UI say so.
+ *
+ * `unavailable` is a jam guest's: the host is playing something this listener
+ * could not open on their own, so there is a title to show and nothing to play.
  */
-export type PlaybackStatus = "idle" | "loading" | "ready" | "failed";
+export type PlaybackStatus = "idle" | "loading" | "ready" | "failed" | "unavailable";
 
 interface ResumeState {
   trackId: string;
   position: number;
+}
+
+/**
+ * Jam Mode, as far as the player is concerned.
+ *
+ * The jam itself — polling, requests, the shared queue — lives in JamContext.
+ * The player only needs to know which way authority runs: a host plays as
+ * usual but draws on the shared queue first, and a guest plays nothing of
+ * their own and follows the host. The bridge is how JamContext tells it.
+ */
+export type JamMode = "solo" | "host" | "guest";
+
+export interface JamBridge {
+  mode: "host" | "guest";
+  /** Host only: take the next shared-queue item, or null when it is empty. */
+  nextShared: () => { track: Track; itemId: string } | null;
+  /** Queue actions go to the shared queue while in a jam. */
+  enqueue: (track: Track, next: boolean) => void;
+  /** A guest started something of their own, which means leaving. */
+  leave: () => void;
+}
+
+/** What the host is doing, as a guest's client last heard it. */
+export interface HostPlayback {
+  track: JamTrack | null;
+  position: number;
+  /** Local clock time at which `position` was true. */
+  atMs: number;
+  playing: boolean;
+}
+
+interface SoloSnapshot {
+  current: Track | null;
+  upNext: Track[];
+  source: PlaybackContextSource | null;
+  order: Track[];
+  cursor: number;
+  position: number;
+}
+
+/** Something to show for a track the guest may not play: its name and nothing else. */
+function unavailableTrack(jt: JamTrack): Track {
+  return {
+    id: jt.id,
+    owner_telegram_id: "",
+    title: jt.title,
+    artist: jt.artist,
+    album: null,
+    duration_seconds: jt.duration_seconds,
+    telegram_file_id: "",
+    mime_type: null,
+    has_cover: jt.cover_track_id != null,
+    origin_adder_id: null,
+    favorited_at: null,
+    has_lyrics: false,
+    created_at: "",
+  };
 }
 
 interface PlayerApi {
@@ -131,6 +193,18 @@ interface PlayerApi {
 
   /** Puts back the last track and position from a previous session. */
   restoreLast: (library: Track[]) => void;
+
+  jamMode: JamMode;
+  /** The shared-queue row the host is playing, if it came from there. */
+  jamItemId: string | null;
+  /** Bumped on every seek, so a host can report a jump the moment it happens. */
+  seekTick: number;
+  /** The element's own position, which `position` only samples. */
+  currentTime: () => number;
+  /** JamContext's hook in. Entering guest mode sets solo playback aside; leaving puts it back, paused. */
+  attachJam: (bridge: JamBridge | null) => void;
+  /** Guest only: line up with the host. */
+  followHost: (target: HostPlayback) => void;
 }
 
 const Ctx = createContext<PlayerApi | null>(null);
@@ -168,6 +242,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [sleepAt, setSleepAt] = useState<number | null>(null);
 
+  const [jamMode, setJamMode] = useState<JamMode>("solo");
+  const [jamItemId, setJamItemId] = useState<string | null>(null);
+  const [seekTick, setSeekTick] = useState(0);
+  const bridgeRef = useRef<JamBridge | null>(null);
+  const soloSnapshot = useRef<SoloSnapshot | null>(null);
+  /** A guest who paused their own ear; the host's next play doesn't override it. */
+  const guestHeld = useRef(false);
+  const lastHost = useRef<HostPlayback | null>(null);
+  // Read by the jam callbacks below, which are handed to JamContext once and
+  // must not capture the state of the render they were made in.
+  const live = useRef({ current, upNext, source, order, cursor, status });
+  live.current = { current, upNext, source, order, cursor, status };
+  const isGuest = () => bridgeRef.current?.mode === "guest";
+
   // A track already sitting in the explicit queue doesn't also show up here —
   // it would otherwise appear twice, once as something you queued and once as
   // "coming up anyway", which reads as the app not knowing its own queue.
@@ -194,8 +282,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const load = useCallback((track: Track | null, autoplay: boolean, at = 0) => {
+  const load = useCallback((track: Track | null, autoplay: boolean, at = 0, itemId: string | null = null) => {
     setCurrent(track);
+    setJamItemId(itemId);
     setPosition(at);
     setDuration(track?.duration_seconds ?? 0);
 
@@ -230,6 +319,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const advance = useCallback(
     (auto: boolean) => {
+      const bridge = bridgeRef.current;
+      // A guest's next track is whatever the host plays next.
+      if (bridge?.mode === "guest") {
+        if (auto) setIsPlaying(false);
+        return;
+      }
+      // A host's jam queue comes before their own, which waits underneath it.
+      const shared = bridge?.nextShared();
+      if (shared) {
+        load(shared.track, true, 0, shared.itemId);
+        return;
+      }
+
       // Hand-queued tracks always win, whatever the source has left.
       if (upNext.length > 0) {
         const [head, ...rest] = upNext;
@@ -258,11 +360,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const next = useCallback(() => {
+    if (isGuest()) return;
     haptic.tap();
     advance(false);
   }, [advance]);
 
   const prev = useCallback(() => {
+    if (isGuest()) return;
     haptic.tap();
     const audio = audioRef.current;
     // The universal transport convention: the first press restarts the track,
@@ -270,6 +374,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       setPosition(0);
+      setSeekTick((n) => n + 1);
       return;
     }
     if (cursor > 0) {
@@ -278,6 +383,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     } else if (audio) {
       audio.currentTime = 0;
       setPosition(0);
+      setSeekTick((n) => n + 1);
     }
   }, [cursor, order, load]);
 
@@ -285,6 +391,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const playFrom = useCallback(
     (nextSource: PlaybackContextSource, track?: Track, shuffleOverride?: boolean) => {
+      // A guest picking their own music is leaving the jam. What they picked
+      // wins over the solo state set aside on the way in, so that is dropped
+      // before the bridge can put it back.
+      const bridge = bridgeRef.current;
+      if (bridge?.mode === "guest") {
+        soloSnapshot.current = null;
+        bridgeRef.current = null;
+        lastHost.current = null;
+        setJamMode("solo");
+        bridge.leave();
+      }
       const useShuffle = shuffleOverride ?? shuffle;
       if (shuffleOverride !== undefined) setShuffleState(shuffleOverride);
       const playOrder = useShuffle ? shuffled(nextSource.tracks) : nextSource.tracks;
@@ -305,15 +422,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audio = audioRef.current;
     if (!audio || !current) return;
     haptic.tap();
+    if (isGuest()) {
+      // A guest can take their own ear out and put it back, nothing more.
+      // Coming back goes through followHost so it lands where the host is now.
+      guestHeld.current = !audio.paused;
+      if (audio.paused && lastHost.current) followHostRef.current(lastHost.current);
+      else if (!audio.paused) audio.pause();
+      return;
+    }
     if (audio.paused) playAudio(audio);
     else audio.pause();
   }, [current, playAudio]);
 
   const seek = useCallback((seconds: number) => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || isGuest()) return;
     audio.currentTime = seconds;
     setPosition(seconds);
+    setSeekTick((n) => n + 1);
   }, []);
 
   /**
@@ -323,6 +449,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
    */
   const queueNext = useCallback(
     (track: Track) => {
+      if (bridgeRef.current) {
+        bridgeRef.current.enqueue(track, true);
+        return;
+      }
       if (!current) {
         playFrom({ label: "Queue", key: `queue:${track.id}`, tracks: [track] });
         return;
@@ -337,6 +467,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const queueLast = useCallback(
     (track: Track) => {
+      if (bridgeRef.current) {
+        bridgeRef.current.enqueue(track, false);
+        return;
+      }
       if (!current) {
         playFrom({ label: "Queue", key: `queue:${track.id}`, tracks: [track] });
         return;
@@ -421,8 +555,126 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const retry = useCallback(() => {
     if (!current) return;
     haptic.tap();
-    load(current, true, position);
-  }, [current, position, load]);
+    if (isGuest()) {
+      // Wherever the host has got to by now, not where this one broke.
+      if (lastHost.current) {
+        guestHeld.current = false;
+        live.current.status = "idle";
+        followHostRef.current(lastHost.current);
+      }
+      return;
+    }
+    load(current, true, position, jamItemId);
+  }, [current, position, jamItemId, load]);
+
+  // --- Jam ------------------------------------------------------------------
+
+  const attachJam = useCallback(
+    (bridge: JamBridge | null) => {
+      const was = bridgeRef.current?.mode ?? "solo";
+      const now = bridge?.mode ?? "solo";
+      bridgeRef.current = bridge;
+      setJamMode(now);
+      if (was === now) return;
+
+      const audio = audioRef.current;
+      if (now === "guest") {
+        // Set the listener's own session aside whole, so leaving gives it back
+        // exactly — their queue included, which the jam never touches.
+        const s = live.current;
+        soloSnapshot.current = {
+          current: s.status === "unavailable" ? null : s.current,
+          upNext: s.upNext,
+          source: s.source,
+          order: s.order,
+          cursor: s.cursor,
+          position: audio?.currentTime ?? 0,
+        };
+        guestHeld.current = false;
+        setUpNext([]);
+        audio?.pause();
+        return;
+      }
+
+      if (was === "guest") {
+        const snap = soloSnapshot.current;
+        soloSnapshot.current = null;
+        lastHost.current = null;
+        guestHeld.current = false;
+        if (!snap) return;
+        setUpNext(snap.upNext);
+        setSource(snap.source);
+        setOrder(snap.order);
+        setCursor(snap.cursor);
+        // Back where they were, and quiet: the jam ending is not a reason for
+        // the phone to start playing something else on its own.
+        load(snap.current, false, snap.position);
+      }
+    },
+    [load]
+  );
+
+  const followHost = useCallback(
+    (target: HostPlayback) => {
+      if (!isGuest()) return;
+      lastHost.current = target;
+      const audio = audioRef.current;
+      if (!audio) return;
+      const jt = target.track;
+      if (!jt) {
+        // The host is between tracks. Stay on the last one, stopped.
+        audio.pause();
+        return;
+      }
+
+      const length = jt.duration_seconds ?? Infinity;
+      const at = Math.max(
+        0,
+        Math.min(
+          length,
+          target.playing ? target.position + (Date.now() - target.atMs) / 1000 : target.position
+        )
+      );
+      const { current: shown, status: shownStatus } = live.current;
+
+      if (!jt.available || !jt.track) {
+        if (shown?.id !== jt.id || shownStatus !== "unavailable") {
+          audio.pause();
+          audio.removeAttribute("src");
+          audio.load();
+          setCurrent(unavailableTrack(jt));
+          setJamItemId(null);
+          setDuration(jt.duration_seconds ?? 0);
+          setIsPlaying(false);
+          setStatus("unavailable");
+          live.current.status = "unavailable";
+        }
+        setPosition(at);
+        return;
+      }
+
+      const shouldPlay = target.playing && !guestHeld.current;
+      if (shown?.id !== jt.id || shownStatus === "unavailable" || shownStatus === "idle") {
+        load(jt.track, shouldPlay, at);
+        live.current.status = "loading";
+        return;
+      }
+      // Mid-load, the element's clock is still at zero; the seek queued by
+      // load() lands on its own, and the next poll checks the result.
+      if (shownStatus === "ready" && Math.abs(audio.currentTime - at) > JAM_DRIFT_SECONDS) {
+        audio.currentTime = at;
+        setPosition(at);
+      }
+      if (shouldPlay && audio.paused && shownStatus !== "failed") playAudio(audio);
+      if (!shouldPlay && !audio.paused) audio.pause();
+    },
+    [load, playAudio]
+  );
+  // toggle and retry come back through here, and are made before it is.
+  const followHostRef = useRef(followHost);
+  followHostRef.current = followHost;
+
+  const currentTime = useCallback(() => audioRef.current?.currentTime ?? 0, []);
 
   // --- Audio element wiring -------------------------------------------------
 
@@ -447,6 +699,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsPlaying(false);
     };
     const onEnded = () => {
+      if (isGuest()) return;
       if (repeat === "one") {
         audio.currentTime = 0;
         playAudio(audio);
@@ -588,23 +841,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [tracks, current]);
 
   /**
-   * What you are playing, while you are playing it.
+   * What you are playing, where in it, and whether it is moving.
    *
    * Sent only when the switch on your profile is on, so an account that never
    * turns it on never spends a request on it — and turning it on reports at
-   * once, because this effect re-runs on the flag. Nothing is sent on a pause:
-   * a status disappears because the server-side window closes over it, not
-   * because this client managed to send a goodbye. A Mini App that is swiped
-   * away never gets to send anything at all, so nothing may depend on one.
+   * once, because this effect re-runs on the flag. It reports on a track
+   * change, a play, a seek, the moment buffering gives way to sound, and a
+   * pause that follows a reported play, which is what lets a friend's profile
+   * draw a live progress line and take it away when you stop. None of that is
+   * load-bearing: a Mini App swiped away never sends a goodbye, so a status
+   * still disappears on its own once the server-side window closes over it.
    */
+  const reportedPlaying = useRef(false);
+  const sounding = status === "ready";
   useEffect(() => {
-    if (!listeningPublic || !current || !isPlaying) return;
+    if (!listeningPublic || !current || status === "unavailable") return;
+    if (!isPlaying && !reportedPlaying.current) return;
     const id = current.id;
-    const report = () => void setListeningStatus(id).catch(() => {});
+    const report = () => {
+      reportedPlaying.current = isPlaying;
+      void setListeningStatus(id, audioRef.current?.currentTime ?? 0, isPlaying).catch(() => {});
+    };
     report();
+    if (!isPlaying) return;
     const timer = window.setInterval(report, STATUS_HEARTBEAT_MS);
     return () => window.clearInterval(timer);
-  }, [listeningPublic, current, isPlaying]);
+    // `status` itself is read only for "unavailable"; `sounding` is the edge
+    // that matters, and following every loading flicker would double the requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listeningPublic, current, isPlaying, seekTick, sounding]);
 
   /**
    * One play per track, once it has genuinely been listened to.
@@ -634,7 +899,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const rememberPosition = useCallback(() => {
     const audio = audioRef.current;
-    if (!current || !audio) return;
+    // A guest is playing the host's music; what to resume is what was set aside.
+    if (!current || !audio || isGuest()) return;
     const state: ResumeState = { trackId: current.id, position: audio.currentTime };
     try {
       localStorage.setItem(RESUME_KEY, JSON.stringify(state));
@@ -724,8 +990,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setSleepMinutes,
       retry,
       restoreLast,
+      jamMode,
+      jamItemId,
+      seekTick,
+      currentTime,
+      attachJam,
+      followHost,
     }),
     [
+      jamMode,
+      jamItemId,
+      seekTick,
+      currentTime,
+      attachJam,
+      followHost,
       current,
       upNext,
       contextNext,
