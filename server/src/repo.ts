@@ -4359,6 +4359,12 @@ export async function setEquippedTags(
       if (Number(rows[0]?.count ?? 0) !== unique.length) return "not-unlocked";
     }
 
+    // From the first choice on, the equipped set is the user's own and the
+    // best-tag auto-equip (tagEvaluator.ts) leaves it alone for good. Taking
+    // the user row lock here is what serialises the two.
+    await client.query(`UPDATE users SET tags_customized = true WHERE telegram_user_id = $1`, [
+      telegramUserId,
+    ]);
     await client.query(`DELETE FROM user_equipped_tags WHERE telegram_user_id = $1`, [
       telegramUserId,
     ]);

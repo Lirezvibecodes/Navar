@@ -15,8 +15,8 @@
  * past its own boundary, so a tag-evaluation failure can never break the
  * primary action (a play, a save, a friend acceptance) it rides along with.
  */
-import { getPool } from "./db";
-import { TAG_BY_ID } from "./tags";
+import { getPool, withTransaction } from "./db";
+import { TAG_BY_ID, TAG_TIERS, type TagTier } from "./tags";
 
 /** Mirrors repo.ts's own splitArtists — see the note above for why it isn't imported. */
 const ARTIST_SPLIT = /\s*,\s*|\s+feat\.?\s+|\s+ft\.?\s+|\s+with\s+/gi;
@@ -37,36 +37,72 @@ const MIDNIGHT_WINDOW_END_MINUTE = 300;
 /** 04:43:30–04:44:59, collapsed to the two minute values it can round to. */
 const FOUR_FOUR_FOUR_MINUTES = new Set([283, 284]);
 
+/** TAG_TIERS is declared lowest to highest, so its key order is the ranking. */
+const TIER_RANK = Object.keys(TAG_TIERS) as TagTier[];
+
 async function unlockTags(telegramUserId: number, tagIds: string[]): Promise<void> {
   const known = tagIds.filter((id) => TAG_BY_ID.has(id));
   if (known.length === 0) return;
-  await getPool().query(
+  const { rowCount } = await getPool().query(
     `INSERT INTO user_tags (telegram_user_id, tag_id)
      SELECT $1, x FROM unnest($2::text[]) AS x
      ON CONFLICT DO NOTHING`,
     [telegramUserId, known]
   );
+  if (rowCount) await autoEquipBestTag(telegramUserId);
 }
 
 /**
- * Grants and equips the unconditional "newcomer" tag for a brand-new user, so
- * every profile has at least one tag to show from the moment it exists —
- * called once, fire-and-forget, right after ensureUser() inserts a genuinely
- * new row (repo.ts). The equip step only ever fires into an empty equipped
- * set, so it can never clobber a curated equip list on an existing user.
+ * Until a user has picked their own tags (users.tags_customized, set by
+ * setEquippedTags in repo.ts), their profile wears exactly one tag: the
+ * highest-tier one they have unlocked, the newest breaking a tie. Re-run after
+ * every fresh unlock. The user row is locked first, so a concurrent
+ * setEquippedTags either commits before the flag is read here or waits for
+ * this to finish — it can never be overwritten by it.
+ */
+async function autoEquipBestTag(telegramUserId: number): Promise<void> {
+  await withTransaction(async (client) => {
+    const { rows: userRows } = await client.query<{ tags_customized: boolean }>(
+      `SELECT tags_customized FROM users WHERE telegram_user_id = $1 FOR UPDATE`,
+      [telegramUserId]
+    );
+    if (userRows[0]?.tags_customized !== false) return;
+
+    const { rows } = await client.query<{ tag_id: string }>(
+      `SELECT tag_id FROM user_tags WHERE telegram_user_id = $1 ORDER BY unlocked_at DESC`,
+      [telegramUserId]
+    );
+    let best: string | null = null;
+    let bestRank = -1;
+    for (const { tag_id } of rows) {
+      const tag = TAG_BY_ID.get(tag_id);
+      const rank = tag ? TIER_RANK.indexOf(tag.tier) : -1;
+      if (rank > bestRank) {
+        best = tag_id;
+        bestRank = rank;
+      }
+    }
+    if (!best) return;
+
+    await client.query(`DELETE FROM user_equipped_tags WHERE telegram_user_id = $1`, [
+      telegramUserId,
+    ]);
+    await client.query(
+      `INSERT INTO user_equipped_tags (telegram_user_id, tag_id, position) VALUES ($1, $2, 0)`,
+      [telegramUserId, best]
+    );
+  });
+}
+
+/**
+ * Grants the unconditional "newcomer" tag to a brand-new user — called once,
+ * fire-and-forget, right after ensureUser() inserts a genuinely new row
+ * (repo.ts). The unlock equips it like any other, so every profile has a tag
+ * to show from the moment it exists.
  */
 export async function grantNewcomerTag(telegramUserId: number): Promise<void> {
   try {
     await unlockTags(telegramUserId, ["newcomer"]);
-    await getPool().query(
-      `INSERT INTO user_equipped_tags (telegram_user_id, tag_id, position)
-       SELECT $1, 'newcomer', 0
-       WHERE NOT EXISTS (
-         SELECT 1 FROM user_equipped_tags WHERE telegram_user_id = $1
-       )
-       ON CONFLICT DO NOTHING`,
-      [telegramUserId]
-    );
   } catch (err) {
     console.error("tag evaluation (newcomer grant) failed", err);
   }
