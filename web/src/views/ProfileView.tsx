@@ -3,7 +3,7 @@ import * as api from "../api";
 import type { Navigation } from "../App";
 import { AddFriendButton, PersonRow } from "./SocialView";
 import { Avatar } from "../components/Avatar";
-import { LiveCard, useLiveState } from "../components/Jam";
+import { LIVE_CARD_OVERLAP, LiveCard, useLiveState } from "../components/Jam";
 import { CollectionArt } from "../components/PixelArt";
 import { PersonTile } from "../components/PersonTile";
 import { RankSection } from "../components/RankSection";
@@ -206,8 +206,11 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
         style={{
           margin:
             "calc(-1 * (var(--nav-topbar-h) + var(--nav-top-inset) + 8px)) -14px 0",
-          padding:
-            "calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px 28px",
+          // A live card straddles the banner's bottom edge, so the banner
+          // makes room for the half of it that sits inside.
+          padding: `calc(var(--nav-topbar-h) + var(--nav-top-inset) + 28px) 16px ${
+            28 + (isLive ? LIVE_CARD_OVERLAP : 0)
+          }px`,
         }}
       >
         {/* A pixelated wash of the header's chosen track, under everything

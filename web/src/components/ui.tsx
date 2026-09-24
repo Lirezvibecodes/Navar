@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { haptic } from "../telegram";
-import { ArrowRightIcon, PlayNextIcon, QueueAddIcon, type IconProps } from "../icons";
+import { ArrowRightIcon, CloseIcon, PlayNextIcon, QueueAddIcon, type IconProps } from "../icons";
 import { backdropCss, type Palette } from "../lib/palette";
 
 /**
@@ -1006,6 +1006,10 @@ export function Portal({ children }: { children: ReactNode }) {
  *
  * It animates out as well as in, which is why the open state is held here
  * rather than by the caller: unmounting on close would make it disappear.
+ *
+ * `floating` is the other shape: a card inset from the screen's edges and
+ * rounded all round, with an X instead of a grabber — for a question asked of
+ * you (join, accept) rather than a list of actions.
  */
 /** Matches the exit transitions below — --dur-state (200ms) plus a frame, so
  *  the sheet unmounts after it has finished leaving rather than during. */
@@ -1016,11 +1020,15 @@ export function Sheet({
   onClose,
   title,
   children,
+  floating = false,
+  closeButton = floating,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  floating?: boolean;
+  closeButton?: boolean;
 }) {
   const [mounted, setMounted] = useState(open);
   const closing = mounted && !open;
@@ -1057,6 +1065,7 @@ export function Sheet({
           display: "flex",
           flexDirection: "column",
           justifyContent: "flex-end",
+          padding: floating ? "0 14px calc(var(--tg-safe-bottom) + 14px)" : undefined,
         }}
       >
         <button
@@ -1084,27 +1093,61 @@ export function Sheet({
             // the items scroll is what keeps the last one reachable — it used
             // to run off the top of the screen instead.
             maxHeight: "calc(100% - var(--nav-top-inset) - 44px)",
-            padding: "10px 8px",
+            padding: floating ? "22px 6px 20px" : "10px 8px",
             // The device inset plus a thumb's worth of room. The nav and the
             // player are underneath this sheet now rather than on top of it,
-            // so nothing here has to dodge them.
-            paddingBottom: "calc(var(--tg-safe-bottom) + 14px)",
-            transform: closing ? "translateY(100%)" : undefined,
+            // so nothing here has to dodge them. A floating card already sits
+            // above the inset, on its container's padding.
+            paddingBottom: floating ? undefined : "calc(var(--tg-safe-bottom) + 14px)",
+            ...(floating
+              ? {
+                  borderRadius: 24,
+                  border: "1px solid var(--glass-rim-top)",
+                  boxShadow: "0 18px 50px rgba(0,0,0,.6)",
+                }
+              : null),
+            transform: closing
+              ? floating
+                ? "translateY(calc(100% + 14px + var(--tg-safe-bottom)))"
+                : "translateY(100%)"
+              : undefined,
             transition: closing
               ? "transform var(--dur-state) var(--ease-in)"
               : undefined,
           }}
         >
-          <div
-            style={{
-              width: 38,
-              height: 4,
-              borderRadius: 2,
-              flex: "none",
-              background: "var(--color-nav-ghost)",
-              margin: "2px auto 10px",
-            }}
-          />
+          {floating ? null : (
+            <div
+              style={{
+                width: 38,
+                height: 4,
+                borderRadius: 2,
+                flex: "none",
+                background: "var(--color-nav-ghost)",
+                margin: "2px auto 10px",
+              }}
+            />
+          )}
+          {closeButton ? (
+            <button
+              aria-label="Close"
+              className="nav-press"
+              onClick={onClose}
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                zIndex: 1,
+                width: 36,
+                height: 36,
+                display: "grid",
+                placeItems: "center",
+                color: "var(--color-nav-muted)",
+              }}
+            >
+              <CloseIcon size={16} />
+            </button>
+          ) : null}
           {title ? (
             <div
               className="nav-clip"

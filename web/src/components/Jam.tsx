@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { getLiveState } from "../api";
 import { Avatar } from "./Avatar";
 import { Cover } from "./PixelArt";
-import { GhostButton, Sheet, SheetItem, TextField } from "./ui";
+import { Sheet, SheetItem, TextField } from "./ui";
 import { AddToPlaylistSheet, useKeepTrack } from "./TrackMenu";
 import {
   ArrowDownIcon,
@@ -40,6 +40,12 @@ const LIVE_POLL_MS = 25_000;
 const REQUEST_GRACE_MS = 5_000;
 
 const JAM_GRADIENT = "linear-gradient(90deg, var(--color-nav-jam), var(--color-nav-action))";
+
+/** How far the live card on a profile reaches up into the banner above it. */
+export const LIVE_CARD_OVERLAP = 45;
+
+/** Height of both buttons at the foot of a jam sheet: the answer and the way out match. */
+const SHEET_BUTTON_H = 54;
 
 // --- Time -------------------------------------------------------------------------
 
@@ -124,39 +130,67 @@ export function JamButton({
         justifyContent: "center",
         gap: 8,
         width: "100%",
-        height: 46,
-        borderRadius: 23,
+        height: SHEET_BUTTON_H,
+        borderRadius: SHEET_BUTTON_H / 2,
         background: JAM_GRADIENT,
         color: "#0A0A0A",
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 600,
         letterSpacing: "-0.01em",
         opacity: disabled ? 0.45 : 1,
-        boxShadow: "0 8px 26px rgba(var(--color-nav-jam-rgb),.32)",
+        boxShadow:
+          "0 0 24px rgba(var(--color-nav-jam-rgb),.42), 0 8px 26px rgba(var(--color-nav-action-rgb),.2)",
       }}
     >
-      <Icon size={16} />
+      <Icon size={18} />
       {children}
     </button>
   );
 }
 
-/** The small track card inside the join and approval sheets. */
-function SheetTrackCard({ track, position }: { track: JamTrack; position: number }) {
+/** The dark pill under a jam sheet's gradient button: same size, no colour. */
+function SheetSecondary({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      className="nav-press"
+      disabled={disabled}
+      onClick={() => {
+        haptic.tap();
+        onClick();
+      }}
+      style={{
+        width: "100%",
+        height: SHEET_BUTTON_H,
+        borderRadius: SHEET_BUTTON_H / 2,
+        background: "rgba(255,255,255,.055)",
+        border: "1px solid rgba(255,255,255,.07)",
+        color: "rgba(255,255,255,.82)",
+        fontSize: 16,
+        fontWeight: 500,
+        opacity: disabled ? 0.45 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** The track card inside the join and approval sheets. */
+function SheetTrackCard({ track, position, cover = 72 }: { track: JamTrack; position: number; cover?: number }) {
   return (
     <div
       className="nav-glass"
-      style={{ display: "flex", alignItems: "center", gap: 12, padding: 10, borderRadius: 14, textAlign: "left" }}
+      style={{ display: "flex", alignItems: "center", gap: 14, padding: 12, borderRadius: 16, textAlign: "left" }}
     >
-      <JamCover track={track} size={58} radius={8} />
+      <JamCover track={track} size={cover} radius={8} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="nav-clip" style={{ fontSize: 13.5, fontWeight: 600 }}>
+        <div className="nav-clip" style={{ fontSize: 15, fontWeight: 600 }}>
           {track.title ?? "Untitled"}
         </div>
-        <div className="nav-clip" style={{ fontSize: 12, color: "var(--color-nav-muted)", marginTop: 1 }}>
+        <div className="nav-clip" style={{ fontSize: 13, color: "var(--color-nav-muted)", marginTop: 2 }}>
           {track.artist ?? "Unknown artist"}
         </div>
-        <div style={{ fontSize: 11, color: "var(--color-nav-faint)", margin: "3px 0 6px" }}>
+        <div style={{ fontSize: 12, color: "var(--color-nav-faint)", margin: "4px 0 8px" }}>
           <span className="nav-numeral">
             {formatDuration(position)} / {formatDuration(track.duration_seconds)}
           </span>
@@ -172,7 +206,7 @@ function SheetHead({ badge, title, children }: { badge: ReactNode; title: string
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "4px 14px 0" }}>
       {badge}
-      <div style={{ fontSize: 17, fontWeight: 600, marginTop: 14, letterSpacing: "-0.01em" }}>{title}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, marginTop: 16, letterSpacing: "-0.015em" }}>{title}</div>
       {children}
     </div>
   );
@@ -180,7 +214,7 @@ function SheetHead({ badge, title, children }: { badge: ReactNode; title: string
 
 function Copy({ children }: { children: ReactNode }) {
   return (
-    <p style={{ fontSize: 13, lineHeight: 1.45, color: "var(--color-nav-muted)", margin: "8px 0 0", maxWidth: 290 }}>
+    <p style={{ fontSize: 14, lineHeight: 1.5, color: "var(--color-nav-muted)", margin: "12px 0 0", maxWidth: 300 }}>
       {children}
     </p>
   );
@@ -192,14 +226,15 @@ function WaveBadge() {
       style={{
         display: "grid",
         placeItems: "center",
-        width: 56,
-        height: 56,
+        width: 64,
+        height: 64,
         borderRadius: "50%",
         background: "rgba(var(--color-nav-jam-rgb),.14)",
+        boxShadow: "0 0 26px rgba(var(--color-nav-jam-rgb),.22)",
         color: "var(--color-nav-jam)",
       }}
     >
-      <WaveIcon size={26} />
+      <WaveIcon size={30} />
     </div>
   );
 }
@@ -213,9 +248,9 @@ function WaitingBadge() {
     border: `1px solid rgba(var(--color-nav-jam-rgb),${alpha})`,
   });
   return (
-    <div style={{ position: "relative", width: 132, height: 132 }}>
-      <div style={ring(0, 0.12)} />
-      <div style={ring(14, 0.2)} />
+    <div style={{ position: "relative", width: 176, height: 176 }}>
+      <div style={ring(0, 0.1)} />
+      <div style={ring(20, 0.18)} />
       <div
         className="nav-spin"
         style={{
@@ -230,7 +265,7 @@ function WaitingBadge() {
       <div
         style={{
           position: "absolute",
-          inset: 32,
+          inset: 44,
           borderRadius: "50%",
           display: "grid",
           placeItems: "center",
@@ -240,14 +275,14 @@ function WaitingBadge() {
           color: "#fff",
         }}
       >
-        <SocialIcon size={28} />
+        <SocialIcon size={36} />
       </div>
     </div>
   );
 }
 
 function SheetActions({ children }: { children: ReactNode }) {
-  return <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "18px 14px 4px" }}>{children}</div>;
+  return <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "24px 14px 0" }}>{children}</div>;
 }
 
 // --- A friend's live state ------------------------------------------------------------
@@ -373,7 +408,10 @@ export function LiveCard({
           display: "flex",
           alignItems: "center",
           gap: 12,
+          position: "relative",
+          zIndex: 1,
           padding: 11,
+          marginTop: -LIVE_CARD_OVERLAP,
           marginBottom: 20,
           borderRadius: 14,
           border: "1px solid transparent",
@@ -454,7 +492,7 @@ function JamPill({ children, onClick, disabled }: { children: ReactNode; onClick
         padding: "0 13px",
         borderRadius: 18,
         border: "1.5px solid transparent",
-        background: `linear-gradient(rgba(28,20,40,1), rgba(28,20,40,1)) padding-box, ${JAM_GRADIENT} border-box`,
+        background: `linear-gradient(rgba(28,20,40,1), rgba(28,20,40,1)) padding-box, linear-gradient(90deg, var(--color-nav-action), var(--color-nav-jam)) border-box`,
         color: "var(--color-nav-jam-soft)",
         fontSize: 13,
         fontWeight: 600,
@@ -499,13 +537,13 @@ function JoinSheet({
   };
 
   return (
-    <Sheet open={open} onClose={onClose}>
+    <Sheet floating open={open} onClose={onClose}>
       <SheetHead badge={<WaveBadge />} title="Join the Jam">
-        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 10 }}>Join {name}'s listening session?</div>
+        <div style={{ fontSize: 16, fontWeight: 600, marginTop: 14 }}>Join {name}'s listening session?</div>
         <Copy>You'll start listening to their current track and stay in the jam for the next songs in the queue.</Copy>
       </SheetHead>
       {shown ? (
-        <div style={{ padding: "16px 14px 0" }}>
+        <div style={{ padding: "20px 14px 0" }}>
           <SheetTrackCard
             track={shown.track}
             position={positionNow(
@@ -522,9 +560,7 @@ function JoinSheet({
         <JamButton disabled={busy} onClick={() => void join()}>
           Join Them
         </JamButton>
-        <GhostButton height={44} onClick={onClose}>
-          Cancel
-        </GhostButton>
+        <SheetSecondary onClick={onClose}>Cancel</SheetSecondary>
       </SheetActions>
     </Sheet>
   );
@@ -626,21 +662,19 @@ export function JamSheets({ onJoined }: { onJoined: () => void }) {
 
   return (
     <>
-      <Sheet open={waitingOpen} onClose={() => pending && setHiddenOutgoing(pending.id)}>
+      <Sheet floating closeButton={false} open={waitingOpen} onClose={() => pending && setHiddenOutgoing(pending.id)}>
         <SheetHead badge={<WaitingBadge />} title="Waiting for approval">
           <Copy>
             Your request has been sent to {personName(waitingOn?.host)}. They'll see it in Navaar and can accept or
             decline.
           </Copy>
         </SheetHead>
-        <SheetActions>
-          <GhostButton height={44} onClick={() => void cancelRequest()}>
-            Cancel Request
-          </GhostButton>
-        </SheetActions>
+        <div style={{ display: "flex", padding: "36px 14px 0" }}>
+          <SheetSecondary onClick={() => void cancelRequest()}>Cancel</SheetSecondary>
+        </div>
       </Sheet>
 
-      <Sheet open={asking != null} onClose={() => asking && dismiss(asking.id)}>
+      <Sheet floating open={asking != null} onClose={() => asking && dismiss(asking.id)}>
         {shownAsk ? (
           <>
             <SheetHead
@@ -649,31 +683,31 @@ export function JamSheets({ onJoined }: { onJoined: () => void }) {
                   userId={shownAsk.requester.telegram_user_id}
                   username={shownAsk.requester.handle ?? shownAsk.requester.username}
                   hasAvatar={shownAsk.requester.has_avatar}
-                  size={64}
+                  size={80}
                 />
               }
               title={personName(shownAsk.requester)}
             >
-              <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>wants to join your jam</div>
+              <div style={{ fontSize: 16, fontWeight: 600, marginTop: 6 }}>wants to join your jam</div>
               {listeners > 1 ? (
                 <Copy>{listeners} of 4 already listening.</Copy>
               ) : null}
             </SheetHead>
             {hostTrack ? (
-              <div style={{ padding: "16px 14px 0" }}>
-                <div style={{ fontSize: 12, color: "var(--color-nav-muted)", marginBottom: 8 }}>
+              <div style={{ padding: "22px 14px 0" }}>
+                <div style={{ fontSize: 14, color: "var(--color-nav-muted)", marginBottom: 10 }}>
                   You're currently listening to:
                 </div>
-                <SheetTrackCard track={hostTrack} position={position} />
+                <SheetTrackCard track={hostTrack} position={position} cover={60} />
               </div>
             ) : null}
             <SheetActions>
               <JamButton disabled={answering} onClick={() => void answer(shownAsk.id, true)}>
                 Accept
               </JamButton>
-              <GhostButton height={44} disabled={answering} onClick={() => void answer(shownAsk.id, false)}>
+              <SheetSecondary disabled={answering} onClick={() => void answer(shownAsk.id, false)}>
                 Decline
-              </GhostButton>
+              </SheetSecondary>
             </SheetActions>
           </>
         ) : null}
@@ -690,6 +724,29 @@ function isMe(person: Person, meId: number | string | undefined): boolean {
   return meId != null && person.telegram_user_id === String(meId);
 }
 
+/** Everyone in the jam, as a row of overlapping faces. */
+function JamFaces({ size, ring }: { size: number; ring: string }) {
+  const { jam } = useJam();
+  if (!jam) return null;
+  return (
+    <span style={{ display: "flex", flex: "none" }}>
+      {jam.participants.slice(0, JAM_MAX).map((p, i) => (
+        <span
+          key={p.person.telegram_user_id}
+          style={{ marginLeft: i === 0 ? 0 : -Math.round(size / 3), borderRadius: "50%", boxShadow: `0 0 0 2px ${ring}` }}
+        >
+          <Avatar
+            userId={p.person.telegram_user_id}
+            username={personName(p.person)}
+            hasAvatar={p.person.has_avatar}
+            size={size}
+          />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** Replaces "Playing from …" in the player's header while in a jam. */
 export function JamHeader() {
   const { jam } = useJam();
@@ -702,21 +759,7 @@ export function JamHeader() {
     <span
       style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
     >
-      <span style={{ display: "flex", flex: "none" }}>
-        {jam.participants.slice(0, JAM_MAX).map((p, i) => (
-          <span
-            key={p.person.telegram_user_id}
-            style={{ marginLeft: i === 0 ? 0 : -6, borderRadius: "50%", boxShadow: "0 0 0 2px var(--color-nav-bg)" }}
-          >
-            <Avatar
-              userId={p.person.telegram_user_id}
-              username={personName(p.person)}
-              hasAvatar={p.person.has_avatar}
-              size={18}
-            />
-          </span>
-        ))}
-      </span>
+      <JamFaces size={18} ring="var(--color-nav-bg)" />
       <span
         className="nav-clip"
         style={{
@@ -727,7 +770,7 @@ export function JamHeader() {
           color: "var(--color-nav-jam-soft)",
         }}
       >
-        {lead ? `Jamming with @${personName(lead)}` : "Jam open"}
+        {lead ? `Jamming with ${personName(lead)}` : "Jam open"}
       </span>
       <span className="nav-numeral" style={{ flex: "none", fontSize: 11, color: "var(--color-nav-action)" }}>
         {jam.participants.length}/{JAM_MAX}
@@ -745,6 +788,26 @@ const JAM_EYEBROW: React.CSSProperties = {
   marginBottom: 4,
 };
 
+type JamConfirm = { kind: "end" | "leave" } | { kind: "remove"; person: Person };
+
+const CONFIRM_COPY: Record<JamConfirm["kind"], { title: (c: JamConfirm) => string; body: string; action: string }> = {
+  end: {
+    title: () => "End the jam?",
+    body: "Everyone goes back to their own music, and the jam queue is cleared.",
+    action: "End Jam",
+  },
+  leave: {
+    title: () => "Leave the jam?",
+    body: "You go back to your own music. You'd have to ask to join again.",
+    action: "Leave Jam",
+  },
+  remove: {
+    title: (c) => `Remove ${c.kind === "remove" ? personName(c.person) : "them"} from the jam?`,
+    body: "They go back to their own music, and can ask to join again.",
+    action: "Remove",
+  },
+};
+
 /**
  * The shared queue, in place of the player's own while in a jam: what is
  * playing, what comes next and who put it there, who is listening, and the
@@ -759,7 +822,11 @@ export function JamQueuePane() {
   const [adding, setAdding] = useState(false);
   const [rowMenu, setRowMenu] = useState<JamQueueItem | null>(null);
   const [filing, setFiling] = useState<Track | null>(null);
-  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [confirm, setConfirm] = useState<JamConfirm | null>(null);
+  // Kept while the sheet animates out, so its words do not vanish first.
+  const lastConfirm = useRef(confirm);
+  if (confirm) lastConfirm.current = confirm;
+  const asked = lastConfirm.current;
   if (!jam) return null;
 
   const hosting = jam.role === "host";
@@ -791,11 +858,11 @@ export function JamQueuePane() {
             height: 32,
             padding: "0 12px",
             borderRadius: 16,
-            background: "var(--color-nav-jam)",
+            background: "var(--color-nav-action)",
             color: "#0A0A0A",
             fontSize: 12,
             fontWeight: 600,
-            boxShadow: "0 0 18px rgba(var(--color-nav-jam-rgb),.3)",
+            boxShadow: "0 0 18px rgba(var(--color-nav-action-rgb),.3)",
           }}
         >
           <PlusIcon size={13} />
@@ -818,16 +885,19 @@ export function JamQueuePane() {
         >
           <Cover trackId={current.id} hasCover={current.has_cover} size={58} radius={8} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 9.5,
-                fontWeight: 600,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--color-nav-action)",
-              }}
-            >
-              {unavailable ? "Track unavailable" : "Now playing"}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 600,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  color: "var(--color-nav-action)",
+                }}
+              >
+                {unavailable ? "Track unavailable" : "Now playing"}
+              </span>
+              <JamFaces size={18} ring="#0c0c0f" />
             </div>
             <div className="nav-clip" style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>
               {trackTitle(current)}
@@ -866,7 +936,7 @@ export function JamQueuePane() {
             key={item.id}
             item={item}
             index={i}
-            addedBy={mine(item) ? "You" : `@${personName(item.added_by)}`}
+            addedBy={mine(item) ? "You" : personName(item.added_by)}
             onMenu={hasMenu(item) ? () => setRowMenu(item) : undefined}
           />
         ))
@@ -884,7 +954,7 @@ export function JamQueuePane() {
             size={30}
           />
           <span className="nav-clip" style={{ flex: 1, fontSize: 13.5 }}>
-            {isMe(p.person, me?.id) ? "You" : `@${personName(p.person)}`}
+            {isMe(p.person, me?.id) ? "You" : personName(p.person)}
           </span>
           {p.role === "host" ? (
             <span
@@ -901,10 +971,10 @@ export function JamQueuePane() {
           ) : hosting ? (
             <button
               className="nav-press"
-              aria-label={`Remove @${personName(p.person)} from the jam`}
+              aria-label={`Remove ${personName(p.person)} from the jam`}
               onClick={() => {
-                haptic.warning();
-                void removeParticipant(p.person.telegram_user_id);
+                haptic.tap();
+                setConfirm({ kind: "remove", person: p.person });
               }}
               style={{ width: 40, height: 40, display: "grid", placeItems: "center", color: "var(--color-nav-muted)" }}
             >
@@ -945,15 +1015,32 @@ export function JamQueuePane() {
           <div className="nav-clip" style={{ fontSize: 11.5, color: "rgba(255,255,255,.7)", marginTop: 1 }}>
             {others.length === 0
               ? "Waiting for somebody to join"
-              : `You and ${others.map((p) => `@${personName(p.person)}`).join(", ")} are listening together`}
+              : `You and ${others.map((p) => personName(p.person)).join(", ")} are listening together`}
           </div>
         </div>
       </div>
 
-      <div style={{ display: "flex", marginTop: 12 }}>
-        <GhostButton height={44} onClick={() => (hosting ? setConfirmEnd(true) : void leave())}>
+      {/* Small and set apart: the way out should be findable, not somewhere a
+          thumb lands on its way to the queue. */}
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
+        <button
+          className="nav-press"
+          onClick={() => {
+            haptic.tap();
+            setConfirm({ kind: hosting ? "end" : "leave" });
+          }}
+          style={{
+            height: 30,
+            padding: "0 14px",
+            borderRadius: 15,
+            border: "1px solid rgba(255,255,255,.1)",
+            color: "var(--color-nav-muted)",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
           {hosting ? "End Jam" : "Leave Jam"}
-        </GhostButton>
+        </button>
       </div>
 
       <AddSongSheet open={adding} onClose={() => setAdding(false)} />
@@ -1014,17 +1101,19 @@ export function JamQueuePane() {
 
       <AddToPlaylistSheet tracks={filing ? [filing] : []} playlists={playlists} onClose={() => setFiling(null)} />
 
-      <Sheet open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End the jam?">
+      <Sheet open={confirm != null} onClose={() => setConfirm(null)} title={asked ? CONFIRM_COPY[asked.kind].title(asked) : ""}>
         <p style={{ fontSize: 13, color: "var(--color-nav-muted)", margin: "0 14px 12px", lineHeight: 1.45 }}>
-          Everyone goes back to their own music, and the jam queue is cleared.
+          {asked ? CONFIRM_COPY[asked.kind].body : null}
         </p>
         <SheetItem
           icon={CloseIcon}
-          label="End Jam"
+          label={asked ? CONFIRM_COPY[asked.kind].action : ""}
           destructive
           onClick={() => {
-            setConfirmEnd(false);
-            void leave();
+            setConfirm(null);
+            haptic.warning();
+            if (asked?.kind === "remove" && asked.person) void removeParticipant(asked.person.telegram_user_id);
+            else void leave();
           }}
         />
       </Sheet>
