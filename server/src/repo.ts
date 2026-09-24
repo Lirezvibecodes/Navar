@@ -381,11 +381,20 @@ export async function areFriends(a: number, b: number): Promise<boolean> {
 }
 
 /**
+ * A jam whose host has not been heard from in this long has gone. Lives here
+ * rather than in jam.ts because the visibility rule below reads it too, and a
+ * jam that has lapsed must stop sharing its songs even before a sweep marks it
+ * ended.
+ */
+export const JAM_HOST_STALE_SECONDS = 120;
+
+/**
  * Whether a requester may have this track at all.
  *
- * Four ways in, and no fifth: they own it, it is in a link-shared playlist, it
- * is in a playlist an accepted friend opened up, or it is in a group crate for
- * a chat they have been seen in. All four are one expression so that a
+ * Five ways in, and no sixth: they own it, it is in a link-shared playlist, it
+ * is in a playlist an accepted friend opened up, it is in a group crate for a
+ * chat they have been seen in, or it is on — or playing in — a jam they are
+ * listening in. All five are one expression so that a
  * partially-evaluated chain of application-code checks can never leak a track
  * the last check would have refused — and so the read path and the save path
  * cannot drift into two different answers to the same question. Both arguments
@@ -422,6 +431,26 @@ export function trackVisibleTo(viewer: string, track: string): string {
               WHERE gm.group_chat_id = p.group_chat_id
                 AND gm.telegram_user_id = ${viewer}
             )
+          )
+        )
+    )
+
+    -- A jam the requester is in: the queue is a playlist everyone in it
+    -- shares, and so is whatever it is playing. Leaving, being removed or the
+    -- jam ending takes the access away again.
+    OR EXISTS (
+      SELECT 1
+      FROM jam_participants jp
+      JOIN jam_sessions js ON js.id = jp.jam_id
+      WHERE jp.telegram_user_id = ${viewer}
+        AND jp.status = 'active'
+        AND js.status = 'active'
+        AND js.host_seen_at >= now() - interval '${JAM_HOST_STALE_SECONDS} seconds'
+        AND (
+          js.current_track_id = ${track}.id
+          OR EXISTS (
+            SELECT 1 FROM jam_queue jq
+            WHERE jq.jam_id = js.id AND jq.track_id = ${track}.id AND jq.status = 'queued'
           )
         )
     )

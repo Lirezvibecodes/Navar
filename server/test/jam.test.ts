@@ -1,7 +1,8 @@
 /**
  * Jam Mode's authorization and lifecycle. A jam is several people's clients
  * acting on one shared row, so what matters is who may do what to it, that
- * joining never hands anybody a track they could not already play, and that
+ * joining alone never hands anybody a track they could not already play —
+ * only a song somebody put on the jam, and only while it is there — and that
  * every open state — a request, a guest, the jam itself — closes on its own
  * when time says it should.
  *
@@ -282,12 +283,13 @@ describe("jam mode", { skip: TEST_DATABASE_URL ? false : "TEST_DATABASE_URL is n
       );
     });
 
-    test("a guest is not handed a track they could not play alone", async () => {
+    test("what the host plays is shared with the jam while it plays", async () => {
       unwrap(await jam.syncJam(HOST, { trackId: tracks.hostPrivate, itemId: null, position: 3, playing: true }));
       const playback = (await jam.getJamState(G1)).jam!.playback;
       assert.equal(playback.track?.id, tracks.hostPrivate);
-      assert.equal(playback.track?.available, false);
-      assert.equal(playback.track?.track, null);
+      assert.equal(playback.track?.available, true);
+      assert.equal(playback.track?.track?.id, tracks.hostPrivate);
+      assert.equal(playback.track?.track?.telegram_file_id, "");
       unwrap(await jam.syncJam(HOST, { trackId: tracks.hostShared, itemId: null, position: 3, playing: true }));
     });
 
@@ -298,14 +300,14 @@ describe("jam mode", { skip: TEST_DATABASE_URL ? false : "TEST_DATABASE_URL is n
       );
     });
 
-    test("queue: add, duplicate, visibility to the host, and who added it", async () => {
+    test("queue: add, duplicate, the adder's own access, and who added it", async () => {
       unwrap(await jam.addToJamQueue(G1, tracks.g1Shared, false));
       assert.deepEqual(await jam.addToJamQueue(G1, tracks.g1Shared, false), {
         ok: false,
         error: "duplicate",
       });
-      // The host could not start it, so it cannot go on.
-      assert.deepEqual(await jam.addToJamQueue(G1, tracks.g1Private, false), {
+      // Nobody can put on what they could not play themselves.
+      assert.deepEqual(await jam.addToJamQueue(G1, tracks.hostPrivate, false), {
         ok: false,
         error: "forbidden",
       });
@@ -335,6 +337,26 @@ describe("jam mode", { skip: TEST_DATABASE_URL ? false : "TEST_DATABASE_URL is n
       unwrap(await jam.removeFromJamQueue(G1, g1Item));
       unwrap(await jam.removeFromJamQueue(HOST, hostItem));
       assert.equal((await jam.getJamState(HOST)).jam!.queue.length, 0);
+    });
+
+    test("a private song on the queue is shared with the jam, and only while it is there", async () => {
+      assert.equal(await repo.getTrackForListener(tracks.g1Private, HOST), null);
+      unwrap(await jam.addToJamQueue(G1, tracks.g1Private, false));
+      const item = (await jam.getJamState(HOST)).jam!.queue[0];
+      assert.equal(item.track.available, true);
+      assert.ok(await repo.getTrackForListener(tracks.g1Private, HOST));
+      assert.equal(await repo.getTrackForListener(tracks.g1Private, STRANGER), null);
+
+      // The host can play it, and anyone in the jam can keep a copy.
+      unwrap(await jam.syncJam(HOST, { trackId: tracks.g1Private, itemId: item.id, position: 0, playing: true }));
+      const copy = await repo.saveTrackToLibrary(tracks.g1Private, HOST);
+      assert.ok(copy);
+      assert.equal(copy.track.owner_telegram_id, String(HOST));
+
+      // Once it has moved on, the original is private again; the copy stays.
+      unwrap(await jam.syncJam(HOST, { trackId: tracks.hostShared, itemId: null, position: 0, playing: true }));
+      assert.equal(await repo.getTrackForListener(tracks.g1Private, HOST), null);
+      assert.ok(await repo.getTrackForListener(copy.track.id, HOST));
     });
 
     test("syncing a queue item consumes it", async () => {

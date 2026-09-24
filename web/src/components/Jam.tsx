@@ -4,12 +4,15 @@ import { getLiveState } from "../api";
 import { Avatar } from "./Avatar";
 import { Cover } from "./PixelArt";
 import { GhostButton, Sheet, SheetItem, TextField } from "./ui";
+import { AddToPlaylistSheet, useKeepTrack } from "./TrackMenu";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
   CloseIcon,
   DotsIcon,
+  LibraryIcon,
+  PlaylistIcon,
   PlusIcon,
   SocialIcon,
   TrashIcon,
@@ -22,7 +25,7 @@ import { useToast } from "../context/ToastContext";
 import { useLibrary } from "../context/LibraryContext";
 import { formatDuration, personName, trackArtist, trackTitle } from "../lib/format";
 import { haptic } from "../telegram";
-import type { JamQueueItem, JamTrack, LiveState, Person } from "../types";
+import type { JamQueueItem, JamTrack, LiveState, Person, Track } from "../types";
 
 /**
  * Jam Mode's own pieces: the live card on a friend's profile, and the three
@@ -751,9 +754,11 @@ const JAM_EYEBROW: React.CSSProperties = {
 export function JamQueuePane() {
   const { jam, leave, removeParticipant, removeQueueItem, moveQueueItem } = useJam();
   const { current, position, duration, isPlaying, status } = usePlayer();
-  const { me } = useLibrary();
+  const { me, owns, playlists } = useLibrary();
+  const keep = useKeepTrack();
   const [adding, setAdding] = useState(false);
   const [rowMenu, setRowMenu] = useState<JamQueueItem | null>(null);
+  const [filing, setFiling] = useState<Track | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
   if (!jam) return null;
 
@@ -763,6 +768,10 @@ export function JamQueuePane() {
   const mine = (item: JamQueueItem) => isMe(item.added_by, me?.id);
   const canRemove = (item: JamQueueItem) => hosting || mine(item);
   const menuIndex = rowMenu ? jam.queue.findIndex((q) => q.id === rowMenu.id) : -1;
+  // The queue is a playlist everyone in the jam shares: any song on it can be
+  // kept, whoever put it there.
+  const menuTrack = rowMenu?.track.track ?? null;
+  const hasMenu = (item: JamQueueItem) => item.track.track != null || canRemove(item);
 
   return (
     <div className="nav-scroll" style={{ flex: 1, minHeight: 0, padding: "4px 14px 14px" }}>
@@ -858,7 +867,7 @@ export function JamQueuePane() {
             item={item}
             index={i}
             addedBy={mine(item) ? "You" : `@${personName(item.added_by)}`}
-            onMenu={canRemove(item) ? () => setRowMenu(item) : undefined}
+            onMenu={hasMenu(item) ? () => setRowMenu(item) : undefined}
           />
         ))
       )}
@@ -950,6 +959,26 @@ export function JamQueuePane() {
       <AddSongSheet open={adding} onClose={() => setAdding(false)} />
 
       <Sheet open={rowMenu != null} onClose={() => setRowMenu(null)} title={rowMenu?.track.title ?? "Song"}>
+        {menuTrack && !owns(menuTrack) ? (
+          <SheetItem
+            icon={LibraryIcon}
+            label="Save to my Crate"
+            onClick={() => {
+              setRowMenu(null);
+              void keep.save(menuTrack);
+            }}
+          />
+        ) : null}
+        {menuTrack ? (
+          <SheetItem
+            icon={PlaylistIcon}
+            label="Add to playlist"
+            onClick={() => {
+              setRowMenu(null);
+              void keep.fileable(menuTrack).then(setFiling);
+            }}
+          />
+        ) : null}
         {hosting && menuIndex > 0 ? (
           <SheetItem
             icon={ArrowUpIcon}
@@ -982,6 +1011,8 @@ export function JamQueuePane() {
           />
         ) : null}
       </Sheet>
+
+      <AddToPlaylistSheet tracks={filing ? [filing] : []} playlists={playlists} onClose={() => setFiling(null)} />
 
       <Sheet open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End the jam?">
         <p style={{ fontSize: 13, color: "var(--color-nav-muted)", margin: "0 14px 12px", lineHeight: 1.45 }}>

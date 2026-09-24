@@ -3,6 +3,7 @@ import { getPool, withTransaction } from "./db";
 import {
   canSeePerson,
   HAS_COVER_T,
+  JAM_HOST_STALE_SECONDS,
   LIVE_T,
   personColumns,
   personFrom,
@@ -24,8 +25,6 @@ import type { Track } from "./types";
  * next read to do the sweeping.
  */
 
-/** A host whose client has not been heard from in this long has gone; the jam ends. */
-const HOST_STALE_SECONDS = 120;
 /** A guest not heard from in this long is counted as having left. */
 const GUEST_STALE_SECONDS = 120;
 /** How long a join request waits for an answer before it lapses. */
@@ -178,7 +177,7 @@ const FRIENDS = (a: string, b: string) => `EXISTS (
 export async function expireJamState(q: Queryable = getPool()): Promise<void> {
   await q.query(
     `UPDATE jam_sessions SET status = 'ended', ended_at = now()
-     WHERE status = 'active' AND host_seen_at < now() - interval '${HOST_STALE_SECONDS} seconds'`
+     WHERE status = 'active' AND host_seen_at < now() - interval '${JAM_HOST_STALE_SECONDS} seconds'`
   );
   await q.query(
     `UPDATE jam_participants SET status = 'left', left_at = now()
@@ -779,10 +778,10 @@ export async function removeJamParticipant(
 }
 
 /**
- * Put a track on the shared queue. It has to be one the adder may play and
- * one the host may play — the host's client is what actually starts it, so a
- * track the host cannot open would stall the jam. Other guests who cannot
- * open it see it as unavailable rather than being handed it.
+ * Put a track on the shared queue. It only has to be one the adder may play:
+ * once it is on, `trackVisibleTo` lets everyone in the jam — the host, whose
+ * client starts it, included — play it and keep a copy, for as long as it is
+ * queued or playing and they are still in the jam.
  */
 export async function addToJamQueue(
   userId: number,
@@ -793,17 +792,13 @@ export async function addToJamQueue(
   return withTransaction(async (c) => {
     const member = await membershipOf(c, userId);
     if (!member) return fail<null>("not_found");
-    const jam = await c.query<{ host: string }>(
-      `SELECT host_telegram_id AS host FROM jam_sessions WHERE id = $1 FOR UPDATE`,
-      [member.jam_id]
-    );
-    const hostId = Number(jam.rows[0].host);
+    await c.query(`SELECT 1 FROM jam_sessions WHERE id = $1 FOR UPDATE`, [member.jam_id]);
 
     const visible = await c.query(
       `SELECT 1 FROM tracks t
        WHERE t.id = $1 AND ${LIVE_T}
-         AND ${trackVisibleTo("$2", "t")} AND ${trackVisibleTo("$3", "t")}`,
-      [trackId, userId, hostId]
+         AND ${trackVisibleTo("$2", "t")}`,
+      [trackId, userId]
     );
     if (visible.rowCount === 0) return fail<null>("forbidden");
 

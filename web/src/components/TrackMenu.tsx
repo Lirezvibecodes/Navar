@@ -74,10 +74,11 @@ export function TrackMenu({
   onClose: () => void;
   onGoTo: (to: { type: "album" | "artist"; name: string }) => void;
 }) {
-  const { owns, tracks, putTrack, dropTracks, playlists, markInPlaylist } =
+  const { owns, putTrack, dropTracks, playlists, markInPlaylist } =
     useLibrary();
   const { queueNext, queueLast } = usePlayer();
   const { toast, errorToast, undoToast } = useToast();
+  const keep = useKeepTrack();
 
   const [adding, setAdding] = useState<Track | null>(null);
   const [editing, setEditing] = useState<Track | null>(null);
@@ -107,46 +108,14 @@ export function TrackMenu({
     });
   };
 
-  /**
-   * Keeping somebody else's track. No file moves — the server copies the row —
-   * so this is as quick as it looks, and what lands in your Crate is a copy of
-   * your own that survives the other person deleting theirs.
-   */
   const saveToLibrary = async (t: Track) => {
     onClose();
-    try {
-      const copy = await api.saveTrack(t.id);
-      // Saving something twice is answered with the copy made the first time,
-      // so the toast says which of the two happened rather than claiming a
-      // second copy that does not exist.
-      const had = tracks.some((row) => row.id === copy.id);
-      putTrack(copy);
-      haptic.success();
-      toast(had ? "Already in your Crate" : `Saved ${trackTitle(t)}`);
-    } catch (err) {
-      errorToast(err, "Could not save that");
-    }
+    await keep.save(t);
   };
 
-  /**
-   * Filing a track into one of your playlists. A playlist can only hold rows
-   * you own — see `addPlaylistTracksBulk` on the server, which silently drops
-   * ids it does not — so a track that is not yours yet is saved to the Crate
-   * first, the same copy `saveToLibrary` makes, and the picker opens on that
-   * copy instead of the original.
-   */
   const addToPlaylist = async (t: Track) => {
-    if (owns(t)) {
-      setAdding(t);
-      return;
-    }
-    try {
-      const copy = await api.saveTrack(t.id);
-      putTrack(copy);
-      setAdding(copy);
-    } catch (err) {
-      errorToast(err, "Could not save that");
-    }
+    const row = await keep.fileable(t);
+    if (row) setAdding(row);
   };
 
   /**
@@ -336,6 +305,53 @@ export function TrackMenu({
       />
     </>
   );
+}
+
+/**
+ * Keeping somebody else's track — from their playlist, or off a jam's queue.
+ * No file moves — the server copies the row — so this is as quick as it
+ * looks, and what lands in your Crate is a copy of your own that survives the
+ * other person deleting theirs.
+ */
+export function useKeepTrack() {
+  const { owns, tracks, putTrack } = useLibrary();
+  const { toast, errorToast } = useToast();
+
+  const save = async (t: Track) => {
+    try {
+      const copy = await api.saveTrack(t.id);
+      // Saving something twice is answered with the copy made the first time,
+      // so the toast says which of the two happened rather than claiming a
+      // second copy that does not exist.
+      const had = tracks.some((row) => row.id === copy.id);
+      putTrack(copy);
+      haptic.success();
+      toast(had ? "Already in your Crate" : `Saved ${trackTitle(t)}`);
+    } catch (err) {
+      errorToast(err, "Could not save that");
+    }
+  };
+
+  /**
+   * The row to file into one of your playlists. A playlist can only hold rows
+   * you own — see `addPlaylistTracksBulk` on the server, which silently drops
+   * ids it does not — so a track that is not yours yet is saved to the Crate
+   * first, the same copy `save` makes, and the picker opens on that copy
+   * instead of the original.
+   */
+  const fileable = async (t: Track): Promise<Track | null> => {
+    if (owns(t)) return t;
+    try {
+      const copy = await api.saveTrack(t.id);
+      putTrack(copy);
+      return copy;
+    } catch (err) {
+      errorToast(err, "Could not save that");
+      return null;
+    }
+  };
+
+  return { save, fileable };
 }
 
 /**
