@@ -67,7 +67,7 @@ export function matchAlbumTracklist(
 
 /**
  * For each release entry still missing from the Crate, the copy somebody else
- * has out in a public playlist, keyed by position. `copies` arrives oldest
+ * could lend it (see AlbumCopy), keyed by position. `copies` arrives oldest
  * first, so taking the first title match is what makes the first uploader the
  * one credited when several people have the same song.
  */

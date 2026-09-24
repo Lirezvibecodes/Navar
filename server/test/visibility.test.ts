@@ -189,7 +189,7 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
     assert.equal(await repo.areFriends(OWNER, STRANGER), false);
   });
 
-  test("album copies offered to others are only the ones in a public playlist", async () => {
+  test("album copies reach public playlists for anyone and a friend's whole Crate", async () => {
     // Its own tracks and playlists, so the shared fixtures keep their null
     // album tags; all of it cascades off OWNER in teardown.
     const pool = db.getPool();
@@ -224,19 +224,31 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
     };
 
     const shared = await make("shared", "Fixture Artist feat. Guest", "fixture album", "public");
-    await make("friends", "Fixture Artist", "Fixture Album", "friends");
-    await make("unshared", "Fixture Artist", "Fixture Album", null);
+    const friends = await make("friends", "Fixture Artist", "Fixture Album", "friends");
+    const unshared = await make("unshared", "Fixture Artist", "Fixture Album", null);
     await make("other artist", "Someone Else", "Fixture Album", "public");
 
-    const copies = await repo.listPublicAlbumCopies(STRANGER, "Fixture Album", "Fixture Artist");
+    const copies = await repo.listAlbumCopies(STRANGER, "Fixture Album", "Fixture Artist");
     assert.deepEqual(
       copies.map((c) => c.id),
       [shared]
     );
     assert.equal(copies[0].uploader_id, String(OWNER));
 
+    // A friend reaches past the playlists into the rest of the Crate.
+    assert.deepEqual(
+      (await repo.listAlbumCopies(FRIEND, "Fixture Album", "Fixture Artist")).map((c) => c.id),
+      [shared, friends, unshared]
+    );
+
     // Your own tracks are never offered back to you.
-    assert.deepEqual(await repo.listPublicAlbumCopies(OWNER, "Fixture Album", "Fixture Artist"), []);
+    assert.deepEqual(await repo.listAlbumCopies(OWNER, "Fixture Album", "Fixture Artist"), []);
+
+    // The wider reach only applies when a save asks for it.
+    assert.equal(await repo.saveTrackToLibrary(unshared, FRIEND), null);
+    assert.equal(await repo.saveTrackToLibrary(unshared, STRANGER, repo.albumCopyReach), null);
+    const kept = await repo.saveTrackToLibrary(unshared, FRIEND, repo.albumCopyReach);
+    assert.equal(kept?.track.owner_telegram_id, String(FRIEND));
   });
 
   test("restoring brings a track back", async () => {

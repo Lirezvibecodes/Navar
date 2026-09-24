@@ -371,9 +371,9 @@ export function getAlbumMetadata(name: string): Promise<AlbumMetadata> {
 }
 
 /**
- * Somebody else's copy of one of an album's tracks, sitting in a public
- * playlist — so saveTrack will take it. `uploader_*` is whoever brought it
- * into Navaar first, named even when they are a stranger.
+ * Somebody else's copy of one of an album's tracks — one in a public
+ * playlist, or anywhere in a friend's Crate. `uploader_*` is whoever
+ * brought it into Navaar first, named even when they are a stranger.
  */
 export interface AlbumCopy {
   id: string;
@@ -387,6 +387,17 @@ export interface AlbumCopy {
 /** Oldest first, so the first copy of a title is its first uploader's. */
 export function listAlbumCopies(name: string): Promise<AlbumCopy[]> {
   return request<AlbumCopy[]>(`/api/albums/${encodeURIComponent(name)}/copies`);
+}
+
+/**
+ * Keeps one of those copies, already tagged with this album. Its own route
+ * rather than saveTrack, because a friend's Crate copy is reachable only for
+ * filling a gap like this one.
+ */
+export function saveAlbumCopy(name: string, id: string): Promise<Track> {
+  return request<Track>(`/api/albums/${encodeURIComponent(name)}/copies/${id}/save`, {
+    method: "POST",
+  });
 }
 
 // --- Friends ----------------------------------------------------------------

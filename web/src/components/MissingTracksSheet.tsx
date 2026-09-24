@@ -1,8 +1,6 @@
 import { useState } from "react";
 import type { AlbumCopy } from "../api";
 import * as api from "../api";
-import { useLibrary } from "../context/LibraryContext";
-import { useToast } from "../context/ToastContext";
 import type { AlbumTracklistMatch } from "../lib/albumTracklist";
 import { CheckIcon, PlusIcon } from "../icons";
 import { haptic } from "../telegram";
@@ -17,12 +15,10 @@ import { Num, Sheet } from "./ui";
  * uses elsewhere, so "dimmed" reads the same way it does everywhere else in
  * the app.
  *
- * The exception is a missing track somebody else has out in a public
- * playlist (`copies`, keyed by position): that row lights up with their face
- * and a + where the check would be, and tapping it keeps their copy exactly
- * the way saving from their playlist would. It lands in this album too — a
- * copy tagged with the same album in different case gets retagged to this
- * one, or the row would stay missing after the save.
+ * The exception is a missing track somebody else could lend (`copies`,
+ * keyed by position): that row lights up with their face and a + where the
+ * check would be, and tapping it keeps their copy exactly the way saving from
+ * their playlist would, landing in this album too.
  */
 export function MissingTracksSheet({
   open,
@@ -37,20 +33,13 @@ export function MissingTracksSheet({
   matched: AlbumTracklistMatch["matched"];
   copies: Map<number, AlbumCopy>;
 }) {
-  const { putTrack } = useLibrary();
-  const { errorToast } = useToast();
   const keep = useKeepTrack();
   const [saving, setSaving] = useState<ReadonlySet<number>>(new Set());
 
   const saveCopy = async (position: number, copy: AlbumCopy) => {
     setSaving((prev) => new Set(prev).add(position));
     try {
-      const saved = await keep.save(copy);
-      if (saved && saved.album !== albumName) {
-        putTrack(await api.updateTrack(saved.id, { album: albumName }));
-      }
-    } catch (err) {
-      errorToast(err, "Could not add that to this album");
+      await keep.save(copy, (id) => api.saveAlbumCopy(albumName, id));
     } finally {
       setSaving((prev) => {
         const next = new Set(prev);

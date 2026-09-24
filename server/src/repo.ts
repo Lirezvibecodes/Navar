@@ -573,7 +573,10 @@ type SaveOutcome =
 
 export async function saveTrackToLibrary(
   sourceTrackId: string,
-  saverTelegramId: number
+  saverTelegramId: number,
+  // Which tracks the saver may copy. Only ever trackVisibleTo or the wider
+  // albumCopyReach below, and always spliced with "$1" as the saver.
+  reach: (viewer: string, track: string) => string = trackVisibleTo
 ): Promise<SavedTrack | null> {
   const result = await withTransaction<SaveOutcome>(async (client) => {
     const live = async (): Promise<Track | null> => {
@@ -601,7 +604,7 @@ export async function saveTrackToLibrary(
        WHERE t.id = $2
          AND ${LIVE_T}
          AND t.owner_telegram_id <> $1
-         AND ${trackVisibleTo("$1", "t")}
+         AND ${reach("$1", "t")}
        RETURNING ${TRACK_COLUMNS}`,
       [saverTelegramId, sourceTrackId]
     );
@@ -2023,21 +2026,44 @@ export interface AlbumCopy {
 }
 
 /**
- * Other people's copies of an album's tracks, for filling the gaps in yours.
+ * Which of other people's tracks can fill a gap in one of your albums: one in
+ * a public playlist, which anybody with the link could already play, or one
+ * anywhere in an accepted friend's Crate.
  *
- * Only tracks sitting in a public playlist count — the same reach a share
- * link already gives anybody, so this is a search over what is already out in
- * the open rather than a window into somebody's private Crate. That is also
- * exactly what /tracks/:id/save lets the caller keep, so every row here can be
- * saved. The uploader is named whether or not the caller knows them: a public
- * playlist already credits its owner to strangers, and this is the same kind
- * of credit.
+ * The friend half is wider than trackVisibleTo, which only lets a friend
+ * reach the playlists opened up to them, and it is deliberately kept out of
+ * that expression: it opens a friend's Crate to this one purpose, filling a
+ * track you are missing from an album you already have, and not to browsing
+ * or streaming it. Same splicing contract as trackVisibleTo.
+ */
+export function albumCopyReach(viewer: string, track: string): string {
+  return `(
+    EXISTS (
+      SELECT 1 FROM playlist_tracks pt
+      JOIN playlists p ON p.id = pt.playlist_id
+      WHERE pt.track_id = ${track}.id AND p.visibility = 'public'
+    )
+    OR EXISTS (
+      SELECT 1 FROM friendships f
+      WHERE f.status = 'accepted'
+        AND ((f.requester_id = ${viewer} AND f.addressee_id = ${track}.owner_telegram_id)
+          OR (f.requester_id = ${track}.owner_telegram_id AND f.addressee_id = ${viewer}))
+    )
+  )`;
+}
+
+/**
+ * Other people's copies of an album's tracks, for filling the gaps in yours —
+ * everything within albumCopyReach, which is also what the album's own save
+ * route copies with. The uploader is named whether or not the caller knows
+ * them: a public playlist already credits its owner to strangers, and this is
+ * the same kind of credit.
  *
  * The album tag is compared case-insensitively and the lead artist must
  * agree, so two unrelated "Greatest Hits" never lend each other tracks. Oldest
  * first, so a title with several copies resolves to whoever got there first.
  */
-export async function listPublicAlbumCopies(
+export async function listAlbumCopies(
   viewerTelegramId: number,
   album: string,
   leadArtist: string
@@ -2052,11 +2078,7 @@ export async function listPublicAlbumCopies(
      WHERE ${LIVE_T}
        AND t.owner_telegram_id <> $1
        AND lower(t.album) = lower($2)
-       AND EXISTS (
-         SELECT 1 FROM playlist_tracks pt
-         JOIN playlists p ON p.id = pt.playlist_id
-         WHERE pt.track_id = t.id AND p.visibility = 'public'
-       )
+       AND ${albumCopyReach("$1", "t")}
      ORDER BY t.created_at ASC`,
     [viewerTelegramId, album]
   );

@@ -9,7 +9,10 @@ import {
   getAlbumMetadata,
   saveAlbumMetadata,
   splitArtists,
-  listPublicAlbumCopies,
+  listAlbumCopies,
+  albumCopyReach,
+  saveTrackToLibrary,
+  updateTrackFields,
 } from "../repo";
 import { lookupAlbum, fetchTracklist } from "../musicbrainz-provider";
 import type { Track } from "../types";
@@ -65,8 +68,8 @@ export function albumsRouter(): Router {
   );
 
   /**
-   * Copies of this album's tracks that other people have put in a public
-   * playlist — what the missing-tracks sheet offers to save into the gaps.
+   * Copies of this album's tracks that other people have within
+   * albumCopyReach — what the missing-tracks sheet offers to save into the gaps.
    * Scoped through the caller's own album the same way the metadata route is,
    * both to find the lead artist and so an album they do not have is a 404
    * rather than a search over any name they care to type.
@@ -82,7 +85,41 @@ export function albumsRouter(): Router {
         return;
       }
       const artist = leadArtistOf(tracks);
-      res.json(artist ? await listPublicAlbumCopies(viewerId, req.params.name, artist) : []);
+      res.json(artist ? await listAlbumCopies(viewerId, req.params.name, artist) : []);
+    })
+  );
+
+  /**
+   * Keeps one of those copies, straight into this album. The id has to be one
+   * the listing above would offer right now — that is what licenses the wider
+   * albumCopyReach over the ordinary save — and the kept track is tagged with
+   * this album's exact name, since a copy tagged in different case would
+   * otherwise leave the gap showing after the save.
+   */
+  router.post(
+    "/:name/copies/:id/save",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const viewerId = (req as AuthedRequest).telegramUserId;
+      const { name, id } = req.params;
+      const tracks = await listTracksByTag(viewerId, "album", name);
+      const artist = leadArtistOf(tracks);
+      const copies = artist ? await listAlbumCopies(viewerId, name, artist) : [];
+      if (!copies.some((copy) => copy.id === id)) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      const saved = await saveTrackToLibrary(id, viewerId, albumCopyReach);
+      if (!saved) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      const track =
+        saved.track.album === name
+          ? saved.track
+          : (await updateTrackFields(saved.track.id, viewerId, { album: name })) ?? saved.track;
+      res.status(saved.already ? 200 : 201).json(track);
     })
   );
 

@@ -318,9 +318,12 @@ export function useKeepTrack() {
   const { toast, errorToast } = useToast();
 
   /** The copy that is now yours, or null when the save failed and said so. */
-  const save = async (t: Pick<Track, "id" | "title">): Promise<Track | null> => {
+  const save = async (
+    t: Pick<Track, "id" | "title">,
+    request: (id: string) => Promise<Track> = api.saveTrack
+  ): Promise<Track | null> => {
     try {
-      const copy = await api.saveTrack(t.id);
+      const copy = await request(t.id);
       // Saving something twice is answered with the copy made the first time,
       // so the toast says which of the two happened rather than claiming a
       // second copy that does not exist.
