@@ -18,7 +18,10 @@ import { Num, Sheet } from "./ui";
  * The exception is a missing track somebody else could lend (`copies`,
  * keyed by position): that row lights up with their face and a + where the
  * check would be, and tapping it keeps their copy exactly the way saving from
- * their playlist would, landing in this album too.
+ * their playlist would, landing in this album too. It has to read apart from
+ * an owned row at a glance, so its title steps down to muted — not yours yet —
+ * and the + sits in the same tinted circle the jam queue uses for "add", where
+ * an owned row keeps a bare check.
  */
 export function MissingTracksSheet({
   open,
@@ -68,7 +71,14 @@ export function MissingTracksSheet({
             >
               <Num>{entry.position}</Num>
             </span>
-            <span className="nav-clip" style={{ flex: 1, fontSize: 13.5 }}>
+            <span
+              className="nav-clip"
+              style={{
+                flex: 1,
+                fontSize: 13.5,
+                color: copy ? "var(--color-nav-muted)" : undefined,
+              }}
+            >
               {entry.title}
             </span>
             {entry.track ? (
@@ -93,7 +103,19 @@ export function MissingTracksSheet({
                   hasAvatar={copy.uploader_has_avatar}
                   size={18}
                 />
-                <PlusIcon size={14} style={{ color: "var(--color-nav-action)" }} />
+                <span
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    color: "var(--color-nav-action)",
+                    background: "rgba(var(--color-nav-action-rgb),.16)",
+                  }}
+                >
+                  <PlusIcon size={13} />
+                </span>
               </span>
             ) : null}
           </>
