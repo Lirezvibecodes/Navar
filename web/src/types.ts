@@ -409,6 +409,8 @@ export interface JamPoll {
 /** `GET /api/users/:id/live` — what a friend is playing right now, if anything. */
 export interface LiveState {
   server_now: string;
+  /** Has the app open right now — signed in recently, whether or not anything plays. */
+  online: boolean;
   live: {
     track: JamTrack;
     position_seconds: number;

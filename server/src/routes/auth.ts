@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { validateInitData } from "../telegram-auth";
 import { signSession } from "../jwt";
-import { ensureUser } from "../repo";
+import { ensureUser, touchPresence } from "../repo";
 import { required } from "../config";
 import { asyncHandler } from "../asyncHandler";
 
@@ -26,6 +26,9 @@ export function authRouter(): Router {
       validated.user.username,
       validated.user.language_code
     );
+    // Signing in is opening the app, which is what friends see as online.
+    // Fire-and-forget: a failed stamp must never cost anybody their sign-in.
+    void touchPresence(validated.user.id).catch(() => undefined);
     const token = signSession(validated.user.id, validated.user.username);
     // The identity comes back alongside the token because the client needs it
     // for every ownership decision it renders — whether to draw a heart, an

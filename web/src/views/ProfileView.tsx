@@ -165,6 +165,9 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
   // Only a friend's listening is ever shown, and only while the server calls it fresh.
   const liveView = useLiveState(userId, !isMe && profile?.state === "friends");
   const isLive = liveView.state?.live != null;
+  // Online is having the app open, not having pressed play: the dot comes on
+  // from sign-in, while the live card below still waits for a track.
+  const isOnline = liveView.state?.online ?? false;
 
   if (loading) {
     return (
@@ -233,7 +236,7 @@ export function ProfileView({ nav, userId }: { nav: Navigation; userId: number }
               username={isMe ? (me?.handle ?? me?.username) : (person?.handle ?? person?.username)}
               hasAvatar={isMe ? true : (person?.has_avatar ?? false)}
               size={84}
-              live={isLive}
+              live={isOnline}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

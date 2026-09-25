@@ -3059,6 +3059,20 @@ export async function setListeningStatus(
 }
 
 /**
+ * Mark this person as having the app open right now.
+ *
+ * Called at sign-in and on the client's presence heartbeat. Only ever read
+ * back as "within the online window or not" (see `getLiveState`), so a missed
+ * write costs a dot for a minute and nothing else.
+ */
+export async function touchPresence(telegramUserId: number): Promise<void> {
+  await getPool().query(
+    `UPDATE users SET last_active_at = now() WHERE telegram_user_id = $1`,
+    [telegramUserId]
+  );
+}
+
+/**
  * Whether this person's listening is shown to their friends at all.
  *
  * Switching it off clears the track as well as the flag. Leaving the last one
