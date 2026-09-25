@@ -673,7 +673,7 @@ export async function listTracksMissingCover(
  */
 export async function getTrackLyrics(id: string): Promise<TrackLyrics | null> {
   const { rows } = await getPool().query<TrackLyrics>(
-    `SELECT lyrics, lyrics_checked_at FROM tracks WHERE id = $1 AND ${LIVE}`,
+    `SELECT lyrics, lyrics_checked_at, lyrics_owner_edited FROM tracks WHERE id = $1 AND ${LIVE}`,
     [id]
   );
   return rows[0] ?? null;
@@ -687,6 +687,8 @@ export interface TrackLyrics {
    * timestamp is a set of words somebody typed in before the lookup existed.
    */
   lyrics_checked_at: Date | null;
+  /** The owner set or cleared these words by hand, so LRCLIB is not asked again. */
+  lyrics_owner_edited: boolean;
 }
 
 /**
@@ -859,6 +861,7 @@ export async function updateTrackFields(
          artist = CASE WHEN $5  THEN $6::text  ELSE artist END,
          album  = CASE WHEN $7  THEN $8::text  ELSE album END,
          lyrics = CASE WHEN $9  THEN $10::text ELSE lyrics END,
+         lyrics_owner_edited = lyrics_owner_edited OR $9,
          favorited_at = CASE
            WHEN NOT $11 THEN favorited_at
            WHEN $12 THEN COALESCE(favorited_at, now())

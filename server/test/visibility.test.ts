@@ -273,6 +273,20 @@ describe("getTrackForListener", { skip: TEST_DATABASE_URL ? false : "TEST_DATABA
     assert.equal(track?.artist, null);
   });
 
+  test("clearing lyrics by hand stops LRCLIB being asked again", async () => {
+    const before = await repo.getTrackLyrics(trackIds.unshared);
+    assert.equal(before?.lyrics_owner_edited, false);
+
+    // An edit that leaves lyrics alone says nothing about them.
+    await repo.updateTrackFields(trackIds.unshared, OWNER, { title: "Renamed" });
+    assert.equal((await repo.getTrackLyrics(trackIds.unshared))?.lyrics_owner_edited, false);
+
+    await repo.updateTrackFields(trackIds.unshared, OWNER, { lyrics: "" });
+    const after = await repo.getTrackLyrics(trackIds.unshared);
+    assert.equal(after?.lyrics, null);
+    assert.equal(after?.lyrics_owner_edited, true);
+  });
+
   /**
    * Saving is the copy path, and it answers the same visibility question the
    * reads do. The fixtures here are its own: a track with artwork, in a
