@@ -26,7 +26,7 @@ interface AvatarProps {
   /** The lime ring that marks somebody who is listening right now. */
   ring?: boolean;
   className?: string;
-  /** A dot in the theme accent: playing right now, by a fresh listening status. */
+  /** A dot in the theme accent: online right now, by a fresh presence heartbeat. */
   live?: boolean;
   /** Bumped after this session uploads a new picture, so the browser does not
    *  keep serving the old bytes for the rest of it from its own cache. */
@@ -90,7 +90,7 @@ export function Avatar({
     <div className={className} style={{ position: "relative", flex: "none", width: size, height: size }}>
       {face}
       <span
-        aria-label="Listening now"
+        aria-label="Online"
         className="nav-fade"
         style={{
           position: "absolute",

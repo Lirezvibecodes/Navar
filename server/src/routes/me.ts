@@ -15,6 +15,7 @@ import {
   setListeningStatus,
   setProfileBackground,
   StatsRange,
+  touchPresence,
 } from "../repo";
 import { captionOf, personLabel, postCoverVideo } from "../channels";
 import { storeCover } from "./covers";
@@ -147,6 +148,21 @@ export function meRouter(): Router {
         listeningPublic
       );
       res.json({ listening_public: listeningPublic });
+    })
+  );
+
+  /**
+   * The app is open. Sent on a slow heartbeat while the Mini App is on screen,
+   * so a friend's profile can show the online dot whether or not anything is
+   * playing. Like the listening status, nothing waits for a goodbye: going
+   * offline is the server-side window closing.
+   */
+  router.post(
+    "/presence",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      await touchPresence((req as AuthedRequest).telegramUserId);
+      res.status(204).end();
     })
   );
 

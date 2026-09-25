@@ -42,6 +42,12 @@ const JAM_QUEUE_LIMIT = 50;
  */
 const LIVE_FRESH_SECONDS = 300;
 /**
+ * How recent `users.last_active_at` must be to count as online. The client
+ * stamps it at sign-in and every minute while the app is on screen, so this is
+ * two missed heartbeats and some slack.
+ */
+const ONLINE_FRESH_SECONDS = 150;
+/**
  * How far past a track's end the derived position may run before the report
  * is called stale — covers the gap between one track ending and the next
  * report arriving, and nothing more.
@@ -140,6 +146,12 @@ export interface LiveJam {
 
 export interface LiveState {
   server_now: string;
+  /**
+   * Has the app open right now: signed in or heartbeating within the online
+   * window, or playing something friends can see. Independent of `live`,
+   * which needs a track.
+   */
+  online: boolean;
   live: LiveListening | null;
   jam: LiveJam | null;
 }
@@ -426,13 +438,16 @@ export async function getLiveState(viewerId: number, targetId: number): Promise<
   const pool = getPool();
   const nowRow = await pool.query<{ now: Date }>(`SELECT now() AS now`);
   const server_now = nowRow.rows[0].now.toISOString();
-  if (viewerId === targetId) return { server_now, live: null, jam: null };
+  const none: LiveState = { server_now, online: false, live: null, jam: null };
+  if (viewerId === targetId) return none;
 
-  const friends = await pool.query<{ ok: boolean }>(`SELECT ${FRIENDS("$1", "$2")} AS ok`, [
-    viewerId,
-    targetId,
-  ]);
-  if (!friends.rows[0]?.ok) return { server_now, live: null, jam: null };
+  const friends = await pool.query<{ ok: boolean; online: boolean | null }>(
+    `SELECT ${FRIENDS("$1", "$2")} AS ok,
+       (SELECT u.last_active_at > now() - interval '${ONLINE_FRESH_SECONDS} seconds'
+        FROM users u WHERE u.telegram_user_id = $2) AS online`,
+    [viewerId, targetId]
+  );
+  if (!friends.rows[0]?.ok) return none;
 
   await expireJamState(pool);
 
@@ -467,6 +482,9 @@ export async function getLiveState(viewerId: number, targetId: number): Promise<
   const j = jam.rows[0];
   return {
     server_now,
+    // Somebody playing in the background with the app hidden has stopped
+    // heartbeating, but is plainly still around.
+    online: Boolean(friends.rows[0].online) || l != null,
     live: l
       ? {
           track: jamTrackFrom(l, viewerId),

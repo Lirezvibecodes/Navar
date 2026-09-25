@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { authenticate, getTags } from "./api";
+import { authenticate, getTags, reportPresence } from "./api";
 import { BottomNav } from "./components/BottomNav";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
@@ -152,6 +152,39 @@ function useTagUnlockToasts(): void {
   }, [toast]);
 }
 
+/**
+ * Keeps friends seeing you as online while the app is on screen.
+ *
+ * Sign-in already stamps the server, so this only has to keep the stamp fresh:
+ * once a minute while visible, and at once on coming back to the front. The
+ * server calls you online for a couple of minutes past the last one, so a
+ * Mini App swiped away goes offline on its own without sending a goodbye.
+ * Fire-and-forget like the listening status — nothing reads it back here.
+ */
+const PRESENCE_HEARTBEAT_MS = 60_000;
+
+function usePresenceHeartbeat(): void {
+  useEffect(() => {
+    let onScreen = true;
+    const ping = () => {
+      if (!onScreen || document.hidden) return;
+      void reportPresence().catch(() => undefined);
+    };
+    const stop = onActivationChange((active) => {
+      onScreen = active;
+      ping();
+    });
+    const onVisible = () => ping();
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = window.setInterval(ping, PRESENCE_HEARTBEAT_MS);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      stop();
+    };
+  }, []);
+}
+
 function Shell({ me }: { me: Me }) {
   const [stack, setStack] = useState<View[]>([{ type: "home" }]);
   const [direction, setDirection] = useState<"push" | "pop" | "tab">("push");
@@ -170,6 +203,7 @@ function Shell({ me }: { me: Me }) {
   const { current, restoreLast } = usePlayer();
 
   useTagUnlockToasts();
+  usePresenceHeartbeat();
 
   const view = stack[stack.length - 1];
 

@@ -472,6 +472,14 @@ export function setListeningStatus(
   });
 }
 
+/**
+ * Say the app is open. Sent on a slow heartbeat while it is on screen, so
+ * friends see the online dot from sign-in on rather than from the first play.
+ */
+export function reportPresence(): Promise<void> {
+  return request<void>("/api/me/presence", { method: "POST" });
+}
+
 /** Whether friends see any of that. Off until the profile switch turns it on. */
 export function setListeningPrivacy(
   listeningPublic: boolean

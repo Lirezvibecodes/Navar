@@ -181,6 +181,31 @@ describe("jam mode", { skip: TEST_DATABASE_URL ? false : "TEST_DATABASE_URL is n
       assert.equal((await jam.getLiveState(G1, HOST)).live, null);
       await pool.query(`UPDATE listen_status SET is_public = true WHERE telegram_user_id = $1`, [HOST]);
     });
+
+    test("a friend with the app open is online without playing anything", async () => {
+      await repo.setListeningStatus(HOST, tracks.hostShared, 10, false);
+      await repo.touchPresence(HOST);
+      const state = await jam.getLiveState(G1, HOST);
+      assert.equal(state.live, null);
+      assert.equal(state.online, true);
+      await repo.setListeningStatus(HOST, tracks.hostShared, 10, true);
+    });
+
+    test("a friend who has gone quiet is not online", async () => {
+      const pool = db.getPool();
+      await repo.setListeningStatus(HOST, tracks.hostShared, 10, false);
+      await pool.query(
+        `UPDATE users SET last_active_at = now() - interval '10 minutes' WHERE telegram_user_id = $1`,
+        [HOST]
+      );
+      assert.equal((await jam.getLiveState(G1, HOST)).online, false);
+      await repo.setListeningStatus(HOST, tracks.hostShared, 10, true);
+    });
+
+    test("a stranger never sees somebody online", async () => {
+      await repo.touchPresence(HOST);
+      assert.equal((await jam.getLiveState(STRANGER, HOST)).online, false);
+    });
   });
 
   describe("requests", () => {
