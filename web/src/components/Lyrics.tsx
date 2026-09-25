@@ -31,8 +31,9 @@ export interface Words {
 
 /**
  * One lookup per track, shared by the strip under the transport and the pane
- * behind it. The server caches both answers, including "LRCLIB has never heard
- * of this", so a track is only ever looked up once however often it is played.
+ * behind it. The server keeps words for good and holds a miss ("LRCLIB has
+ * never heard of this") for a day before asking again, so replaying a track
+ * never costs more than one outside lookup a day.
  */
 export function useLyrics(trackId: string | null): Words {
   const [words, setWords] = useState<Words>({ state: "loading", lyrics: null });
