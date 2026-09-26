@@ -15,3 +15,9 @@ coverage/
 supabase/.temp/
 .claude/
 *.tsbuildinfo
+
+# Launch video renders and the licensed soundtrack stay out of the repo
+marketing/launch-video/*.mp4
+marketing/launch-video/*.m4a
+marketing/launch-video/*.wav
+marketing/launch-video/*.mp3

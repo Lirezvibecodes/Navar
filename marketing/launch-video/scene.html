@@ -1,0 +1,464 @@
+<!doctype html>
+<!--
+  Navaar launch spot, 1920x1080, 19.3s.
+
+  Nothing here animates on its own. The whole frame is a pure function of one
+  number, window.renderAt(t), so render.mjs can step through it frame by frame
+  and every render comes out identical. Open the file in a browser and it plays
+  itself in real time off requestAnimationFrame, which is only for previewing.
+
+  Cut points sit on the music's beat grid (about 0.24s a step):
+    0.00  cold open on the finished chat
+    0.77  composer, typing the command
+    3.30  the chat, message sent
+    4.27  three forwarded tracks land
+    5.90  Navaar answers with the playlist
+    8.00  close-up on the playlist card, press play
+   13.00  end card
+   17.20  black
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navaar launch spot</title>
+<style>
+  @font-face { font-family: "Pixelify Sans"; font-weight: 400 700; src: url("../../web/public/fonts/pixelify-sans-latin.woff2") format("woff2"); }
+  @font-face { font-family: "General Sans"; font-weight: 400; src: url("../../web/public/fonts/general-sans-400.woff2") format("woff2"); }
+  @font-face { font-family: "General Sans"; font-weight: 500; src: url("../../web/public/fonts/general-sans-500.woff2") format("woff2"); }
+  @font-face { font-family: "General Sans"; font-weight: 600; src: url("../../web/public/fonts/general-sans-600.woff2") format("woff2"); }
+  @font-face { font-family: "General Sans"; font-weight: 700; src: url("../../web/public/fonts/general-sans-700.woff2") format("woff2"); }
+
+  :root {
+    --bg: #030303;
+    --lime: #c6f24a;
+    --lime-hi: #dffc8e;
+    --lime-soft: #e6f7c4;
+    --social: #89aeff;
+    --art: #bce4fe;
+    --card-top: #171a1f;
+    --card-bottom: #101216;
+    --muted: rgba(255, 255, 255, 0.52);
+    --faint: rgba(255, 255, 255, 0.32);
+    --display: "Pixelify Sans", monospace;
+    --sans: "General Sans", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+  #stage { position: absolute; inset: 0; overflow: hidden; background: var(--lime); }
+  .layer { position: absolute; inset: 0; }
+
+  /* ---- Background: a slow lime wash, the orange swirl's counterpart ---- */
+  #wash { position: absolute; inset: -240px; filter: blur(70px); }
+  #wash i { position: absolute; display: block; border-radius: 50%; }
+
+  /* ---- Composer ---- */
+  #composer {
+    position: absolute; left: 50%; top: 50%;
+    width: 1320px; height: 196px; margin: -98px 0 0 -660px;
+    border-radius: 98px; background: #0b0c0e;
+    box-shadow: 0 30px 80px rgba(40, 60, 0, 0.35), inset 0 0 0 2px rgba(255,255,255,0.08);
+    display: flex; align-items: center; padding: 0 34px 0 38px; gap: 34px;
+  }
+  #composer .clip { width: 64px; height: 64px; flex: none; opacity: 0.55; }
+  #composer .field { flex: 1; font-size: 50px; font-weight: 500; color: #fff; white-space: pre; letter-spacing: -0.01em; display: flex; align-items: center; }
+  #composer .field .ph { color: rgba(255,255,255,0.3); }
+  #composer .caret { width: 5px; height: 62px; background: var(--lime); margin-left: 4px; }
+  #composer .send { width: 128px; height: 128px; border-radius: 64px; background: var(--lime); flex: none; display: grid; place-items: center; }
+
+  /* ---- Phone ---- */
+  #phone {
+    position: absolute; left: 50%; top: 0; width: 393px; height: 852px; margin-left: -196.5px;
+    transform-origin: 50% 0;
+  }
+  #phone .body {
+    position: absolute; inset: 0; border-radius: 58px; background: #0a0b0d; overflow: hidden;
+    box-shadow: 0 0 0 1.5px #2a2d33, 0 0 0 5px #0c0d10, 0 40px 90px rgba(30, 50, 0, 0.45);
+  }
+  .status { position: absolute; left: 0; right: 0; top: 0; height: 54px; color: #fff; font-weight: 600; font-size: 16px; z-index: 3; background: #0a0b0d; }
+  .status .time { position: absolute; left: 50px; top: 18px; }
+  .status .island { position: absolute; left: 50%; top: 11px; width: 124px; height: 36px; margin-left: -62px; border-radius: 18px; background: #000; }
+  .status .icons { position: absolute; right: 30px; top: 20px; display: flex; gap: 6px; align-items: center; }
+  .chathead {
+    position: absolute; left: 0; right: 0; top: 54px; height: 54px; z-index: 3;
+    display: flex; align-items: center; padding: 0 14px; gap: 10px; background: #0a0b0d;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .chathead .back { width: 30px; height: 30px; display: grid; place-items: center; }
+  .avatar { width: 36px; height: 36px; border-radius: 18px; background: var(--bg); display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); flex: none; }
+  .chathead .who { flex: 1; line-height: 1.15; }
+  .chathead .name { font-weight: 600; font-size: 16px; color: #fff; }
+  .chathead .sub { font-size: 12.5px; color: var(--muted); }
+  .chathead .more { width: 30px; height: 30px; display: grid; place-items: center; opacity: 0.8; }
+
+  #chat { position: absolute; left: 0; right: 0; top: 108px; padding: 14px 12px 40px; }
+  .msg { display: flex; margin-bottom: 7px; transform-origin: 100% 100%; }
+  .msg.in { transform-origin: 0 100%; }
+  .msg.out { justify-content: flex-end; }
+  .ts { text-align: center; font-size: 11.5px; color: var(--faint); margin: 2px 0 10px; font-weight: 500; }
+  .bubble { max-width: 290px; padding: 9px 13px 10px; border-radius: 18px; font-size: 14.5px; line-height: 1.32; font-weight: 500; }
+  .out .bubble { background: var(--lime); color: #0b0c0e; border-bottom-right-radius: 6px; }
+  .in .bubble { background: #1b1e24; color: #fff; border-bottom-left-radius: 6px; }
+  .cmd { font-weight: 600; }
+
+  .file { display: flex; align-items: center; gap: 11px; padding: 8px 14px 8px 8px; width: 238px; }
+  .file .pb { width: 40px; height: 40px; border-radius: 20px; background: #0b0c0e; display: grid; place-items: center; flex: none; }
+  .file .t { font-weight: 600; font-size: 14px; line-height: 1.2; }
+  .file .a { font-size: 12.5px; opacity: 0.62; line-height: 1.25; }
+
+  .card { padding: 10px; width: 292px; background: linear-gradient(180deg, var(--card-top), var(--card-bottom)); }
+  .card .top { display: flex; gap: 11px; align-items: center; }
+  .cover { width: 50px; height: 50px; border-radius: 9px; flex: none;
+    background-image: conic-gradient(#89AEFF 0 25%, #BCE4FE 0 50%, #c6f24a 0 75%, #141414 0);
+    background-size: 8px 8px; }
+  .card .ptitle { font-family: var(--display); font-weight: 600; font-size: 18px; color: #fff; letter-spacing: 0.01em; line-height: 1.1; }
+  .card .pmeta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .player { display: flex; align-items: center; gap: 10px; margin-top: 10px; background: rgba(255,255,255,0.05); border-radius: 22px; padding: 5px 12px 5px 5px; }
+  .player .pp { width: 34px; height: 34px; border-radius: 17px; background: var(--lime); display: grid; place-items: center; flex: none; position: relative; }
+  .player .halo { position: absolute; inset: -8px; border-radius: 50%; background: rgba(198,242,74,0.25); opacity: 0; }
+  .wave { flex: 1; height: 26px; display: flex; align-items: center; gap: 2px; }
+  .wave b { display: block; width: 2px; background: rgba(255,255,255,0.3); }
+  .player .dur { font-size: 12px; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; width: 30px; text-align: right; }
+  .kbd { margin-top: 5px; width: 292px; height: 38px; border-radius: 12px; background: rgba(198,242,74,0.14); color: var(--lime); font-weight: 600; font-size: 14px; display: grid; place-items: center; }
+
+  /* ---- End card ---- */
+  #end { background: var(--bg); }
+  #lockup { position: absolute; left: 50%; top: 50%; display: flex; align-items: center; }
+  #mark { position: relative; width: 176px; height: 176px; flex: none; }
+  #mark i { position: absolute; display: block; background: var(--lime-hi); }
+  #wordclip { overflow: hidden; }
+  #word { width: max-content; font-family: var(--display); font-weight: 600; font-size: 150px; line-height: 1; color: var(--lime-hi); letter-spacing: 0.02em; padding-left: 18px; white-space: nowrap; }
+  #tag { position: absolute; left: 0; right: 0; top: 50%; margin-top: 130px; text-align: center; font-size: 34px; font-weight: 500; color: var(--muted); }
+
+  #black { background: #000; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="world" class="layer">
+    <div id="wash"></div>
+
+    <div id="composer">
+      <svg class="clip" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg>
+      <div class="field"><span id="typed"></span><span class="caret" id="caret"></span><span class="ph" id="ph">Message</span></div>
+      <div class="send" id="send">
+        <!-- A send arrow drawn on the same pixel grid as the app mark. -->
+        <svg width="56" height="56" viewBox="0 0 14 14" shape-rendering="crispEdges" fill="#0b0c0e">
+          <rect x="6" y="2" width="2" height="10"/><rect x="4" y="4" width="2" height="2"/><rect x="8" y="4" width="2" height="2"/><rect x="2" y="6" width="2" height="2"/><rect x="10" y="6" width="2" height="2"/>
+        </svg>
+      </div>
+    </div>
+
+    <div id="phone">
+      <div class="body">
+        <div class="status">
+          <span class="time">9:41</span><span class="island"></span>
+          <span class="icons">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+            <svg width="16" height="12" viewBox="0 0 16 12" fill="#fff"><path d="M8 2.2c2.4 0 4.6.9 6.2 2.5l1.3-1.4C13.5 1.3 10.9.2 8 .2S2.5 1.3.5 3.3l1.3 1.4C3.4 3.1 5.6 2.2 8 2.2zm0 3.6c1.4 0 2.7.5 3.7 1.4l1.3-1.4C11.7 4.6 9.9 3.8 8 3.8S4.3 4.6 3 5.8l1.3 1.4c1-.9 2.3-1.4 3.7-1.4zM8 12l2.3-2.5c-.6-.6-1.4-.9-2.3-.9s-1.7.3-2.3.9z"/></svg>
+            <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" fill="none" stroke="#fff" stroke-opacity=".4"/><rect x="2" y="2" width="20" height="9" rx="2" fill="#fff"/><rect x="24.5" y="4.5" width="2" height="4" rx="1" fill="#fff" fill-opacity=".4"/></svg>
+          </span>
+        </div>
+        <div class="chathead">
+          <span class="back"><svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="#c6f24a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L2 10l8 8"/></svg></span>
+          <span class="avatar"><svg width="20" height="20" viewBox="0 0 16 16" shape-rendering="crispEdges" fill="#DFFC8E"><rect x="5" y="3" width="2" height="10"/><rect x="7" y="5" width="2" height="6"/><rect x="9" y="7" width="2" height="2"/></svg></span>
+          <span class="who"><div class="name">Navaar</div><div class="sub">bot</div></span>
+          <span class="more"><svg width="4" height="18" viewBox="0 0 4 18" fill="#fff"><circle cx="2" cy="2" r="2"/><circle cx="2" cy="9" r="2"/><circle cx="2" cy="16" r="2"/></svg></span>
+        </div>
+
+        <div id="chat">
+          <div class="ts" data-at="3.3">Today 9:41 PM</div>
+          <div class="msg out" data-at="3.3"><div class="bubble"><span class="cmd">/playlist</span> Late Night Drive</div></div>
+
+          <div class="msg out" data-at="4.27"><div class="bubble file">
+            <span class="pb"><svg width="14" height="14" viewBox="0 0 16 16" shape-rendering="crispEdges" fill="#c6f24a"><rect x="4" y="2" width="3" height="12"/><rect x="7" y="4" width="3" height="8"/><rect x="10" y="6" width="3" height="4"/></svg></span>
+            <span><div class="t">Night Bus</div><div class="a">Luma Vale · 3:12</div></span>
+          </div></div>
+          <div class="msg out" data-at="4.6"><div class="bubble file">
+            <span class="pb"><svg width="14" height="14" viewBox="0 0 16 16" shape-rendering="crispEdges" fill="#c6f24a"><rect x="4" y="2" width="3" height="12"/><rect x="7" y="4" width="3" height="8"/><rect x="10" y="6" width="3" height="4"/></svg></span>
+            <span><div class="t">Soft Static</div><div class="a">Harbor Kids · 2:48</div></span>
+          </div></div>
+          <div class="msg out" data-at="4.84"><div class="bubble file">
+            <span class="pb"><svg width="14" height="14" viewBox="0 0 16 16" shape-rendering="crispEdges" fill="#c6f24a"><rect x="4" y="2" width="3" height="12"/><rect x="7" y="4" width="3" height="8"/><rect x="10" y="6" width="3" height="4"/></svg></span>
+            <span><div class="t">Glass Hour</div><div class="a">Okra Lane · 3:41</div></span>
+          </div></div>
+
+          <div class="msg in" data-at="5.9"><div class="bubble">Done. 3 tracks are in <b style="font-weight:600">Late Night Drive</b>.</div></div>
+          <div class="msg in" data-at="6.1" id="cardmsg"><div>
+            <div class="bubble card" id="card">
+              <div class="top">
+                <span class="cover"></span>
+                <span><div class="ptitle">Late Night Drive</div><div class="pmeta">Playlist · 3 tracks · 9:41</div></span>
+              </div>
+              <div class="player" id="player">
+                <span class="pp" id="pp"><span class="halo" id="halo"></span>
+                  <svg id="icoPlay" width="14" height="14" viewBox="0 0 16 16" shape-rendering="crispEdges" fill="#0b0c0e"><rect x="4" y="2" width="3" height="12"/><rect x="7" y="4" width="3" height="8"/><rect x="10" y="6" width="3" height="4"/></svg>
+                  <svg id="icoPause" width="14" height="14" viewBox="0 0 16 16" shape-rendering="crispEdges" fill="#0b0c0e" style="display:none"><rect x="3" y="2" width="3.5" height="12"/><rect x="9.5" y="2" width="3.5" height="12"/></svg>
+                </span>
+                <span class="wave" id="wave"></span>
+                <span class="dur" id="dur">0:00</span>
+              </div>
+            </div>
+            <div class="kbd" data-at="6.4">Open in Navaar</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="end" class="layer">
+    <div id="lockup"><div id="mark"></div><div id="wordclip"><div id="word">Navaar</div></div></div>
+    <div id="tag">Your music, kept in Telegram.</div>
+  </div>
+
+  <div id="black" class="layer"></div>
+</div>
+
+<script>
+const DURATION = 19.3;
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------- easing
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outExpo = (k) => (k >= 1 ? 1 : 1 - Math.pow(2, -10 * k));
+const outCubic = (k) => 1 - Math.pow(1 - k, 3);
+const inOutCubic = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+const inOutQuint = (k) => (k < 0.5 ? 16 * k ** 5 : 1 - Math.pow(-2 * k + 2, 5) / 2);
+// A damped spring settling from 0 to 1, for things that pop in.
+const spring = (k, freq = 4.2, damp = 6.5) => (k <= 0 ? 0 : 1 - Math.exp(-damp * k) * Math.cos(freq * Math.PI * k));
+
+// ---------------------------------------------------------------- waveform
+// Fixed heights so every render draws the same bars: a deterministic hash,
+// shaped into phrases with a quiet gap in the middle like a real recording.
+const BARS = 46;
+const heights = [];
+for (let i = 0; i < BARS; i++) {
+  const n = Math.abs(Math.sin(i * 12.9898 + 4.1) * 43758.5453) % 1;
+  const phrase = 0.55 + 0.45 * Math.abs(Math.sin(i / 5.2));
+  const gap = i >= 20 && i <= 22 ? 0.12 : 1;
+  heights.push(Math.max(3, Math.round((6 + n * 20) * phrase * gap)));
+}
+$("wave").innerHTML = heights.map((h) => `<b style="height:${h}px"></b>`).join("");
+const bars = [...$("wave").children];
+
+// ---------------------------------------------------------------- wash
+// Soft blobs drifting over the lime; the blur on #wash melts them together.
+const BLOBS = [
+  { c: "#e9fbb4", w: 1100, h: 520, x: 300, y: 120, r: -24, sx: 160, sy: 90, f: 0.23 },
+  { c: "#a9dc26", w: 900, h: 700, x: 1300, y: 600, r: 18, sx: 190, sy: 110, f: 0.19 },
+  { c: "#f3ffd6", w: 1400, h: 260, x: 700, y: 520, r: -32, sx: 220, sy: 80, f: 0.31 },
+  { c: "#b6e83a", w: 800, h: 600, x: -80, y: 780, r: 10, sx: 150, sy: 140, f: 0.17 },
+  { c: "#eaffc2", w: 1000, h: 220, x: 1250, y: 140, r: -38, sx: 180, sy: 70, f: 0.27 },
+  { c: "#9fd41c", w: 700, h: 500, x: 900, y: -120, r: 0, sx: 140, sy: 90, f: 0.21 },
+];
+$("wash").innerHTML = BLOBS.map(() => "<i></i>").join("");
+const blobEls = [...$("wash").children];
+function renderWash(t) {
+  BLOBS.forEach((b, i) => {
+    const el = blobEls[i];
+    const x = b.x + Math.sin(t * b.f * 2 + i) * b.sx;
+    const y = b.y + Math.cos(t * b.f * 1.6 + i * 2) * b.sy;
+    el.style.cssText = `width:${b.w}px;height:${b.h}px;background:${b.c};left:${x}px;top:${y}px;transform:rotate(${b.r + Math.sin(t * 0.3 + i) * 8}deg)`;
+  });
+}
+
+// ---------------------------------------------------------------- chat layout
+const chatItems = [...document.querySelectorAll("#chat [data-at]")].map((el) => ({ el, at: parseFloat(el.dataset.at) }));
+const chat = $("chat");
+const CHAT_TOP = 108;
+let itemBottoms = [];
+function measure() {
+  itemBottoms = chatItems.map(({ el }) => {
+    let y = 0, n = el;
+    while (n && n !== chat) { y += n.offsetTop; n = n.offsetParent; }
+    return y + el.offsetHeight;
+  });
+}
+
+// Where the chat is scrolled to: the newest item sits on the bottom of the
+// visible part of the phone, and each new arrival shoves it up quickly.
+function chatScroll(t, visibleBottom) {
+  let s = 0;
+  chatItems.forEach((it, i) => {
+    const target = Math.max(0, CHAT_TOP + itemBottoms[i] + 22 - visibleBottom);
+    const k = outExpo(prog(t, it.at - 0.02, it.at + 0.42));
+    s = lerp(s, Math.max(s, target), k);
+  });
+  return s;
+}
+
+// ---------------------------------------------------------------- phone state
+function renderChat(t, visibleBottom) {
+  chatItems.forEach(({ el, at }) => {
+    const k = prog(t, at, at + 0.5);
+    const s = spring(k, 3.2, 7);
+    el.style.opacity = clamp((t - at) / 0.12);
+    el.style.transform = `translateY(${(1 - s) * 16}px) scale(${lerp(0.86, 1, s)})`;
+  });
+  chat.style.transform = `translateY(${-chatScroll(t, visibleBottom)}px)`;
+
+  // Play press and progress (the close-up).
+  const press = prog(t, 8.62, 8.9);
+  const pressScale = 1 - 0.14 * Math.sin(Math.PI * press);
+  $("pp").style.transform = `scale(${pressScale})`;
+  $("halo").style.opacity = (Math.sin(Math.PI * press) * 0.9).toFixed(3);
+  $("halo").style.transform = `scale(${lerp(0.6, 1.25, press)})`;
+  const playing = t >= 8.76;
+  $("icoPlay").style.display = playing ? "none" : "";
+  $("icoPause").style.display = playing ? "" : "none";
+
+  const played = Math.max(0, t - 9.0);
+  const frac = Math.min(1, played / 30);
+  const lit = frac * BARS;
+  bars.forEach((b, i) => {
+    const on = i < lit;
+    const edge = i < lit && i >= lit - 1;
+    b.style.background = on ? (edge ? "#dffc8e" : "#c6f24a") : "rgba(255,255,255,0.3)";
+  });
+  const sec = Math.floor(played);
+  $("dur").textContent = t < 8.76 ? "3:12" : `0:${String(sec).padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------- end card
+// The app mark, built from its own pixels: the tip lands first, then the two
+// columns behind it, on the same three beats as the original's logo.
+const U = 11; // one mark pixel, in px
+const MARK = [
+  { x: 9, y: 7, w: 2, h: 2, at: 13.05 },
+  { x: 7, y: 5, w: 2, h: 6, at: 13.5 },
+  { x: 5, y: 3, w: 2, h: 10, at: 13.68 },
+];
+$("mark").innerHTML = MARK.map(() => "<i></i>").join("");
+const markEls = [...$("mark").children];
+
+function renderEnd(t) {
+  // Mark sits in the middle of the frame until the wordmark pushes it left.
+  MARK.forEach((m, i) => {
+    const k = spring(prog(t, m.at, m.at + 0.6), 3.4, 6);
+    const el = markEls[i];
+    const cx = (m.x + m.w / 2) * U, cy = (m.y + m.h / 2) * U;
+    el.style.cssText = `left:${cx - (m.w * U) / 2}px;top:${cy - (m.h * U) / 2}px;width:${m.w * U}px;height:${m.h * U}px;transform:scale(${k});opacity:${t >= m.at ? 1 : 0}`;
+  });
+  // The tip starts life big and alone, like the dot in the original.
+  const tip = markEls[0];
+  const grow = spring(prog(t, 13.05, 13.65), 2.6, 5.5);
+  const shrink = inOutCubic(prog(t, 13.4, 13.7));
+  tip.style.transform = `scale(${grow * lerp(2.4, 1, shrink)})`;
+
+  const word = $("word");
+  const ww = word.offsetWidth;
+  const open = outExpo(prog(t, 14.0, 14.7));
+  $("wordclip").style.width = `${ww * open}px`;
+  word.style.transform = `translateX(${(1 - open) * -60}px)`;
+  const markW = 16 * U;
+  const lock = $("lockup");
+  const total = markW + ww * open;
+  // Centre the optical middle of the staircase, not its 16-unit box.
+  const markOptical = 8 * U - 16 * U / 2;
+  lock.style.transform = `translate(${-total / 2 - (1 - open) * markOptical}px, ${-markW / 2}px)`;
+
+  const tk = outCubic(prog(t, 14.9, 15.6));
+  $("tag").style.opacity = tk;
+  $("tag").style.transform = `translateY(${(1 - tk) * 18}px)`;
+}
+
+// ---------------------------------------------------------------- main
+function renderAt(t) {
+  renderWash(t);
+
+  const inEnd = t >= 13.0 && t < 17.2;
+  $("end").style.display = inEnd ? "" : "none";
+  $("black").style.display = t >= 17.2 ? "" : "none";
+  if (inEnd) renderEnd(t);
+
+  const composer = $("composer");
+  const phone = $("phone");
+  const world = $("world");
+
+  // Composer: 0.77 -> 3.30
+  if (t >= 0.77 && t < 3.3) {
+    composer.style.display = "";
+    const text = "/playlist Late Night Drive";
+    const typed = Math.floor(clamp((t - 0.98) / (2.95 - 0.98)) * text.length);
+    const s = text.slice(0, typed);
+    $("typed").innerHTML = s.startsWith("/")
+      ? `<span style="color:#c6f24a">${s.slice(0, Math.min(9, s.length))}</span>${s.slice(9)}`
+      : s;
+    $("ph").style.display = typed ? "none" : "";
+    const blink = typed > 0 && typed < text.length ? 1 : (Math.floor(t * 2.6) % 2 ? 0 : 1);
+    $("caret").style.opacity = blink;
+    const inK = outExpo(prog(t, 0.77, 1.25));
+    // The send button swells once the command is complete.
+    const ready = spring(prog(t, 2.98, 3.3), 3, 6);
+    $("send").style.transform = `scale(${lerp(0.82, 1, ready)})`;
+    $("send").style.opacity = lerp(0.55, 1, ready);
+    composer.style.transform = `translateY(${(1 - inK) * 70}px) scale(${lerp(0.94, 1, inK)})`;
+  } else {
+    composer.style.display = "none";
+  }
+
+  // Phone.
+  let showPhone = t < 0.77 || (t >= 3.3 && t < 13.0);
+  phone.style.display = showPhone ? "" : "none";
+  world.style.transformOrigin = "0 0";
+  world.style.transform = "";
+  if (!showPhone) return;
+
+  const SCALE = 2.62;
+  let top, chatT, camScale = 1, camX = 0, camY = 0;
+
+  if (t < 0.77) {
+    // Cold open: the finished chat, riding high, drifting up.
+    chatT = 7.6;
+    top = lerp(-420, -470, t / 0.77);
+  } else if (t < 8.0) {
+    chatT = t;
+    const rise = outExpo(prog(t, 3.3, 4.0));
+    top = lerp(900, 96, rise);
+    // A slow push in while the conversation plays out.
+    top -= inOutCubic(prog(t, 4.0, 8.0)) * 18;
+  } else {
+    chatT = t;
+    top = 78;
+  }
+
+  phone.style.transform = `translateY(${top}px) scale(${SCALE})`;
+  const visibleBottom = (1080 - top) / SCALE;
+  renderChat(chatT, t < 8.0 ? visibleBottom : (1080 - 78) / SCALE);
+
+  if (t >= 8.0) {
+    // Close-up on the card's player row: cut straight in, drift right, then
+    // ease back a touch before the end card.
+    const card = $("player");
+    const r = card.getBoundingClientRect();
+    // The rect is measured with the camera reset above, so it is in stage px.
+    const drift = inOutCubic(prog(t, 8.0, 12.6));
+    const pull = inOutQuint(prog(t, 12.2, 13.0));
+    camScale = lerp(2.95, 2.95, drift) * lerp(1, 0.9, pull);
+    const fx = r.left + lerp(0.12, 0.34, drift) * r.width;
+    const fy = r.top + r.height * lerp(0.2, 0.3, drift);
+    camX = 960 - fx * camScale;
+    camY = 640 - fy * camScale;
+    world.style.transform = `translate(${camX}px, ${camY}px) scale(${camScale})`;
+  }
+}
+
+window.renderAt = renderAt;
+window.DURATION = DURATION;
+
+document.fonts.ready.then(() => {
+  measure();
+  window.sceneReady = true;
+  if (!navigator.webdriver) {
+    const t0 = performance.now();
+    const tick = () => { renderAt(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(tick); };
+    tick();
+  }
+});
+</script>
+</body>
+</html>
