@@ -15,6 +15,7 @@ import {
   trackStreamUrl,
 } from "../api";
 import { useLibrary } from "./LibraryContext";
+import { cachedUrl, initAudioCache, prefetchAllowed, saveTrack } from "../lib/audioCache";
 import {
   haptic,
   onActivationChange,
@@ -299,9 +300,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // A saved copy plays with no network at all. Without one and without a
+    // connection there is nothing to fetch, so say so now rather than leave a
+    // spinner turning until the element gives up on its own.
+    const local = cachedUrl(track.id);
+    if (!local && navigator.onLine === false) {
+      audio.removeAttribute("src");
+      audio.load();
+      setIsPlaying(false);
+      setStatus("failed");
+      return;
+    }
+
     setStatus("loading");
 
-    audio.src = trackStreamUrl(track.id);
+    audio.src = local ?? trackStreamUrl(track.id);
     audio.currentTime = 0;
     if (at > 0) {
       // The stream is a Range proxy, so seeking before any data has arrived is
@@ -731,6 +744,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener("ended", onEnded);
     };
   }, [advance, repeat, playAudio]);
+
+  // --- Keeping songs on the phone -------------------------------------------
+
+  useEffect(() => {
+    void initAudioCache();
+  }, []);
+
+  // Five seconds in, a song is one the listener actually wanted rather than
+  // one skipped past, so it is kept for next time — and then whatever plays
+  // next is fetched ahead, so a weak connection has a song in hand when this
+  // one ends. One track ahead only: a queue is a guess, and every download
+  // after the first is a guess about a guess.
+  const settled = current != null && position >= 5;
+  const nextUp = upNext[0] ?? contextNext[0] ?? null;
+  useEffect(() => {
+    if (!settled || !current || current.telegram_file_id === "") return;
+    let cancelled = false;
+    void (async () => {
+      await saveTrack(current.id, current.mime_type);
+      if (cancelled || !nextUp || !prefetchAllowed()) return;
+      await saveTrack(nextUp.id, nextUp.mime_type);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [settled, current, nextUp]);
 
   // Confirm before closing only while something is actually playing. A stray
   // swipe should not end a song; confirming an exit the user meant is friction.

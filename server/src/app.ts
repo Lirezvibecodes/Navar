@@ -119,7 +119,10 @@ export function createApp(bot: Telegraf | null): Express {
     express.static(webDist, {
       maxAge: "1d",
       setHeaders: (res, filePath) => {
-        if (path.basename(filePath) === "index.html") {
+        // sw.js likewise: a service worker that could be served stale would
+        // keep serving the app it knows about after a fix has shipped.
+        const name = path.basename(filePath);
+        if (name === "index.html" || name === "sw.js") {
           res.setHeader("Cache-Control", "no-cache");
         }
       },

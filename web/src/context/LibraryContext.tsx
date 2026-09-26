@@ -8,6 +8,7 @@ import {
 } from "react";
 import * as api from "../api";
 import { cacheKey, dropCache } from "../lib/cache";
+import { isNetworkError, readLibrarySnapshot, saveLibrarySnapshot } from "../lib/offlineSnapshot";
 import { splitArtists } from "../lib/artists";
 import type { FriendPlaylist, Me, Playlist, Track } from "../types";
 
@@ -86,10 +87,16 @@ export function LibraryProvider({
   setMe: (me: Me) => void;
   children: React.ReactNode;
 }) {
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [followedPlaylists, setFollowedPlaylists] = useState<FriendPlaylist[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Seeded from the last library this phone saw, so the first frame has rows
+  // in it even while the server is waking up, or when it cannot be reached.
+  // The live load below replaces all of it.
+  const [snapshot] = useState(readLibrarySnapshot);
+  const [tracks, setTracks] = useState<Track[]>(snapshot?.tracks ?? []);
+  const [playlists, setPlaylists] = useState<Playlist[]>(snapshot?.playlists ?? []);
+  const [followedPlaylists, setFollowedPlaylists] = useState<FriendPlaylist[]>(
+    snapshot?.followedPlaylists ?? []
+  );
+  const [loading, setLoading] = useState(snapshot == null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -105,11 +112,21 @@ export function LibraryProvider({
       setPlaylists(p);
       setFollowedPlaylists(f);
     } catch (err) {
+      // Offline with a saved library on screen, the rows are the answer; an
+      // error banner over them would only say what the phone already knows.
+      if (snapshot && isNetworkError(err)) return;
       setError(err instanceof Error ? err.message : "Could not load your library");
     } finally {
       setLoading(false);
     }
-  }, [me]);
+  }, [me, snapshot]);
+
+  // Kept after every change, not only after a load, so a playlist made or a
+  // track hearted just before losing signal is still there on the next open.
+  useEffect(() => {
+    if (loading) return;
+    saveLibrarySnapshot({ tracks, playlists, followedPlaylists });
+  }, [loading, tracks, playlists, followedPlaylists]);
 
   // Optimistic on the way out — dropping a followed playlist you have just
   // opened should not wait on a round trip to disappear from your library —

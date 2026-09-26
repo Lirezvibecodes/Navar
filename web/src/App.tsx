@@ -34,6 +34,7 @@ import { TagsView } from "./views/TagsView";
 import { ListeningStatsView } from "./views/ListeningStatsView";
 import { hideSplash } from "./lib/splash";
 import { peek, cacheKey, revalidate } from "./lib/cache";
+import { isNetworkError, readMeSnapshot, saveMeSnapshot } from "./lib/offlineSnapshot";
 import {
   getTelegramWebApp,
   haptic,
@@ -409,6 +410,9 @@ function Shell({ me }: { me: Me }) {
  * until one of the other two states has actually committed. Rendering a
  * spinner here as well would put two loading screens on top of each other.
  */
+/** How long a sign-in may take before the saved library is shown instead. */
+const SLOW_SIGN_IN_MS = 6000;
+
 function Boot() {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -432,6 +436,17 @@ function Boot() {
     setBusy(true);
     setError(null);
     const initData = getTelegramWebApp()?.initData;
+    // A server that is asleep answers in about thirty seconds, and one that is
+    // unreachable never does. Past this point the last library this phone saw
+    // goes up in the meantime, if there is one, and the live sign-in replaces
+    // it the moment it lands.
+    let showingSnapshot = false;
+    const fallback = window.setTimeout(() => {
+      const snapshot = readMeSnapshot(initData);
+      if (!snapshot) return;
+      showingSnapshot = true;
+      setMe((prev) => prev ?? snapshot);
+    }, SLOW_SIGN_IN_MS);
     try {
       if (!initData) {
         setError("Open Navaar from Telegram to sign in.");
@@ -439,12 +454,19 @@ function Boot() {
       }
       setMe(await authenticate(initData));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not sign you in");
+      const snapshot = isNetworkError(err) ? readMeSnapshot(initData) : null;
+      if (snapshot) setMe((prev) => prev ?? snapshot);
+      else if (!showingSnapshot) setError(err instanceof Error ? err.message : "Could not sign you in");
     } finally {
+      window.clearTimeout(fallback);
       setBusy(false);
       setAttempted(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (me) saveMeSnapshot(me);
+  }, [me]);
 
   useEffect(() => {
     void signIn();
