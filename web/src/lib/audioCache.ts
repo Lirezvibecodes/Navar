@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { trackStreamUrl } from "../api";
 
 /**
@@ -46,6 +47,21 @@ interface Meta {
 const entries = new Map<string, Meta>();
 const inflight = new Map<string, Promise<void>>();
 let dbPromise: Promise<IDBDatabase | null> | null = null;
+
+/** Rows showing the "saved on this phone" mark re-render when this fires. */
+const listeners = new Set<() => void>();
+function changed(): void {
+  for (const listener of listeners) listener();
+}
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** Whether a song is saved on this phone, kept current as songs come and go. */
+export function useIsCached(trackId: string): boolean {
+  return useSyncExternalStore(subscribe, () => entries.has(trackId));
+}
 let budgetBytes = FALLBACK_BUDGET_BYTES;
 
 function openDb(): Promise<IDBDatabase | null> {
@@ -104,6 +120,7 @@ export function initAudioCache(): Promise<void> {
     } catch {
       // An unreadable cache is an empty one.
     }
+    changed();
 
     try {
       // Ask the browser not to clear this under storage pressure. It may say
@@ -169,6 +186,7 @@ export function saveTrack(trackId: string, mimeType: string | null): Promise<voi
       const row: Row = { id: trackId, blob, size: blob.size, lastPlayed: Date.now() };
       await tx(db, "readwrite", (s) => void s.put(row));
       entries.set(trackId, { url: URL.createObjectURL(blob), size: blob.size, lastPlayed: row.lastPlayed });
+      changed();
     } catch {
       // Offline, cut off, or out of room: the song simply streams next time.
     } finally {
@@ -194,6 +212,7 @@ async function makeRoom(db: IDBDatabase, incoming: number): Promise<void> {
     URL.revokeObjectURL(meta.url);
     entries.delete(id);
     total -= meta.size;
+    changed();
   }
 }
 

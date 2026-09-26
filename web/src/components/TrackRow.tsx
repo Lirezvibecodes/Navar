@@ -2,10 +2,11 @@ import { useState } from "react";
 import type { Track } from "../types";
 import { Cover } from "./PixelArt";
 import { Avatar } from "./Avatar";
-import { CheckIcon, DotsIcon, HeartIcon } from "../icons";
+import { CheckIcon, DotsIcon, DownloadIcon, HeartIcon } from "../icons";
 import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/format";
 import { haptic } from "../telegram";
 import { useLibrary } from "../context/LibraryContext";
+import { useIsCached } from "../lib/audioCache";
 import { SwipeQueueConfirm, SwipeQueueReveal, useLongPress, useSwipeQueue } from "./ui";
 
 /**
@@ -95,6 +96,7 @@ export function TrackRow({
   const [popping, setPopping] = useState(false);
 
   const meta = secondary ?? trackArtist(track);
+  const saved = useIsCached(track.id);
   // Who put it here, when that is somebody other than you. A library is mostly
   // your own uploads, and a row that says your own name nine times in a screen
   // is nine rows of nothing — the tag is worth its width exactly when the
@@ -249,6 +251,18 @@ export function TrackRow({
               minWidth: 0,
             }}
           >
+            {saved ? (
+              // Played from the phone, network or not. Lime, because in this
+              // app lime is playback — and this is the one mark that says a
+              // song will play no matter what the connection is doing.
+              <DownloadIcon
+                size={11}
+                aria-label="Saved on this phone"
+                role="img"
+                aria-hidden={false}
+                style={{ flex: "none", color: "var(--color-nav-action)" }}
+              />
+            ) : null}
             <span className="nav-clip">
               <Highlighted text={meta} query={query} />
             </span>
