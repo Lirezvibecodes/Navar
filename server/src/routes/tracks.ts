@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { Readable } from "node:stream";
+import { edgeStreamUrl } from "../stream-links";
 import multer from "multer";
 import { requireAuth, AuthedRequest } from "../middleware";
 import {
@@ -115,6 +116,16 @@ export function tracksRouter(): Router {
       const track = await getTrackForListener(req.params.id, requesterId);
       if (!track) {
         res.status(404).json({ error: "Not found" });
+        return;
+      }
+
+      // With the stream Worker configured, the audio skips this server
+      // entirely: the player follows the redirect and fetches the bytes from
+      // Cloudflare. Only this tiny response counts against our bandwidth.
+      const edgeUrl = edgeStreamUrl(track.telegram_file_id, track.mime_type);
+      if (edgeUrl) {
+        res.setHeader("Cache-Control", "no-store");
+        res.redirect(302, edgeUrl);
         return;
       }
 

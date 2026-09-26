@@ -33,6 +33,14 @@ export const config = {
   databaseUrl: optional("DATABASE_URL"),
   jwtSecret: optional("JWT_SECRET"),
   /**
+   * The Cloudflare Worker that streams audio (stream-worker/), and the secret
+   * its links are signed with. Both set: plays redirect to the Worker and no
+   * audio passes through this server. Either missing: audio is proxied here
+   * as before.
+   */
+  streamBaseUrl: optional("STREAM_BASE_URL")?.replace(/\/+$/, ""),
+  streamSigningSecret: optional("STREAM_SIGNING_SECRET"),
+  /**
    * Overrides for the two media channels. Normally unset: the bot discovers
    * both from the updates they send it and remembers them in app_channels, so
    * these exist for pinning a channel by hand — pointing a local instance at a
