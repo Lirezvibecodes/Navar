@@ -50,8 +50,74 @@ let dbPromise: Promise<IDBDatabase | null> | null = null;
 
 /** Rows showing the "saved on this phone" mark re-render when this fires. */
 const listeners = new Set<() => void>();
+let stats: CacheStats = { count: 0, bytes: 0 };
 function changed(): void {
+  let bytes = 0;
+  for (const meta of entries.values()) bytes += meta.size;
+  // A new object only when something moved, so useSyncExternalStore sees a
+  // stable snapshot between changes.
+  stats = { count: entries.size, bytes };
   for (const listener of listeners) listener();
+}
+
+export interface CacheStats {
+  count: number;
+  bytes: number;
+}
+
+/** How many songs are saved here and how much room they take. */
+export function useAudioCacheStats(): CacheStats {
+  return useSyncExternalStore(subscribe, () => stats);
+}
+
+// --- The switch in Settings --------------------------------------------------
+//
+// Per phone, like the cache itself, so it lives in localStorage rather than on
+// the account. Off stops new songs being saved or fetched ahead; songs already
+// saved still play until they are cleared, so each control does one thing.
+
+const ENABLED_KEY = "navaar-save-songs";
+let enabled = readEnabled();
+
+function readEnabled(): boolean {
+  try {
+    return localStorage.getItem(ENABLED_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function useSavingEnabled(): [boolean, (on: boolean) => void] {
+  const on = useSyncExternalStore(subscribe, () => enabled);
+  return [on, setSavingEnabled];
+}
+
+export function setSavingEnabled(on: boolean): void {
+  enabled = on;
+  try {
+    localStorage.setItem(ENABLED_KEY, on ? "on" : "off");
+  } catch {
+    // Remembered for this session only.
+  }
+  changed();
+}
+
+/**
+ * Forgets every saved song. The object URLs are deliberately not revoked: the
+ * song playing right now may be one of them, and pulling its URL out from
+ * under the audio element would cut it off mid-track. They are released when
+ * the app closes.
+ */
+export async function clearAudioCache(): Promise<void> {
+  entries.clear();
+  changed();
+  const db = await openDb();
+  if (!db) return;
+  try {
+    await tx(db, "readwrite", (s) => void s.clear());
+  } catch {
+    // Whatever is left is dropped by eviction in time.
+  }
 }
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
@@ -166,7 +232,7 @@ async function touch(trackId: string, lastPlayed: number): Promise<void> {
  * for one already saved. Resolves either way; never throws.
  */
 export function saveTrack(trackId: string, mimeType: string | null): Promise<void> {
-  if (entries.has(trackId)) return Promise.resolve();
+  if (!enabled || entries.has(trackId)) return Promise.resolve();
   const pending = inflight.get(trackId);
   if (pending) return pending;
 
@@ -182,6 +248,7 @@ export function saveTrack(trackId: string, mimeType: string | null): Promise<voi
       if (raw.size === 0) return;
       const blob = mimeType && raw.type !== mimeType ? new Blob([raw], { type: mimeType }) : raw;
 
+      if (!enabled) return;
       await makeRoom(db, blob.size);
       const row: Row = { id: trackId, blob, size: blob.size, lastPlayed: Date.now() };
       await tx(db, "readwrite", (s) => void s.put(row));

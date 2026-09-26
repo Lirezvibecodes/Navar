@@ -10,6 +10,7 @@ import { GhostButton, Screen, SectionHeader, Sheet, SheetDivider, Toggle } from 
 import { EditIcon, ImageIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
+import { clearAudioCache, useAudioCacheStats, useSavingEnabled } from "../lib/audioCache";
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { haptic } from "../telegram";
 import { bannerLayerStyle, usePixelatedBanner } from "./ProfileView";
@@ -22,7 +23,9 @@ import { bannerLayerStyle, usePixelatedBanner } from "./ProfileView";
  */
 export function SettingsView({ nav: _nav }: { nav: Navigation }) {
   const { me, tracks, setMe } = useLibrary();
-  const { errorToast } = useToast();
+  const { errorToast, toast } = useToast();
+  const [saving, setSaving] = useSavingEnabled();
+  const saved = useAudioCacheStats();
 
   const [renaming, setRenaming] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
@@ -238,6 +241,45 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
         onChange={(next) => void setListening(next)}
       />
 
+      <SectionHeader title="On this phone" />
+      <Toggle
+        label="Save songs I play"
+        hint="Kept on this phone, so a replay starts at once and plays without a connection. Off stops saving new ones; saved songs still play until you clear them."
+        checked={saving}
+        onChange={setSaving}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 52 }}>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>
+            Saved songs
+          </span>
+          <span
+            style={{
+              display: "block",
+              fontSize: 11.5,
+              lineHeight: 1.35,
+              color: "var(--color-nav-muted)",
+              marginTop: 3,
+            }}
+          >
+            {saved.count === 0
+              ? "None yet"
+              : `${saved.count} ${saved.count === 1 ? "song" : "songs"} · ${formatBytes(saved.bytes)}`}
+          </span>
+        </span>
+        <GhostButton
+          width={84}
+          height={34}
+          disabled={saved.count === 0}
+          onClick={() => {
+            void clearAudioCache();
+            toast("Saved songs cleared");
+          }}
+        >
+          Clear
+        </GhostButton>
+      </div>
+
       <SectionHeader title="Appearance" />
       <AccentPicker
         value={me.accent_color ?? "lime"}
@@ -295,4 +337,10 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
       </Sheet>
     </Screen>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
