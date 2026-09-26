@@ -4,7 +4,8 @@ import { Cover } from "./PixelArt";
 import { Avatar } from "./Avatar";
 import { CheckIcon, DotsIcon, DownloadIcon, HeartIcon } from "../icons";
 import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/format";
-import { haptic } from "../telegram";
+import { haptic, isInTelegram } from "../telegram";
+import { useOnline } from "../lib/online";
 import { useLibrary } from "../context/LibraryContext";
 import { useIsCached } from "../lib/audioCache";
 import { SwipeQueueConfirm, SwipeQueueReveal, useLongPress, useSwipeQueue } from "./ui";
@@ -97,6 +98,8 @@ export function TrackRow({
 
   const meta = secondary ?? trackArtist(track);
   const saved = useIsCached(track.id);
+  const online = useOnline();
+  const unavailable = !online && !saved && !isInTelegram();
   // Who put it here, when that is somebody other than you. A library is mostly
   // your own uploads, and a row that says your own name nine times in a screen
   // is nine rows of nothing — the tag is worth its width exactly when the
@@ -115,6 +118,10 @@ export function TrackRow({
           borderRadius: 12,
           margin: "0 -8px",
           overflow: canSwipe ? "hidden" : undefined,
+          // Offline in the installed app, a song that is not downloaded
+          // cannot play; it stays in the list, just set back.
+          opacity: unavailable ? 0.4 : undefined,
+          transition: "opacity 200ms ease",
         } as React.CSSProperties
       }
     >

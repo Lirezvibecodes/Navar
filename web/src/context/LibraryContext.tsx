@@ -10,6 +10,7 @@ import * as api from "../api";
 import { cacheKey, dropCache } from "../lib/cache";
 import { isNetworkError, readLibrarySnapshot, saveLibrarySnapshot } from "../lib/offlineSnapshot";
 import { splitArtists } from "../lib/artists";
+import { useToast } from "./ToastContext";
 import type { FriendPlaylist, Me, Playlist, Track } from "../types";
 
 /**
@@ -90,6 +91,7 @@ export function LibraryProvider({
   // Seeded from the last library this phone saw, so the first frame has rows
   // in it even while the server is waking up, or when it cannot be reached.
   // The live load below replaces all of it.
+  const { toast } = useToast();
   const [snapshot] = useState(readLibrarySnapshot);
   const [tracks, setTracks] = useState<Track[]>(snapshot?.tracks ?? []);
   const [playlists, setPlaylists] = useState<Playlist[]>(snapshot?.playlists ?? []);
@@ -218,6 +220,12 @@ export function LibraryProvider({
 
   const setFavorite = useCallback(
     async (track: Track, on: boolean) => {
+      // Offline, a heart would flip and then quietly flip back when the save
+      // failed; say why instead of doing either.
+      if (navigator.onLine === false) {
+        toast("You're offline. Connect to the internet to do that.");
+        return;
+      }
       const before = track;
       // Optimistic, with a plausible timestamp so any "recently favourited"
       // ordering does not jump when the real one arrives.
@@ -228,7 +236,7 @@ export function LibraryProvider({
         putTrack(before);
       }
     },
-    [putTrack]
+    [putTrack, toast]
   );
 
   const value = useMemo<LibraryApi>(

@@ -15,7 +15,7 @@ import {
   trackStreamUrl,
 } from "../api";
 import { useLibrary } from "./LibraryContext";
-import { cachedUrl, initAudioCache, prefetchAllowed, saveTrack } from "../lib/audioCache";
+import { cachedUrl, initAudioCache, isCached, prefetchAllowed, saveTrack } from "../lib/audioCache";
 import {
   haptic,
   isInTelegram,
@@ -418,7 +418,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       const useShuffle = shuffleOverride ?? shuffle;
       if (shuffleOverride !== undefined) setShuffleState(shuffleOverride);
-      const playOrder = useShuffle ? shuffled(nextSource.tracks) : nextSource.tracks;
+      // Offline in the installed app only downloaded songs can play, so the
+      // rest are left out of this run instead of stopping it at the first one.
+      // The song tapped stays in either way, and says so if it cannot play.
+      const offline = !isInTelegram() && navigator.onLine === false;
+      const pool = offline
+        ? nextSource.tracks.filter((t) => t.id === track?.id || isCached(t.id))
+        : nextSource.tracks;
+      const playOrder = useShuffle ? shuffled(pool) : pool;
       const start = track
         ? playOrder.findIndex((t) => t.id === track.id)
         : 0;

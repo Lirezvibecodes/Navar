@@ -1,14 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { Navigation } from "../App";
 import { TrackRow } from "./TrackRow";
 import { TrackMenu } from "./TrackMenu";
 import type { TrackMenuTarget } from "./TrackMenu";
 import { ActionButton, Empty, GhostButton, Screen, Skeleton } from "./ui";
-import { PlayIcon, ShuffleIcon } from "../icons";
+import { CheckIcon, DownloadIcon, PlayIcon, ShuffleIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import type { Track } from "../types";
+import { confirmAction, isInTelegram } from "../telegram";
+import { useToast } from "../context/ToastContext";
+import { downloadTracks, removeDownloads, takeDownloadError, useDownloadSummary } from "../lib/audioCache";
+import { rememberCollection } from "../lib/collections";
 
 /**
  * A playlist, an album, an artist, a friend's library: a header and a list.
@@ -71,6 +75,7 @@ export function TrackListScreen({
   actions?: ReactNode;
 }) {
   const { owns, setFavorite } = useLibrary();
+  const inTelegram = isInTelegram();
   const { current, isPlaying, playFrom, queueNext, queueLast } = usePlayer();
   const [menu, setMenu] = useState<TrackMenuTarget | null>(null);
 
@@ -78,6 +83,13 @@ export function TrackListScreen({
     () => ({ label: sourceLabel, key: sourceKey, tracks }),
     [sourceLabel, sourceKey, tracks]
   );
+
+  // What this list holds, for its tile's download mark in the library. Only
+  // a list that actually loaded counts: an empty one from a failed request
+  // would otherwise read as "nothing to download".
+  useEffect(() => {
+    if (!loading && !error) rememberCollection(sourceKey, tracks.map((t) => t.id));
+  }, [loading, error, sourceKey, tracks]);
 
   return (
     <>
@@ -142,6 +154,7 @@ export function TrackListScreen({
               playFrom(source, undefined, true);
             }}
           />
+          {inTelegram ? null : <DownloadAllButton tracks={tracks} />}
           {actions}
         </div>
 
@@ -185,5 +198,52 @@ export function TrackListScreen({
         onGoTo={(to) => nav.push(to)}
       />
     </>
+  );
+}
+
+/**
+ * Download the whole list, in the installed web app. One button, four faces:
+ * nothing kept yet, some kept (the count, and a tap fetches the rest), in
+ * progress (the count climbing), all kept (a lime tick, and a tap offers to
+ * remove them).
+ */
+function DownloadAllButton({ tracks }: { tracks: Track[] }) {
+  const ids = useMemo(() => tracks.map((t) => t.id), [tracks]);
+  const { saved, total, busy } = useDownloadSummary(ids);
+  const { toast } = useToast();
+  const all = total > 0 && saved === total;
+
+  const onClick = async () => {
+    if (total === 0 || busy) return;
+    if (all) {
+      if (await confirmAction("Remove these downloads from this device?")) {
+        void removeDownloads(ids);
+        toast("Downloads removed");
+      }
+      return;
+    }
+    if (!navigator.onLine) {
+      toast("You're offline. Connect to download.");
+      return;
+    }
+    await downloadTracks(tracks);
+    const error = takeDownloadError();
+    toast(error ?? "Downloaded");
+  };
+
+  return (
+    <GhostButton
+      icon={all ? CheckIcon : DownloadIcon}
+      label={all ? "Downloaded" : busy ? "Downloading" : "Download"}
+      width={saved > 0 && !all ? 70 : 44}
+      disabled={total === 0}
+      onClick={() => void onClick()}
+    >
+      {saved > 0 && !all ? (
+        <span style={{ fontSize: 11.5, fontVariantNumeric: "tabular-nums" }}>
+          {saved}/{total}
+        </span>
+      ) : null}
+    </GhostButton>
   );
 }

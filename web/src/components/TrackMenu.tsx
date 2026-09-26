@@ -16,6 +16,7 @@ import {
 import { CollectionArt, Cover } from "./PixelArt";
 import {
   AlbumIcon,
+  DownloadIcon,
   EditIcon,
   ImageIcon,
   LibraryIcon,
@@ -29,7 +30,8 @@ import {
   UserIcon,
 } from "../icons";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
-import { haptic, shareLink } from "../telegram";
+import { haptic, isInTelegram, shareLink } from "../telegram";
+import { downloadTracks, removeDownloads, takeDownloadError, useDownloadState } from "../lib/audioCache";
 import { LyricsPickerSheet } from "./LyricsPickerSheet";
 import { StoryOutputSheet, type StoryPick } from "./StoryOutputSheet";
 
@@ -78,6 +80,7 @@ export function TrackMenu({
     useLibrary();
   const { queueNext, queueLast } = usePlayer();
   const { toast, errorToast, undoToast } = useToast();
+  const inTelegram = isInTelegram();
   const keep = useKeepTrack();
 
   const [adding, setAdding] = useState<Track | null>(null);
@@ -185,6 +188,7 @@ export function TrackMenu({
                 onClose();
               }}
             />
+            {inTelegram ? null : <DownloadItem track={track} onDone={onClose} />}
             <SheetDivider />
 
             {owned ? null : (
@@ -206,7 +210,8 @@ export function TrackMenu({
                 onClick={() => void share(track)}
               />
             ) : null}
-            {owned ? (
+            {/* A Story is a Telegram thing; the installed app has none to open. */}
+            {owned && inTelegram ? (
               <SheetItem
                 icon={SparklesIcon}
                 label="Share to Story"
@@ -679,5 +684,49 @@ export function EditTrackSheet({
         </div>
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * Download / Remove download, in the installed web app's song menu. The sheet
+ * closes as soon as a download is queued; the row's own mark shows when it
+ * lands, and a toast says so if it fails.
+ */
+function DownloadItem({ track, onDone }: { track: Track; onDone: () => void }) {
+  const state = useDownloadState(track.id);
+  const { toast } = useToast();
+
+  if (state === "saved") {
+    return (
+      <SheetItem
+        icon={TrashIcon}
+        label="Remove download"
+        onClick={() => {
+          void removeDownloads([track.id]);
+          toast("Download removed");
+          onDone();
+        }}
+      />
+    );
+  }
+  if (state !== "none") {
+    return <SheetItem icon={DownloadIcon} label="Downloading…" disabled onClick={() => {}} />;
+  }
+  return (
+    <SheetItem
+      icon={DownloadIcon}
+      label="Download"
+      onClick={() => {
+        if (!navigator.onLine) {
+          toast("You're offline. Connect to download.");
+          return;
+        }
+        onDone();
+        void downloadTracks([track]).then(() => {
+          const error = takeDownloadError();
+          toast(error ?? "Downloaded");
+        });
+      }}
+    />
   );
 }

@@ -22,9 +22,12 @@ import {
 } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { personName } from "../lib/format";
-import { CrateIcon } from "../icons";
+import { CrateIcon, DownloadIcon } from "../icons";
 import { useFavoritesArt } from "../lib/favoritesArt";
-import { haptic } from "../telegram";
+import { haptic, isInTelegram } from "../telegram";
+import { useDownloadSummary, useSavedTracks } from "../lib/audioCache";
+import { useCollectionTracks } from "../lib/collections";
+import { useOnline } from "../lib/online";
 import { usePersistedState } from "../lib/persist";
 import type { CrateFilter, View } from "../view";
 
@@ -77,6 +80,20 @@ export function LibraryView({
   const [naming, setNaming] = useState(false);
 
   const albums = useMemo(() => albumsOf(tracks), [tracks]);
+  // An album is a cut of your own library, so its songs are known without
+  // ever opening it, unlike a playlist's.
+  const albumTrackIds = useMemo(() => {
+    const byAlbum = new Map<string, string[]>();
+    for (const t of tracks) {
+      if (!t.album) continue;
+      const list = byAlbum.get(t.album) ?? [];
+      list.push(t.id);
+      byAlbum.set(t.album, list);
+    }
+    return byAlbum;
+  }, [tracks]);
+  const savedTracks = useSavedTracks();
+  const inTelegram = isInTelegram();
   const artists = useMemo(() => artistsOf(tracks), [tracks]);
   const favorites = useMemo(
     () => tracks.filter((t) => t.favorited_at != null).length,
@@ -167,6 +184,20 @@ export function LibraryView({
                 // Favourites is a cut of your own library, never a friend's, so
                 // it belongs only alongside your own playlists — pinned first
                 // among them rather than fixed regardless of the chips.
+                // The installed app's downloads, pinned first: the one list
+                // that always plays, connection or not.
+                ...(showOwn && !inTelegram
+                  ? [
+                      {
+                        key: "downloads",
+                        name: "On this phone",
+                        art: null,
+                        caption: <Counted count={savedTracks.length} one="song" />,
+                        to: { type: "downloads" } as View,
+                        onThisPhone: true,
+                      },
+                    ]
+                  : []),
                 ...(showOwn
                   ? [
                       {
@@ -175,6 +206,7 @@ export function LibraryView({
                         art: favoritesArt,
                         caption: <Counted count={favorites} one="track" />,
                         to: { type: "favorites" } as View,
+                        collection: "favorites",
                       },
                       ...playlists.map((p) => ({
                         key: p.id,
@@ -183,6 +215,7 @@ export function LibraryView({
                         art: api.playlistArtworkUrl(p),
                         caption: <Counted count={p.track_count ?? 0} one="track" />,
                         to: { type: "playlist", id: p.id, name: p.name } as View,
+                        collection: `playlist:${p.id}`,
                       })),
                     ]
                   : []),
@@ -196,6 +229,7 @@ export function LibraryView({
                       art: api.playlistArtworkUrl(p),
                       caption: personName(p.person),
                       to: { type: "playlist", id: p.id, name: p.name } as View,
+                      collection: `playlist:${p.id}`,
                     }))
                   : []),
               ]}
@@ -219,6 +253,8 @@ export function LibraryView({
                 cover: a.cover_track_id,
                 caption: a.artist || <Counted count={a.track_count} one="track" />,
                 to: { type: "album", name: a.name } as View,
+                collection: `album:${a.name}`,
+                trackIds: albumTrackIds.get(a.name),
               }))}
               nav={nav}
             />
@@ -276,6 +312,13 @@ function Grid({
     art?: string | null;
     caption: React.ReactNode;
     to: View;
+    /** TrackListScreen's key for this collection, for its download mark. */
+    collection?: string;
+    /** Its songs when the library already knows them (an album); otherwise
+     *  whatever the collection's screen last showed is used. */
+    trackIds?: string[];
+    /** The installed app's downloads tile, which draws its own art. */
+    onThisPhone?: boolean;
   }[];
   nav: Navigation;
 }) {
@@ -306,14 +349,20 @@ function Grid({
             } as React.CSSProperties
           }
         >
-          <CollectionArt
-            name={item.name}
-            coverTrackId={item.cover}
-            src={item.art}
-            size={112}
-            radius={13}
-            fill
-          />
+          {item.onThisPhone ? (
+            <OnThisPhoneArt />
+          ) : (
+            <DownloadMark collection={item.collection} trackIds={item.trackIds}>
+              <CollectionArt
+                name={item.name}
+                coverTrackId={item.cover}
+                src={item.art}
+                size={112}
+                radius={13}
+                fill
+              />
+            </DownloadMark>
+          )}
           <span
             className="nav-clamp-2"
             style={{
@@ -415,5 +464,86 @@ function Circles({
     <div className="nav-shelf nav-shelf-bleed" style={{ gap: 6 }}>
       {artists.map(tile)}
     </div>
+  );
+}
+
+/**
+ * A tile's download state, in the installed web app: a lime mark when every
+ * song is kept, the count when some are, and nothing when none are. Offline,
+ * a tile with nothing kept is set back like a row that cannot play.
+ */
+function DownloadMark({
+  collection,
+  trackIds,
+  children,
+}: {
+  collection?: string;
+  trackIds?: string[];
+  children: React.ReactNode;
+}) {
+  const remembered = useCollectionTracks(collection ?? "");
+  const ids = trackIds ?? remembered;
+  const { saved, total } = useDownloadSummary(ids);
+  const online = useOnline();
+  if (!collection || isInTelegram()) return <>{children}</>;
+
+  const all = total > 0 && saved === total;
+  return (
+    <span
+      style={{
+        position: "relative",
+        display: "block",
+        opacity: !online && saved === 0 ? 0.4 : 1,
+        transition: "opacity 200ms ease",
+      }}
+    >
+      {children}
+      {saved > 0 ? (
+        <span
+          aria-label={all ? "Downloaded" : `${saved} of ${total} downloaded`}
+          role="img"
+          style={{
+            position: "absolute",
+            left: 6,
+            bottom: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            height: 20,
+            padding: all ? 0 : "0 6px 0 3px",
+            width: all ? 20 : undefined,
+            justifyContent: "center",
+            borderRadius: 10,
+            background: "rgba(3,3,3,0.78)",
+            color: "var(--color-nav-action)",
+            fontSize: 10.5,
+            fontWeight: 600,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          <DownloadIcon size={11} />
+          {all ? null : `${saved}/${total}`}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** The downloads tile's own picture: the download arrow on the app's lime. */
+function OnThisPhoneArt() {
+  return (
+    <span
+      style={{
+        display: "grid",
+        placeItems: "center",
+        width: "100%",
+        aspectRatio: "1",
+        borderRadius: 13,
+        background: "var(--color-nav-action)",
+        color: "#0b0c0e",
+      }}
+    >
+      <DownloadIcon size={40} />
+    </span>
   );
 }

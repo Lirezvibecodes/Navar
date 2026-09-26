@@ -47,6 +47,8 @@ export type View =
    * heart on a row is the only door in or out.
    */
   | { type: "favorites" }
+  /** The installed web app's downloads: every song kept on this device. */
+  | { type: "downloads" }
   | { type: "social" }
   /** One view serves both your own profile and somebody else's; the edit
    *  affordances turn on when userId is you. */
@@ -79,6 +81,7 @@ export function rootTabFor(view: View): RootTab {
     case "artist":
     case "album":
     case "favorites":
+    case "downloads":
       return "library";
     case "social":
     case "profile":

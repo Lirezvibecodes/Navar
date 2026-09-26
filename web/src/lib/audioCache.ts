@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { trackStreamUrl } from "../api";
+import { trackCoverUrl, trackStreamUrl } from "../api";
+import type { Track } from "../types";
 
 /**
  * Songs kept on the phone, so a replay starts at once and a song you have
@@ -18,6 +19,14 @@ import { trackStreamUrl } from "../api";
  * The cache is a courtesy, never the authority. Every failure here — no
  * IndexedDB, a quota error, a download cut off halfway — falls back to
  * streaming exactly as the app did before this existed.
+ *
+ * Two kinds of song live here. Inside Telegram, songs are saved as they are
+ * played (saveTrack) and the oldest make room for new ones. In the installed
+ * web app nothing is saved unasked: songs are downloaded on purpose
+ * (downloadTracks), marked `pinned`, and never evicted to make room — only
+ * the person deleting them removes them. A download also keeps the track's
+ * details, so "On this phone" can list it with no connection and without the
+ * library it came from (a friend's playlist, say).
  */
 
 const DB_NAME = "navaar-audio";
@@ -36,12 +45,16 @@ interface Row {
   blob: Blob;
   size: number;
   lastPlayed: number;
+  pinned?: boolean;
+  track?: Track;
 }
 
 interface Meta {
   url: string;
   size: number;
   lastPlayed: number;
+  pinned: boolean;
+  track: Track | null;
 }
 
 const entries = new Map<string, Meta>();
@@ -51,13 +64,23 @@ let dbPromise: Promise<IDBDatabase | null> | null = null;
 /** Rows showing the "saved on this phone" mark re-render when this fires. */
 const listeners = new Set<() => void>();
 let stats: CacheStats = { count: 0, bytes: 0 };
+let savedTracks: Track[] = [];
 function changed(): void {
   let bytes = 0;
   for (const meta of entries.values()) bytes += meta.size;
-  // A new object only when something moved, so useSyncExternalStore sees a
+  // New objects only when something moved, so useSyncExternalStore sees a
   // stable snapshot between changes.
   stats = { count: entries.size, bytes };
+  savedTracks = [...entries.values()]
+    .filter((m) => m.track)
+    .sort((a, b) => b.lastPlayed - a.lastPlayed)
+    .map((m) => m.track!);
   for (const listener of listeners) listener();
+}
+
+/** Every saved song whose details were kept, most recently played first. */
+export function useSavedTracks(): Track[] {
+  return useSyncExternalStore(subscribe, () => savedTracks);
 }
 
 export interface CacheStats {
@@ -110,6 +133,8 @@ export function setSavingEnabled(on: boolean): void {
  */
 export async function clearAudioCache(): Promise<void> {
   entries.clear();
+  queue.length = 0;
+  downloadState.clear();
   changed();
   const db = await openDb();
   if (!db) return;
@@ -181,6 +206,8 @@ export function initAudioCache(): Promise<void> {
           url: URL.createObjectURL(row.blob),
           size: row.size,
           lastPlayed: row.lastPlayed,
+          pinned: row.pinned === true,
+          track: row.track ?? null,
         });
       }
     } catch {
@@ -252,7 +279,13 @@ export function saveTrack(trackId: string, mimeType: string | null): Promise<voi
       await makeRoom(db, blob.size);
       const row: Row = { id: trackId, blob, size: blob.size, lastPlayed: Date.now() };
       await tx(db, "readwrite", (s) => void s.put(row));
-      entries.set(trackId, { url: URL.createObjectURL(blob), size: blob.size, lastPlayed: row.lastPlayed });
+      entries.set(trackId, {
+        url: URL.createObjectURL(blob),
+        size: blob.size,
+        lastPlayed: row.lastPlayed,
+        pinned: false,
+        track: null,
+      });
       changed();
     } catch {
       // Offline, cut off, or out of room: the song simply streams next time.
@@ -272,7 +305,10 @@ async function makeRoom(db: IDBDatabase, incoming: number): Promise<void> {
   let total = incoming;
   for (const meta of entries.values()) total += meta.size;
 
-  const oldestFirst = [...entries.entries()].sort((a, b) => a[1].lastPlayed - b[1].lastPlayed);
+  // Downloads are never the ones to go; only songs saved in passing are.
+  const oldestFirst = [...entries.entries()]
+    .filter(([, meta]) => !meta.pinned)
+    .sort((a, b) => a[1].lastPlayed - b[1].lastPlayed);
   while ((total > budgetBytes || entries.size + 1 > MAX_TRACKS) && oldestFirst.length > 0) {
     const [id, meta] = oldestFirst.shift()!;
     await tx(db, "readwrite", (s) => void s.delete(id));
@@ -294,4 +330,152 @@ export function prefetchAllowed(): boolean {
   if (connection?.saveData) return false;
   if (connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g") return false;
   return true;
+}
+
+// --- Downloads (the installed web app) ---------------------------------------
+
+export type DownloadState = "none" | "queued" | "downloading" | "saved";
+
+const downloadState = new Map<string, "queued" | "downloading">();
+const queue: Track[] = [];
+let draining = false;
+let lastError: string | null = null;
+
+/** Why the last download failed, for the toast that reports it. */
+export function takeDownloadError(): string | null {
+  const error = lastError;
+  lastError = null;
+  return error;
+}
+
+function stateOf(trackId: string): DownloadState {
+  const meta = entries.get(trackId);
+  if (meta?.pinned) return "saved";
+  return downloadState.get(trackId) ?? "none";
+}
+
+export function useDownloadState(trackId: string): DownloadState {
+  return useSyncExternalStore(subscribe, () => stateOf(trackId));
+}
+
+/**
+ * How much of a set of songs is downloaded, for a playlist or album header
+ * and its tile in the library. Returned as a string so the snapshot is a
+ * primitive that only changes when the numbers do.
+ */
+export function useDownloadSummary(trackIds: string[]): { saved: number; total: number; busy: boolean } {
+  const key = useSyncExternalStore(subscribe, () => {
+    let saved = 0;
+    let busy = false;
+    for (const id of trackIds) {
+      const state = stateOf(id);
+      if (state === "saved") saved++;
+      else if (state !== "none") busy = true;
+    }
+    return `${saved}/${trackIds.length}/${busy ? 1 : 0}`;
+  });
+  const [saved, total, busy] = key.split("/");
+  return { saved: Number(saved), total: Number(total), busy: busy === "1" };
+}
+
+/**
+ * Queues songs to be downloaded and kept, one at a time so a playlist does not
+ * open forty connections at once. Songs already downloaded or already queued
+ * are skipped. Resolves when the queue has drained.
+ */
+export async function downloadTracks(tracks: Track[]): Promise<void> {
+  await initAudioCache();
+  for (const track of tracks) {
+    if (!track.telegram_file_id || stateOf(track.id) !== "none") continue;
+    downloadState.set(track.id, "queued");
+    queue.push(track);
+  }
+  changed();
+  await drain();
+}
+
+async function drain(): Promise<void> {
+  if (draining) {
+    // Another call is already working through the queue; wait for it.
+    while (draining) await new Promise((r) => setTimeout(r, 250));
+    return;
+  }
+  draining = true;
+  try {
+    while (queue.length > 0) {
+      const track = queue.shift()!;
+      if (!downloadState.has(track.id)) continue; // cleared meanwhile
+      downloadState.set(track.id, "downloading");
+      changed();
+      try {
+        await downloadOne(track);
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : "Download failed";
+      }
+      downloadState.delete(track.id);
+      changed();
+    }
+  } finally {
+    draining = false;
+  }
+}
+
+async function downloadOne(track: Track): Promise<void> {
+  const db = await openDb();
+  if (!db) throw new Error("This browser cannot keep downloads");
+
+  const existing = entries.get(track.id);
+  if (existing) {
+    // Saved in passing already: keep the file, just stop it being evicted.
+    const row = await tx<Row>(db, "readonly", (s) => s.get(track.id));
+    if (row) {
+      await tx(db, "readwrite", (s) => void s.put({ ...row, pinned: true, track }));
+      existing.pinned = true;
+      existing.track = track;
+      return;
+    }
+  }
+
+  const res = await fetch(trackStreamUrl(track.id));
+  if (!res.ok) throw new Error("Could not download that song");
+  const raw = await res.blob();
+  if (raw.size === 0) throw new Error("Could not download that song");
+  const blob = track.mime_type && raw.type !== track.mime_type ? new Blob([raw], { type: track.mime_type }) : raw;
+
+  const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+  if (estimate?.quota && (estimate.usage ?? 0) + blob.size > estimate.quota * 0.9) {
+    throw new Error("Not enough space on this device");
+  }
+
+  // Its cover too, so the song has its picture offline. The service worker
+  // keeps whatever this fetches; where there is none, it simply is not kept.
+  if (track.has_cover) void fetch(trackCoverUrl(track.id)).catch(() => undefined);
+
+  const row: Row = { id: track.id, blob, size: blob.size, lastPlayed: Date.now(), pinned: true, track };
+  await tx(db, "readwrite", (s) => void s.put(row));
+  entries.set(track.id, {
+    url: URL.createObjectURL(blob),
+    size: blob.size,
+    lastPlayed: row.lastPlayed,
+    pinned: true,
+    track,
+  });
+}
+
+/** Deletes downloads. As with clearing, URLs stay valid for whatever is playing. */
+export async function removeDownloads(trackIds: string[]): Promise<void> {
+  const db = await openDb();
+  for (const id of trackIds) {
+    entries.delete(id);
+    downloadState.delete(id);
+  }
+  changed();
+  if (!db) return;
+  try {
+    await tx(db, "readwrite", (s) => {
+      for (const id of trackIds) s.delete(id);
+    });
+  } catch {
+    // Left for the next Delete all.
+  }
 }

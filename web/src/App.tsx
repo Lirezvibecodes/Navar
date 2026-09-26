@@ -46,6 +46,8 @@ import { peek, cacheKey, revalidate } from "./lib/cache";
 import { isNetworkError, readDeviceMeSnapshot, readMeSnapshot, saveMeSnapshot } from "./lib/offlineSnapshot";
 import { LoginScreen } from "./components/LoginScreen";
 import { InstallPage } from "./views/InstallPage";
+import { DownloadsView } from "./views/DownloadsView";
+import { startPlaySync, useOnline } from "./lib/online";
 import {
   getTelegramWebApp,
   haptic,
@@ -95,6 +97,7 @@ const TITLES: Record<View["type"], string> = {
   artist: "Artist",
   album: "Album",
   favorites: "Playlist",
+  downloads: "Playlist",
   social: "Social",
   profile: "Profile",
   friendLibrary: "Their Library",
@@ -217,6 +220,10 @@ function Shell({ me }: { me: Me }) {
 
   useTagUnlockToasts();
   usePresenceHeartbeat();
+  const online = useOnline();
+
+  // Plays heard while offline go up now, and whenever the connection returns.
+  useEffect(() => startPlaySync(), []);
 
   const view = stack[stack.length - 1];
 
@@ -294,6 +301,8 @@ function Shell({ me }: { me: Me }) {
         return <CollectionView nav={nav} kind={view.type} name={view.name} />;
       case "favorites":
         return <FavoritesView nav={nav} />;
+      case "downloads":
+        return <DownloadsView nav={nav} />;
       case "social":
         return (
           <SocialView
@@ -323,7 +332,8 @@ function Shell({ me }: { me: Me }) {
     view.type === "playlist" ||
     view.type === "artist" ||
     view.type === "album" ||
-    view.type === "favorites";
+    view.type === "favorites" ||
+    view.type === "downloads";
   const title = TITLES[view.type];
   // The top bar's own-profile shortcut is pointless while already on that
   // exact page — swapped for a Settings shortcut instead, see TopBar.
@@ -365,6 +375,34 @@ function Shell({ me }: { me: Me }) {
         ownProfile={onOwnProfile}
         onSettings={() => push({ type: "settings" })}
       />
+
+      {/* The installed app only. Inside Telegram there is no being offline:
+          Telegram will not open the app without a connection. */}
+      {!online && !isInTelegram() ? (
+        <div
+          role="status"
+          className="nav-glass"
+          style={{
+            position: "fixed",
+            top: "calc(var(--nav-top-inset) + var(--nav-topbar-h) + 4px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: "var(--z-topbar)",
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "6px 12px",
+            borderRadius: 999,
+            fontSize: 12,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+          }}
+        >
+          <span aria-hidden="true" style={{ width: 7, height: 7, background: "var(--color-nav-muted)" }} />
+          Offline · playing what's downloaded
+        </div>
+      ) : null}
 
       <div
         key={seq}

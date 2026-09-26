@@ -14,6 +14,7 @@ import { clearAudioCache, useAudioCacheStats, useSavingEnabled } from "../lib/au
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { confirmAction, haptic, isInTelegram } from "../telegram";
 import { clearSnapshots } from "../lib/offlineSnapshot";
+import { forgetCollections } from "../lib/collections";
 import { bannerLayerStyle, usePixelatedBanner } from "./ProfileView";
 
 /**
@@ -381,6 +382,9 @@ async function logOut(): Promise<void> {
   if (!ok) return;
   api.clearSession();
   clearSnapshots();
+  forgetCollections();
+  // Plays not yet sent would otherwise go up under whoever signs in next.
+  api.clearPendingPlays();
   await clearAudioCache();
   window.location.replace("/");
 }

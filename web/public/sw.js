@@ -15,12 +15,20 @@
  *   - Fonts, the favicon and Telegram's SDK: the saved copy at once, refreshed
  *     in the background.
  *
- * The API, the audio and the share pages are never touched. The API has its
- * own offline fallback in the app, and a stale answer from here would be
- * indistinguishable from a real one.
+ *   - Covers, playlist artwork and avatars: from the network, falling back to
+ *     the last copy seen, so the library keeps its pictures offline.
+ *
+ * The rest of the API, the audio and the share pages are never touched. The
+ * API has its own offline fallback in the app, and a stale answer from here
+ * would be indistinguishable from a real one.
  */
 
 const SHELL_CACHE = "navaar-shell-v1";
+const ART_CACHE = "navaar-art-v1";
+const ART_LIMIT = 600;
+// Covers, playlist artwork and avatars: kept so the library still has its
+// pictures offline. See artwork() below.
+const ART = /^\/api\/(tracks\/[^/]+\/cover|playlists\/[^/]+\/artwork|users\/[^/]+\/avatar)$/;
 const PAGE_TIMEOUT_MS = 4000;
 const STATIC_FILES = /^\/(fonts\/.+|icons\/.+|favicon\.svg|manifest\.webmanifest|telegram-web-app\.js)$/;
 
@@ -46,7 +54,10 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       for (const name of await caches.keys()) {
-        if (name.startsWith("navaar-shell-") && name !== SHELL_CACHE) await caches.delete(name);
+        const stale =
+          (name.startsWith("navaar-shell-") && name !== SHELL_CACHE) ||
+          (name.startsWith("navaar-art-") && name !== ART_CACHE);
+        if (stale) await caches.delete(name);
       }
       await self.clients.claim();
     })()
@@ -65,8 +76,39 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(cacheFirst(request));
   } else if (STATIC_FILES.test(url.pathname)) {
     event.respondWith(staleWhileRevalidate(event));
+  } else if (ART.test(url.pathname)) {
+    event.respondWith(artwork(event, url));
   }
 });
+
+/**
+ * A picture from the network when there is one, the saved copy when there is
+ * not. Filed under its address without the session token, which changes on
+ * every sign-in and would otherwise make every copy unreachable the next time.
+ * The oldest are dropped past ART_LIMIT.
+ */
+async function artwork(event, url) {
+  const key = new URL(url);
+  key.searchParams.delete("token");
+  const cache = await caches.open(ART_CACHE);
+  try {
+    const res = await fetch(event.request);
+    if (res.ok) {
+      event.waitUntil(
+        (async () => {
+          await cache.put(key.href, res.clone());
+          const keys = await cache.keys();
+          for (const old of keys.slice(0, Math.max(0, keys.length - ART_LIMIT))) await cache.delete(old);
+        })()
+      );
+    }
+    return res;
+  } catch (err) {
+    const hit = await cache.match(key.href);
+    if (hit) return hit;
+    throw err;
+  }
+}
 
 async function appPage(event) {
   const cache = await caches.open(SHELL_CACHE);

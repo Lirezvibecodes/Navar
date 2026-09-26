@@ -43,6 +43,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
+  // Nothing changes while offline: an edit that could not reach the server
+  // would have to be queued and replayed against whatever changed meanwhile,
+  // which this app does not attempt. Plays are the one exception, handled in
+  // recordPlay below.
+  const method = (options.method ?? "GET").toUpperCase();
+  if (method !== "GET" && typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw new ApiError("You're offline. Connect to the internet to do that.", 0);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -554,23 +563,102 @@ export function setListeningPrivacy(
  * own clock is UTC, and guessing the listener's timezone from an IP is the
  * kind of thing this app does not do.
  */
-export function recordPlay(trackId: string): Promise<void> {
+export async function recordPlay(trackId: string): Promise<void> {
   const now = new Date();
-  return request<void>("/api/me/plays", {
-    method: "POST",
-    body: json({
-      trackId,
-      localMinuteOfDay: now.getHours() * 60 + now.getMinutes(),
-      localDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-        now.getDate()
-      ).padStart(2, "0")}`,
-    }),
-  }).then(() => {
-    // Best-effort: a listening tag may have just unlocked. Dropped after the
-    // request lands rather than awaited by the caller, same as every other
-    // fire-and-forget play log in this app.
-    dropCache(cacheKey.tags);
-  });
+  const play: PendingPlay = {
+    trackId,
+    localMinuteOfDay: now.getHours() * 60 + now.getMinutes(),
+    localDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+      now.getDate()
+    ).padStart(2, "0")}`,
+    playedAt: now.toISOString(),
+  };
+  try {
+    await sendPlay(play);
+  } catch (err) {
+    // Never reached the server (offline, or the connection dropped): keep it
+    // and send it later, stamped with when it was actually heard, so stats
+    // and tag progress catch up. A play the server refused is not retried.
+    if (err instanceof ApiError && err.status !== 0) throw err;
+    queuePlay(play);
+    return;
+  }
+  // Best-effort: a listening tag may have just unlocked. Dropped after the
+  // request lands rather than awaited by the caller, same as every other
+  // fire-and-forget play log in this app.
+  dropCache(cacheKey.tags);
+}
+
+// --- Plays heard offline -------------------------------------------------------
+
+interface PendingPlay {
+  trackId: string;
+  localMinuteOfDay: number;
+  localDate: string;
+  playedAt: string;
+}
+
+const PENDING_PLAYS_KEY = "navaar-pending-plays";
+/** The server only takes plays from the last 30 days; a month offline is plenty. */
+const MAX_PENDING_PLAYS = 1000;
+
+function sendPlay(play: PendingPlay): Promise<void> {
+  return request<void>("/api/me/plays", { method: "POST", body: json(play) });
+}
+
+function readPendingPlays(): PendingPlay[] {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_PLAYS_KEY) ?? "[]") as PendingPlay[];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingPlays(plays: PendingPlay[]): void {
+  try {
+    if (plays.length === 0) localStorage.removeItem(PENDING_PLAYS_KEY);
+    else localStorage.setItem(PENDING_PLAYS_KEY, JSON.stringify(plays.slice(-MAX_PENDING_PLAYS)));
+  } catch {
+    // Full storage: those plays are lost, which costs a stat, not a song.
+  }
+}
+
+export function clearPendingPlays(): void {
+  writePendingPlays([]);
+}
+
+function queuePlay(play: PendingPlay): void {
+  writePendingPlays([...readPendingPlays(), play]);
+}
+
+let flushing = false;
+
+/**
+ * Sends the plays heard while offline, oldest first. Stops at the first one
+ * that cannot get through and keeps the rest for next time; drops one the
+ * server refuses (a track since deleted, say) rather than retrying it forever.
+ */
+export async function flushPendingPlays(): Promise<void> {
+  if (flushing || !sessionToken) return;
+  flushing = true;
+  try {
+    let pending = readPendingPlays();
+    let sent = false;
+    while (pending.length > 0) {
+      try {
+        await sendPlay(pending[0]);
+        sent = true;
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status === 0) break;
+      }
+      pending = pending.slice(1);
+      writePendingPlays(pending);
+    }
+    // Every stats range may have moved, not only today's.
+    if (sent) dropCache(cacheKey.tags, "stats:");
+  } finally {
+    flushing = false;
+  }
 }
 
 /** Replace the Telegram profile photo with a picture chosen and cropped here. */
