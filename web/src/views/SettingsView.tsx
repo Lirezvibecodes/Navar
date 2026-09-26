@@ -10,7 +10,6 @@ import { GhostButton, Screen, SectionHeader, Sheet, SheetDivider, Toggle } from 
 import { EditIcon, ImageIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
-import { ScreenDiagnostics } from "../components/ScreenDiagnostics";
 import { clearAudioCache, useAudioCacheStats, useSavingEnabled } from "../lib/audioCache";
 import { cacheKey, ttl, useCached } from "../lib/cache";
 import { haptic } from "../telegram";
@@ -317,8 +316,6 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
           void uploadAvatar(blob);
         }}
       />
-
-      <ScreenDiagnostics />
 
       <Sheet open={pickingBg} onClose={() => setPickingBg(false)} title="Profile background">
         <div style={{ padding: "2px 12px 10px" }}>
