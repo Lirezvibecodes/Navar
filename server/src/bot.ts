@@ -60,6 +60,7 @@ import {
   noteGroupJoins,
   noteGroupPresence,
 } from "./bot-groups";
+import { cancelLoginCode, confirmLoginCode, describeLoginCode } from "./bot-login";
 
 /**
  * Tracks scanned per /covers run, to stay inside Telegraf's 90s handlerTimeout.
@@ -181,6 +182,26 @@ export function createBot(): Telegraf | null {
     void refreshAvatar(bot, ctx.from.id);
     const lang: Lang = user.language ?? "en";
 
+    // The installed web app asking to sign in (see bot-login.ts). Nothing is
+    // granted here: this only asks, and the Yes button below is what binds
+    // the code to whoever tapped it.
+    const loginMatch = /^login_([A-Za-z0-9_-]{22})$/.exec(ctx.startPayload ?? "");
+    if (loginMatch) {
+      const request = describeLoginCode(loginMatch[1]);
+      if (!request) {
+        await ctx.reply(t(lang, "login_expired"));
+        return;
+      }
+      await ctx.reply(
+        t(lang, "login_confirm", { device: request.device }),
+        Markup.inlineKeyboard([
+          Markup.button.callback(t(lang, "btn_login_yes"), `login_ok:${loginMatch[1]}`),
+          Markup.button.callback(t(lang, "btn_login_cancel"), `login_no:${loginMatch[1]}`),
+        ])
+      );
+      return;
+    }
+
     // A friend deep link arrives as /start with a payload. It answers on its
     // own terms — someone tapping a friend's link came to add a friend, not to
     // read the welcome, and it should never be blocked by the language picker
@@ -242,6 +263,26 @@ export function createBot(): Telegraf | null {
     await setUserLanguage(ctx.from.id, lang);
     await ctx.answerCbQuery();
     await ctx.reply(t(lang, "start_welcome"), startKeyboard(lang));
+  });
+
+  bot.action(/^login_(ok|no):([A-Za-z0-9_-]{22})$/, async (ctx) => {
+    const lang = await getUserLanguage(ctx.from.id);
+    const [, choice, code] = ctx.match;
+    await ctx.answerCbQuery();
+    if (choice === "no") {
+      cancelLoginCode(code);
+      await ctx.editMessageText(t(lang, "login_cancelled")).catch(() => undefined);
+      return;
+    }
+    const ok = confirmLoginCode(code, {
+      id: ctx.from.id,
+      username: ctx.from.username,
+      first_name: ctx.from.first_name,
+      language_code: ctx.from.language_code,
+    });
+    await ctx
+      .editMessageText(t(lang, ok ? "login_done" : "login_expired"))
+      .catch(() => undefined);
   });
 
   bot.action("add_music_hint", async (ctx) => {

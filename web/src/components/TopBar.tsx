@@ -1,8 +1,8 @@
 import type { Me } from "../types";
 import { Avatar } from "./Avatar";
 import { RoundButton } from "./ui";
-import { SearchIcon, SettingsIcon } from "../icons";
-import { haptic } from "../telegram";
+import { ChevronLeftIcon, SearchIcon, SettingsIcon } from "../icons";
+import { haptic, useWebBack } from "../telegram";
 
 /**
  * Title, search, you.
@@ -48,8 +48,12 @@ export function TopBar({
   ownProfile?: boolean;
   onSettings?: () => void;
 }) {
+  const back = useWebBack();
   return (
     <header className="nav-topbar">
+      {/* Only in the installed web app, where there is no Telegram header to
+          carry a back button. Inside Telegram this is always null. */}
+      {back ? <RoundButton icon={ChevronLeftIcon} label="Back" onClick={back} /> : null}
       {subdued ? (
         <span
           className="nav-clip"

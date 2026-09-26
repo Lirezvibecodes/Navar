@@ -184,13 +184,23 @@ export function meRouter(): Router {
     "/plays",
     requireAuth,
     asyncHandler(async (req, res) => {
-      const { trackId, localMinuteOfDay, localDate } = req.body ?? {};
+      const { trackId, localMinuteOfDay, localDate, playedAt } = req.body ?? {};
       if (typeof trackId !== "string") {
         res.status(400).json({ error: "trackId is required" });
         return;
       }
 
-      const opts: { localMinuteOfDay?: number; localDate?: string } = {};
+      const opts: { localMinuteOfDay?: number; localDate?: string; playedAt?: Date } = {};
+      // A play the web app heard while offline and is only now sending. Kept
+      // to the last 30 days and never in the future, so a wrong clock cannot
+      // write history anywhere it likes.
+      if (typeof playedAt === "string") {
+        const at = new Date(playedAt);
+        const age = Date.now() - at.getTime();
+        if (Number.isFinite(age) && age >= -5 * 60_000 && age <= 30 * 86_400_000) {
+          opts.playedAt = at;
+        }
+      }
       if (
         typeof localMinuteOfDay === "number" &&
         Number.isInteger(localMinuteOfDay) &&

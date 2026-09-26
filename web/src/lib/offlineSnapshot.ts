@@ -70,6 +70,25 @@ export function readMeSnapshot(initData: string | undefined): Me | null {
   }
 }
 
+/**
+ * The saved account for the installed web app, which has no initData to
+ * check it against: it must belong to whoever the stored session is for.
+ */
+export function readDeviceMeSnapshot(sessionUserId: number | null): Me | null {
+  const me = read<Me>(ME_KEY);
+  return me && sessionUserId != null && me.id === sessionUserId ? me : null;
+}
+
+/** Everything this file keeps, for logging out. */
+export function clearSnapshots(): void {
+  try {
+    localStorage.removeItem(ME_KEY);
+    localStorage.removeItem(LIBRARY_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
 /** A fetch that never reached the server, as opposed to one it refused. */
 export function isNetworkError(err: unknown): boolean {
   return err instanceof TypeError || (typeof navigator !== "undefined" && navigator.onLine === false);

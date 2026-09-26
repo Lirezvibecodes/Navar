@@ -40,3 +40,15 @@ export function trackShareLink(token: string): string | null {
   if (!botUsername) return null;
   return `https://t.me/${botUsername}?start=track_${token}`;
 }
+
+/** Opens the bot on the confirm-your-sign-in prompt for the installed web app. */
+export function botLoginLink(code: string): string | null {
+  if (!botUsername) return null;
+  return `https://t.me/${botUsername}?start=login_${code}`;
+}
+
+/** The bot's own chat, for the web app's "Add music" and install page. */
+export function botChatLink(): string | null {
+  if (!botUsername) return null;
+  return `https://t.me/${botUsername}`;
+}

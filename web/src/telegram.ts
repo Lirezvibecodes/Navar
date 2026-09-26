@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /**
  * Everything this app knows about the Telegram Mini App host.
  *
@@ -110,6 +112,17 @@ declare global {
 // and callers simply never authenticate.
 export function getTelegramWebApp(): TelegramWebApp | undefined {
   return window.Telegram?.WebApp;
+}
+
+/**
+ * Whether this page is running as a Telegram Mini App, as opposed to the
+ * installed web app or a plain browser tab. Not the same as
+ * getTelegramWebApp() being defined: the SDK script defines
+ * window.Telegram.WebApp everywhere it is loaded, and only Telegram itself
+ * hands it initData.
+ */
+export function isInTelegram(): boolean {
+  return !!getTelegramWebApp()?.initData;
 }
 
 /**
@@ -241,7 +254,9 @@ function applyViewport(tg: TelegramWebApp): void {
  */
 export function initTelegramPlatform(): () => void {
   const tg = getTelegramWebApp();
-  if (!tg) return () => {};
+  // Outside Telegram the SDK still answers, with made-up figures; the web
+  // app sizes itself from the browser's own viewport and env() insets.
+  if (!tg || !isInTelegram()) return () => {};
 
   // The one class every Android-only rule in index.css is gated behind.
   const android = tg.platform === "android";
@@ -366,7 +381,7 @@ export function confirmAction(message: string): Promise<boolean> {
  */
 export function setBackButton(handler: (() => void) | null): () => void {
   const tg = getTelegramWebApp();
-  if (!tg) return () => {};
+  if (!tg || !isInTelegram()) return setWebBack(handler);
 
   if (!handler) {
     try {
@@ -392,6 +407,51 @@ export function setBackButton(handler: (() => void) | null): () => void {
       /* older client */
     }
   };
+}
+
+/*
+ * The installed web app has no Telegram header to put a back button in, so
+ * the handler is published here instead: TopBar draws a chevron while there
+ * is one (useWebBack), and the browser's own back — Android's gesture, a
+ * desktop back button — is routed to it through a single history entry that
+ * is kept pushed for as long as there is somewhere to go back to.
+ */
+let webBack: (() => void) | null = null;
+const webBackListeners = new Set<() => void>();
+let historyGuard = false;
+let popstateWired = false;
+
+function setWebBack(handler: (() => void) | null): () => void {
+  webBack = handler;
+  webBackListeners.forEach((l) => l());
+  if (handler) {
+    if (!popstateWired) {
+      popstateWired = true;
+      window.addEventListener("popstate", () => {
+        historyGuard = false;
+        webBack?.();
+      });
+    }
+    if (!historyGuard) {
+      historyGuard = true;
+      history.pushState({ navaarBack: true }, "");
+    }
+  }
+  return () => {
+    if (webBack !== handler) return;
+    webBack = null;
+    webBackListeners.forEach((l) => l());
+  };
+}
+
+export function useWebBack(): (() => void) | null {
+  return useSyncExternalStore(
+    (l) => {
+      webBackListeners.add(l);
+      return () => webBackListeners.delete(l);
+    },
+    () => webBack
+  );
 }
 
 // --- Main button ------------------------------------------------------------

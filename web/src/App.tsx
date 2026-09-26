@@ -6,7 +6,16 @@ import {
   useRef,
   useState,
 } from "react";
-import { authenticate, getTags, reportPresence } from "./api";
+import {
+  ApiError,
+  authenticate,
+  clearSession,
+  getSessionToken,
+  getTags,
+  refreshSession,
+  reportPresence,
+  sessionUserId,
+} from "./api";
 import { BottomNav } from "./components/BottomNav";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
@@ -34,11 +43,14 @@ import { TagsView } from "./views/TagsView";
 import { ListeningStatsView } from "./views/ListeningStatsView";
 import { hideSplash } from "./lib/splash";
 import { peek, cacheKey, revalidate } from "./lib/cache";
-import { isNetworkError, readMeSnapshot, saveMeSnapshot } from "./lib/offlineSnapshot";
+import { isNetworkError, readDeviceMeSnapshot, readMeSnapshot, saveMeSnapshot } from "./lib/offlineSnapshot";
+import { LoginScreen } from "./components/LoginScreen";
+import { InstallPage } from "./views/InstallPage";
 import {
   getTelegramWebApp,
   haptic,
   initTelegramPlatform,
+  isInTelegram,
   onActivationChange,
   setBackButton,
 } from "./telegram";
@@ -422,6 +434,7 @@ function Boot() {
   // splash is gone for good, so a retry has to show its own waiting state.
   const [busy, setBusy] = useState(true);
   const [attempted, setAttempted] = useState(false);
+  const [needsLogin, setNeedsLogin] = useState(false);
 
   useEffect(() => initTelegramPlatform(), []);
 
@@ -432,7 +445,46 @@ function Boot() {
     if (me || attempted) hideSplash();
   }, [me, attempted]);
 
+  // The installed web app: no initData, so the stored session is renewed
+  // instead, or the login screen is shown when there is none.
+  const signInDevice = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    if (!getSessionToken()) {
+      setNeedsLogin(true);
+      setBusy(false);
+      setAttempted(true);
+      return;
+    }
+    let showingSnapshot = false;
+    const fallback = window.setTimeout(() => {
+      const snapshot = readDeviceMeSnapshot(sessionUserId());
+      if (!snapshot) return;
+      showingSnapshot = true;
+      setMe((prev) => prev ?? snapshot);
+    }, SLOW_SIGN_IN_MS);
+    try {
+      setMe(await refreshSession());
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        // Expired or signed out elsewhere: back to the login screen.
+        clearSession();
+        setMe(null);
+        setNeedsLogin(true);
+      } else {
+        const snapshot = isNetworkError(err) ? readDeviceMeSnapshot(sessionUserId()) : null;
+        if (snapshot) setMe((prev) => prev ?? snapshot);
+        else if (!showingSnapshot) setError(err instanceof Error ? err.message : "Could not sign you in");
+      }
+    } finally {
+      window.clearTimeout(fallback);
+      setBusy(false);
+      setAttempted(true);
+    }
+  }, []);
+
   const signIn = useCallback(async () => {
+    if (!isInTelegram()) return signInDevice();
     setBusy(true);
     setError(null);
     const initData = getTelegramWebApp()?.initData;
@@ -462,7 +514,7 @@ function Boot() {
       setBusy(false);
       setAttempted(true);
     }
-  }, []);
+  }, [signInDevice]);
 
   useEffect(() => {
     if (me) saveMeSnapshot(me);
@@ -475,6 +527,17 @@ function Boot() {
   // The first attempt, still running. The splash in index.html is what the
   // user is looking at, and it stays until this resolves one way or the other.
   if (!me && !attempted) return null;
+
+  if (!me && needsLogin) {
+    return (
+      <LoginScreen
+        onSignedIn={(user) => {
+          setNeedsLogin(false);
+          setMe(user);
+        }}
+      />
+    );
+  }
 
   if (!me) {
     return (
@@ -538,6 +601,16 @@ function Boot() {
 const SHARE_PATH = /^\/s\/([A-Za-z0-9_-]{8,64})\/?$/;
 
 export default function App() {
+  // The page people are sent to install the web app. No session, no shell.
+  if (/^\/get\/?$/.test(window.location.pathname)) {
+    return (
+      <ToastProvider>
+        <div className="nav-screen-bg" aria-hidden="true" />
+        <InstallPage />
+      </ToastProvider>
+    );
+  }
+
   const shared = SHARE_PATH.exec(window.location.pathname);
   if (shared) {
     return (

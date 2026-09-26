@@ -46,10 +46,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
+    throw new ApiError(body.error ?? `Request failed: ${res.status}`, res.status);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+/** A request the server answered and refused, as opposed to one that never got there. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 function json(body: unknown): RequestInit["body"] {
@@ -57,6 +66,52 @@ function json(body: unknown): RequestInit["body"] {
 }
 
 // --- Session ----------------------------------------------------------------
+
+export function clearSession(): void {
+  sessionToken = null;
+  try {
+    localStorage.removeItem("session_token");
+  } catch {
+    // Nothing stored, then.
+  }
+}
+
+/** Whose session this is, read from the token itself; null without one. */
+export function sessionUserId(): number | null {
+  try {
+    const payload = JSON.parse(atob(sessionToken!.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    const id = Number(payload.sub);
+    return Number.isFinite(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+// The installed web app signs in through the bot rather than with initData.
+// See server/src/bot-login.ts for the whole exchange.
+
+export function startBotLogin(): Promise<{ code: string; link: string; expiresAt: number }> {
+  return request("/api/auth/bot-login", { method: "POST" });
+}
+
+/** Null while the person has not confirmed in Telegram yet. */
+export async function pollBotLogin(code: string): Promise<Me | null> {
+  const res = await request<{ status?: "pending"; token?: string; user?: Me }>(
+    `/api/auth/bot-login/${encodeURIComponent(code)}`
+  );
+  if (!res.token || !res.user) return null;
+  setSessionToken(res.token);
+  return res.user;
+}
+
+/** Renews the installed app's session and returns the account it belongs to. */
+export async function refreshSession(): Promise<Me> {
+  const { token, user } = await request<{ token: string; user: Me }>("/api/auth/refresh", {
+    method: "POST",
+  });
+  setSessionToken(token);
+  return user;
+}
 
 export async function authenticate(initData: string): Promise<Me> {
   const { token, user } = await request<{ token: string; user: Me }>(

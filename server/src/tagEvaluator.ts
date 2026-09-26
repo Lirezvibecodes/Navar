@@ -173,10 +173,13 @@ async function evaluateListeningTags(telegramUserId: number): Promise<void> {
 export async function recordQualifiedListen(
   telegramUserId: number,
   trackId: string,
-  opts: { localMinuteOfDay?: number; localDate?: string } = {}
+  opts: { localMinuteOfDay?: number; localDate?: string; playedAt?: Date } = {}
 ): Promise<void> {
   try {
     const pool = getPool();
+    // When the play happened, which for a play synced after time offline is
+    // earlier than now: every "when" below is measured from it.
+    const playedAt = opts.playedAt ?? new Date();
     const trackRow = await pool.query<{ artist: string | null }>(
       `SELECT artist FROM tracks WHERE id = $1`,
       [trackId]
@@ -192,13 +195,14 @@ export async function recordQualifiedListen(
 
     await pool.query(
       `INSERT INTO user_tag_track_stats (telegram_user_id, track_id, play_count, first_played_at, last_played_at)
-       VALUES ($1, $2, 1, now(), now())
+       VALUES ($1, $2, 1, $3, $3)
        ON CONFLICT (telegram_user_id, track_id)
-       DO UPDATE SET play_count = user_tag_track_stats.play_count + 1, last_played_at = now()`,
-      [telegramUserId, trackId]
+       DO UPDATE SET play_count = user_tag_track_stats.play_count + 1,
+         last_played_at = GREATEST(user_tag_track_stats.last_played_at, $3)`,
+      [telegramUserId, trackId, playedAt]
     );
 
-    const day = opts.localDate ?? new Date().toISOString().slice(0, 10);
+    const day = opts.localDate ?? playedAt.toISOString().slice(0, 10);
     await pool.query(
       `INSERT INTO user_tag_listening_days (telegram_user_id, day) VALUES ($1, $2::date)
        ON CONFLICT DO NOTHING`,
@@ -236,7 +240,7 @@ export async function recordQualifiedListen(
     // previous play. Only a *previous* play counts — a track's first-ever
     // play is First Spin, not a resurrection.
     if (previousLastPlayedAt) {
-      const gapMs = Date.now() - new Date(previousLastPlayedAt).getTime();
+      const gapMs = playedAt.getTime() - new Date(previousLastPlayedAt).getTime();
       if (gapMs >= 90 * 24 * 60 * 60 * 1000) eventUnlocks.push("necromancer");
     }
 

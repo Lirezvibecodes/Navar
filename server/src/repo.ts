@@ -3183,7 +3183,7 @@ export async function listFriendsListening(
 export async function recordPlay(
   telegramUserId: number,
   trackId: string,
-  opts: { localMinuteOfDay?: number; localDate?: string } = {}
+  opts: { localMinuteOfDay?: number; localDate?: string; playedAt?: Date } = {}
 ): Promise<boolean> {
   const { rowCount } = await getPool().query(
     `WITH pruned AS (
@@ -3191,8 +3191,8 @@ export async function recordPlay(
        WHERE played_at < now() - interval '${PLAY_RETENTION_DAYS} days'
      ),
      inserted AS (
-       INSERT INTO plays (telegram_user_id, track_id, local_date, local_minute_of_day)
-       SELECT $1, t.id, $3, $4
+       INSERT INTO plays (telegram_user_id, track_id, local_date, local_minute_of_day, played_at)
+       SELECT $1, t.id, $3, $4, COALESCE($5::timestamptz, now())
        FROM tracks t
        WHERE t.id = $2 AND ${LIVE_T} AND ${trackVisibleTo("$1", "t")}
        RETURNING track_id
@@ -3202,7 +3202,13 @@ export async function recordPlay(
      FROM inserted i
      JOIN tracks t ON t.id = i.track_id
      WHERE u.telegram_user_id = $1`,
-    [telegramUserId, trackId, opts.localDate ?? null, opts.localMinuteOfDay ?? null]
+    [
+      telegramUserId,
+      trackId,
+      opts.localDate ?? null,
+      opts.localMinuteOfDay ?? null,
+      opts.playedAt ?? null,
+    ]
   );
   const landed = (rowCount ?? 0) > 0;
   if (landed) {

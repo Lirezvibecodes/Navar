@@ -22,7 +22,7 @@
 
 const SHELL_CACHE = "navaar-shell-v1";
 const PAGE_TIMEOUT_MS = 4000;
-const STATIC_FILES = /^\/(fonts\/.+|favicon\.svg|telegram-web-app\.js)$/;
+const STATIC_FILES = /^\/(fonts\/.+|icons\/.+|favicon\.svg|manifest\.webmanifest|telegram-web-app\.js)$/;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

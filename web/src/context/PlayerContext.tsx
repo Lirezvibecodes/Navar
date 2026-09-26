@@ -18,6 +18,7 @@ import { useLibrary } from "./LibraryContext";
 import { cachedUrl, initAudioCache, prefetchAllowed, saveTrack } from "../lib/audioCache";
 import {
   haptic,
+  isInTelegram,
   onActivationChange,
   setClosingConfirmation,
 } from "../telegram";
@@ -759,6 +760,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const settled = current != null && position >= 5;
   const nextUp = upNext[0] ?? contextNext[0] ?? null;
   useEffect(() => {
+    // The installed web app keeps only what is downloaded on purpose.
+    if (!isInTelegram()) return;
     if (!settled || !current || current.telegram_file_id === "") return;
     let cancelled = false;
     void (async () => {

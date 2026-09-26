@@ -12,7 +12,8 @@ import { useLibrary } from "../context/LibraryContext";
 import { useToast } from "../context/ToastContext";
 import { clearAudioCache, useAudioCacheStats, useSavingEnabled } from "../lib/audioCache";
 import { cacheKey, ttl, useCached } from "../lib/cache";
-import { haptic } from "../telegram";
+import { confirmAction, haptic, isInTelegram } from "../telegram";
+import { clearSnapshots } from "../lib/offlineSnapshot";
 import { bannerLayerStyle, usePixelatedBanner } from "./ProfileView";
 
 /**
@@ -26,6 +27,7 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
   const { errorToast, toast } = useToast();
   const [saving, setSaving] = useSavingEnabled();
   const saved = useAudioCacheStats();
+  const inTelegram = isInTelegram();
 
   const [renaming, setRenaming] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
@@ -242,16 +244,21 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
       />
 
       <SectionHeader title="On this phone" />
-      <Toggle
-        label="Save songs I play"
-        hint="Kept on this phone, so a replay starts at once and plays without a connection. Off stops saving new ones; saved songs still play until you clear them."
-        checked={saving}
-        onChange={setSaving}
-      />
+      {/* Inside Telegram songs are saved as they are played, and the switch
+          turns that off. The installed app only keeps what you download on
+          purpose, so there is nothing to switch — only what to delete. */}
+      {inTelegram ? (
+        <Toggle
+          label="Save songs I play"
+          hint="Kept on this phone, so a replay starts at once and plays without a connection. Off stops saving new ones; saved songs still play until you clear them."
+          checked={saving}
+          onChange={setSaving}
+        />
+      ) : null}
       <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 52 }}>
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: "block", fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>
-            Saved songs
+            {inTelegram ? "Saved songs" : "Downloaded songs"}
           </span>
           <span
             style={{
@@ -271,14 +278,31 @@ export function SettingsView({ nav: _nav }: { nav: Navigation }) {
           width={84}
           height={34}
           disabled={saved.count === 0}
-          onClick={() => {
+          onClick={async () => {
+            // Downloads were chosen one by one, so deleting them is asked
+            // first; Telegram's saved songs just come back as they are played.
+            if (!inTelegram && !(await confirmAction("Delete every downloaded song from this device?"))) return;
             void clearAudioCache();
-            toast("Saved songs cleared");
+            toast(inTelegram ? "Saved songs cleared" : "Downloads deleted");
           }}
         >
-          Clear
+          {inTelegram ? "Clear" : "Delete all"}
         </GhostButton>
       </div>
+
+      {inTelegram ? null : (
+        <>
+          <SectionHeader title="Account" />
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 52 }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 1.35, color: "var(--color-nav-muted)" }}>
+              Logging out removes your downloads and saved library from this device. Your account and music stay in Telegram.
+            </span>
+            <GhostButton width={96} height={34} onClick={() => void logOut()}>
+              Log out
+            </GhostButton>
+          </div>
+        </>
+      )}
 
       <SectionHeader title="Appearance" />
       <AccentPicker
@@ -343,4 +367,20 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/**
+ * The installed app only. Everything this device kept for the account goes:
+ * the session, the saved library, the downloads. The reload lands on the
+ * login screen with nothing of the previous person left in memory.
+ */
+async function logOut(): Promise<void> {
+  const ok = await confirmAction(
+    "Log out of Navaar on this device? Your downloads on this device will be deleted."
+  );
+  if (!ok) return;
+  api.clearSession();
+  clearSnapshots();
+  await clearAudioCache();
+  window.location.replace("/");
 }

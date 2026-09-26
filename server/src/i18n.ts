@@ -63,6 +63,35 @@ const catalog = {
   },
 
   btn_open_navaar: { en: "Open Navaar", fa: "باز کردن ناوار" },
+
+  // Signing in to the installed web app. The prompt names the device and
+  // says plainly to refuse if it was not them: a login link can be sent to
+  // somebody by someone else, and this message is the only thing standing
+  // between that and their account.
+  login_confirm: {
+    en:
+      "Log in to Navaar on {device}?\n\n" +
+      "Only tap Yes if you just asked to log in on a device you are holding. " +
+      "If someone sent you this link, tap Cancel.",
+    fa:
+      "ورود به ناوار روی {device}؟\n\n" +
+      "فقط وقتی «بله» را بزن که همین الان روی دستگاهی که دستت است درخواست ورود داده‌ای. " +
+      "اگر کسی این لینک را برایت فرستاده، «لغو» را بزن.",
+  },
+  login_done: {
+    en: "You're logged in. Go back to Navaar.",
+    fa: "وارد شدی. به ناوار برگرد.",
+  },
+  login_cancelled: {
+    en: "Cancelled. Nobody was logged in.",
+    fa: "لغو شد. هیچ‌کس وارد نشد.",
+  },
+  login_expired: {
+    en: "This login link has expired. Start again from the Navaar app.",
+    fa: "این لینک ورود منقضی شده. دوباره از اپ ناوار شروع کن.",
+  },
+  btn_login_yes: { en: "Yes, log me in", fa: "بله، وارد شو" },
+  btn_login_cancel: { en: "Cancel", fa: "لغو" },
   btn_add_music: { en: "Add Music", fa: "افزودن موسیقی" },
 
   add_music_hint: {
