@@ -1,22 +1,24 @@
 import { useSyncExternalStore } from "react";
-import { flushPendingPlays } from "../api";
+import { flushPendingPlays, isOnlineNow, probeServer, subscribeReachability } from "../api";
 
 /**
- * Whether the device has a connection, as the browser sees it. That can be
- * optimistic — on a network with no way out it still says yes — but when it
- * says no it is right, and "no" is what the offline look keys off.
+ * Whether the app can reach Navaar: the radio is on and, in the installed
+ * app, the server has been answering (see Reachability in api.ts). This is
+ * what the offline look keys off.
  */
 function subscribe(listener: () => void): () => void {
   window.addEventListener("online", listener);
   window.addEventListener("offline", listener);
+  const off = subscribeReachability(listener);
   return () => {
     window.removeEventListener("online", listener);
     window.removeEventListener("offline", listener);
+    off();
   };
 }
 
 export function useOnline(): boolean {
-  return useSyncExternalStore(subscribe, () => navigator.onLine);
+  return useSyncExternalStore(subscribe, isOnlineNow);
 }
 
 let wired = false;
@@ -29,5 +31,14 @@ export function startPlaySync(): void {
   void flushPendingPlays();
   if (wired) return;
   wired = true;
-  window.addEventListener("online", () => void flushPendingPlays());
+  // The radio coming back is a hint, not proof: check the server answers,
+  // then send what is waiting.
+  window.addEventListener("online", () => {
+    void probeServer().then((ok) => {
+      if (ok) void flushPendingPlays();
+    });
+  });
+  subscribeReachability(() => {
+    if (isOnlineNow()) void flushPendingPlays();
+  });
 }

@@ -19,7 +19,7 @@ import {
 import { BottomNav } from "./components/BottomNav";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { TopBar } from "./components/TopBar";
-import { Empty } from "./components/ui";
+import { Empty, Screen } from "./components/ui";
 import { FirstRun } from "./components/Welcome";
 import { LibraryProvider, useLibrary } from "./context/LibraryContext";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
@@ -89,6 +89,17 @@ export interface Navigation {
 }
 
 /** What the top bar says on each screen. */
+/** The screens the installed app can still draw with no connection. */
+const WORKS_OFFLINE = new Set<View["type"]>([
+  "library",
+  "playlist",
+  "album",
+  "artist",
+  "favorites",
+  "downloads",
+  "settings",
+]);
+
 const TITLES: Record<View["type"], string> = {
   home: "Navaar",
   library: "Your Library",
@@ -225,6 +236,13 @@ function Shell({ me }: { me: Me }) {
   // Plays heard while offline go up now, and whenever the connection returns.
   useEffect(() => startPlaySync(), []);
 
+  // Back online: remount the screen so whatever it could not load, it loads.
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current) setSeq((n) => n + 1);
+    wasOnline.current = online;
+  }, [online]);
+
   const view = stack[stack.length - 1];
 
   const push = useCallback((next: View) => {
@@ -277,6 +295,22 @@ function Shell({ me }: { me: Me }) {
   }, [loading, tracks, current, restoreLast]);
 
   const body = () => {
+    // Offline in the installed app, only what the device holds can show: the
+    // library from its saved copy, downloads, and anything built from those.
+    // Everything else says so plainly instead of waiting on a server it
+    // cannot reach.
+    if (!online && !isInTelegram() && !WORKS_OFFLINE.has(view.type)) {
+      return (
+        <Screen>
+          <Empty
+            title="You're offline"
+            body="This needs a connection. Everything you've downloaded still plays."
+            action="On this phone"
+            onAction={() => push({ type: "downloads" })}
+          />
+        </Screen>
+      );
+    }
     if (error) {
       return (
         <Empty

@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { JamTrack, Track } from "../types";
 import {
+  isOnlineNow,
   recordPlay,
   setListeningStatus,
   trackCoverUrl,
@@ -305,7 +306,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // connection there is nothing to fetch, so say so now rather than leave a
     // spinner turning until the element gives up on its own.
     const local = cachedUrl(track.id);
-    if (!local && navigator.onLine === false) {
+    if (!local && !isOnlineNow()) {
       audio.removeAttribute("src");
       audio.load();
       setIsPlaying(false);
@@ -421,7 +422,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // Offline in the installed app only downloaded songs can play, so the
       // rest are left out of this run instead of stopping it at the first one.
       // The song tapped stays in either way, and says so if it cannot play.
-      const offline = !isInTelegram() && navigator.onLine === false;
+      const offline = !isInTelegram() && !isOnlineNow();
       const pool = offline
         ? nextSource.tracks.filter((t) => t.id === track?.id || isCached(t.id))
         : nextSource.tracks;

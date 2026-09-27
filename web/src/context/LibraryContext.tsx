@@ -222,7 +222,7 @@ export function LibraryProvider({
     async (track: Track, on: boolean) => {
       // Offline, a heart would flip and then quietly flip back when the save
       // failed; say why instead of doing either.
-      if (navigator.onLine === false) {
+      if (!api.isOnlineNow()) {
         toast("You're offline. Connect to the internet to do that.");
         return;
       }

@@ -236,7 +236,17 @@ export function cachedUrl(trackId: string): string | null {
   if (!meta) return null;
   meta.lastPlayed = Date.now();
   void touch(trackId, meta.lastPlayed);
+  // In the installed app the service worker serves downloads as ordinary
+  // audio (see offlineAudio in public/sw.js): Safari will not reliably play
+  // an object URL for a Blob kept in IndexedDB. Still synchronous — it is only
+  // a URL — so the tap that asked for the song still starts it.
+  if (serviceWorkerServesAudio()) return `/offline-audio/${encodeURIComponent(trackId)}`;
   return meta.url;
+}
+
+function serviceWorkerServesAudio(): boolean {
+  const telegram = (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram;
+  return !telegram?.WebApp?.initData && navigator.serviceWorker?.controller != null;
 }
 
 export function isCached(trackId: string): boolean {
@@ -337,6 +347,13 @@ export function prefetchAllowed(): boolean {
 export type DownloadState = "none" | "queued" | "downloading" | "saved";
 
 const downloadState = new Map<string, "queued" | "downloading">();
+/** 0–1 for the song downloading now; absent when its size is not known yet. */
+const downloadProgress = new Map<string, number>();
+
+/** How far a song's download has got, 0–1, or null when there is no figure. */
+export function useDownloadProgress(trackId: string): number | null {
+  return useSyncExternalStore(subscribe, () => downloadProgress.get(trackId) ?? null);
+}
 const queue: Track[] = [];
 let draining = false;
 let lastError: string | null = null;
@@ -438,7 +455,7 @@ async function downloadOne(track: Track): Promise<void> {
 
   const res = await fetch(trackStreamUrl(track.id));
   if (!res.ok) throw new Error("Could not download that song");
-  const raw = await res.blob();
+  const raw = await readWithProgress(res, track.id);
   if (raw.size === 0) throw new Error("Could not download that song");
   const blob = track.mime_type && raw.type !== track.mime_type ? new Blob([raw], { type: track.mime_type }) : raw;
 
@@ -460,6 +477,39 @@ async function downloadOne(track: Track): Promise<void> {
     pinned: true,
     track,
   });
+}
+
+/**
+ * Reads a download while reporting how far it has got, for the circle that
+ * fills beside the song. Announced at most every few percent so a fast
+ * connection does not re-render the list for every chunk.
+ */
+async function readWithProgress(res: Response, trackId: string): Promise<Blob> {
+  const total = Number(res.headers.get("content-length")) || 0;
+  if (!res.body || total === 0) return res.blob();
+  const reader = res.body.getReader();
+  const chunks: BlobPart[] = [];
+  let received = 0;
+  let announced = 0;
+  downloadProgress.set(trackId, 0);
+  changed();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value as BlobPart);
+      received += value.byteLength;
+      const fraction = Math.min(1, received / total);
+      if (fraction - announced >= 0.04 || fraction === 1) {
+        announced = fraction;
+        downloadProgress.set(trackId, fraction);
+        changed();
+      }
+    }
+  } finally {
+    downloadProgress.delete(trackId);
+  }
+  return new Blob(chunks, { type: res.headers.get("content-type") ?? "" });
 }
 
 /** Deletes downloads. As with clearing, URLs stay valid for whatever is playing. */

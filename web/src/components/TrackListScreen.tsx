@@ -9,10 +9,11 @@ import { CheckIcon, DownloadIcon, PlayIcon, ShuffleIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import type { Track } from "../types";
-import { confirmAction, isInTelegram } from "../telegram";
+import { confirmAction, haptic, isInTelegram } from "../telegram";
 import { useToast } from "../context/ToastContext";
 import { downloadTracks, removeDownloads, takeDownloadError, useDownloadSummary } from "../lib/audioCache";
 import { rememberCollection } from "../lib/collections";
+import { isOnlineNow } from "../api";
 
 /**
  * A playlist, an album, an artist, a friend's library: a header and a list.
@@ -222,12 +223,18 @@ function DownloadAllButton({ tracks }: { tracks: Track[] }) {
       }
       return;
     }
-    if (!navigator.onLine) {
+    if (!isOnlineNow()) {
       toast("You're offline. Connect to download.");
       return;
     }
+    // Said at once, so the tap is answered before the first song lands; the
+    // rings on the rows take it from there.
+    const remaining = total - saved;
+    toast(remaining === 1 ? "Downloading 1 song…" : `Downloading ${remaining} songs…`);
     await downloadTracks(tracks);
     const error = takeDownloadError();
+    if (error) haptic.error();
+    else haptic.success();
     toast(error ?? "Downloaded");
   };
 

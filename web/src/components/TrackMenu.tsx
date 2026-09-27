@@ -717,13 +717,16 @@ function DownloadItem({ track, onDone }: { track: Track; onDone: () => void }) {
       icon={DownloadIcon}
       label="Download"
       onClick={() => {
-        if (!navigator.onLine) {
+        if (!api.isOnlineNow()) {
           toast("You're offline. Connect to download.");
           return;
         }
         onDone();
+        toast("Downloading…");
         void downloadTracks([track]).then(() => {
           const error = takeDownloadError();
+          if (error) haptic.error();
+          else haptic.success();
           toast(error ?? "Downloaded");
         });
       }}

@@ -314,24 +314,70 @@ export function initTelegramPlatform(): () => void {
  */
 export const haptic = {
   tap(): void {
+    if (!isInTelegram()) return webHaptic([8], 1);
     call("6.1", (t) => t.HapticFeedback.impactOccurred("light"));
   },
   press(): void {
+    if (!isInTelegram()) return webHaptic([14], 1);
     call("6.1", (t) => t.HapticFeedback.impactOccurred("medium"));
   },
   select(): void {
+    if (!isInTelegram()) return webHaptic([5], 1);
     call("6.1", (t) => t.HapticFeedback.selectionChanged());
   },
   success(): void {
+    if (!isInTelegram()) return webHaptic([10, 60, 14], 2);
     call("6.1", (t) => t.HapticFeedback.notificationOccurred("success"));
   },
   warning(): void {
+    if (!isInTelegram()) return webHaptic([18, 60, 18], 2);
     call("6.1", (t) => t.HapticFeedback.notificationOccurred("warning"));
   },
   error(): void {
+    if (!isInTelegram()) return webHaptic([24, 50, 24, 50, 24], 3);
     call("6.1", (t) => t.HapticFeedback.notificationOccurred("error"));
   },
 };
+
+/**
+ * Haptics for the installed web app, which has no Telegram to ask.
+ *
+ * Android's browsers take a vibration pattern. iOS Safari has no vibration
+ * API at all, but since iOS 18 flipping a switch-style checkbox plays the
+ * system's own selection tick, and it does so for a click the page makes on
+ * its behalf inside a tap. So a hidden one is kept and flipped: once for a
+ * tap, a few times in a row for success or an error. Unofficial, and silent
+ * wherever it is not supported, which is the right failure.
+ */
+let hapticSwitch: HTMLLabelElement | null = null;
+
+function webHaptic(pattern: number[], ticks: number): void {
+  try {
+    if (typeof navigator.vibrate === "function" && navigator.vibrate(pattern)) return;
+  } catch {
+    // Not allowed here; try the other way.
+  }
+  if (!/iPhone|iPad|iPod/.test(navigator.userAgent)) return;
+  try {
+    if (!hapticSwitch) {
+      const label = document.createElement("label");
+      label.setAttribute("aria-hidden", "true");
+      label.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.setAttribute("switch", "");
+      input.tabIndex = -1;
+      label.appendChild(input);
+      document.body.appendChild(label);
+      hapticSwitch = label;
+    }
+    const target = hapticSwitch;
+    target.click();
+    for (let i = 1; i < ticks; i++) window.setTimeout(() => target.click(), i * 90);
+  } catch {
+    // No haptics, then.
+  }
+}
 
 // --- Closing confirmation ---------------------------------------------------
 

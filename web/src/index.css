@@ -1362,3 +1362,18 @@ html.nav-platform-android .nav-topbar::before {
     scroll-behavior: auto !important;
   }
 }
+
+/* A song waiting its turn to download (TrackRow's DownloadRing). */
+.nav-download-waiting {
+  animation: nav-download-waiting 1.2s ease-in-out infinite;
+}
+@keyframes nav-download-waiting {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-download-waiting {
+    animation: none;
+  }
+}

@@ -91,5 +91,7 @@ export function clearSnapshots(): void {
 
 /** A fetch that never reached the server, as opposed to one it refused. */
 export function isNetworkError(err: unknown): boolean {
+  // Status 0 is the API client's own "offline, not tried" (see api.ts).
+  if ((err as { status?: number } | null)?.status === 0) return true;
   return err instanceof TypeError || (typeof navigator !== "undefined" && navigator.onLine === false);
 }

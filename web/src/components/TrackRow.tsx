@@ -7,7 +7,7 @@ import { formatDuration, trackArtist, trackTitle, trackUploader } from "../lib/f
 import { haptic, isInTelegram } from "../telegram";
 import { useOnline } from "../lib/online";
 import { useLibrary } from "../context/LibraryContext";
-import { useIsCached } from "../lib/audioCache";
+import { useDownloadProgress, useDownloadState, useIsCached } from "../lib/audioCache";
 import { SwipeQueueConfirm, SwipeQueueReveal, useLongPress, useSwipeQueue } from "./ui";
 
 /**
@@ -98,6 +98,8 @@ export function TrackRow({
 
   const meta = secondary ?? trackArtist(track);
   const saved = useIsCached(track.id);
+  const downloading = useDownloadState(track.id);
+  const progress = useDownloadProgress(track.id);
   const online = useOnline();
   const unavailable = !online && !saved && !isInTelegram();
   // Who put it here, when that is somebody other than you. A library is mostly
@@ -258,7 +260,9 @@ export function TrackRow({
               minWidth: 0,
             }}
           >
-            {saved ? (
+            {downloading !== "none" && downloading !== "saved" ? (
+              <DownloadRing progress={downloading === "queued" ? null : progress} />
+            ) : saved ? (
               // Played from the phone, network or not. Lime, because in this
               // app lime is playback — and this is the one mark that says a
               // song will play no matter what the connection is doing.
@@ -341,5 +345,41 @@ export function TrackRow({
       </div>
       {canSwipe ? <SwipeQueueConfirm confirmTick={swipe.confirmTick} /> : null}
     </div>
+  );
+}
+
+/**
+ * A song downloading in the installed app: a lime ring filling as it arrives,
+ * or, while it waits its turn in the queue, an empty ring that breathes.
+ */
+function DownloadRing({ progress }: { progress: number | null }) {
+  const r = 4.5;
+  const length = 2 * Math.PI * r;
+  const waiting = progress == null;
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 12 12"
+      role="img"
+      aria-label={waiting ? "Waiting to download" : `Downloading, ${Math.round(progress * 100)}%`}
+      className={waiting ? "nav-download-waiting" : undefined}
+      style={{ flex: "none", transform: "rotate(-90deg)" }}
+    >
+      <circle cx="6" cy="6" r={r} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth="1.8" />
+      {waiting ? null : (
+        <circle
+          cx="6"
+          cy="6"
+          r={r}
+          fill="none"
+          stroke="var(--color-nav-action)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeDasharray={`${length * progress} ${length}`}
+          style={{ transition: "stroke-dasharray 180ms linear" }}
+        />
+      )}
+    </svg>
   );
 }

@@ -46,19 +46,102 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   // Nothing changes while offline: an edit that could not reach the server
   // would have to be queued and replayed against whatever changed meanwhile,
   // which this app does not attempt. Plays are the one exception, handled in
-  // recordPlay below.
+  // recordPlay below. In the installed app a read fails at once too, rather
+  // than joining the queue of requests hanging on a dead connection.
   const method = (options.method ?? "GET").toUpperCase();
-  if (method !== "GET" && typeof navigator !== "undefined" && navigator.onLine === false) {
-    throw new ApiError("You're offline. Connect to the internet to do that.", 0);
+  if (!isOnlineNow() && (method !== "GET" || deviceMode())) {
+    throw new ApiError(OFFLINE_MESSAGE, 0);
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let res: Response;
+  if (deviceMode()) {
+    // A connection that is up but goes nowhere (a captive network, a
+    // blocked route) does not fail a request, it just never answers. Past
+    // this long the answer is taken to be "offline", which the rest of the
+    // app knows how to show.
+    const abort = new AbortController();
+    const timer = window.setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      res = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: abort.signal });
+    } catch {
+      setReachable(false);
+      throw new TypeError("Network request failed");
+    } finally {
+      window.clearTimeout(timer);
+    }
+    setReachable(true);
+  } else {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(body.error ?? `Request failed: ${res.status}`, res.status);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+// --- Reachability (the installed web app) ---------------------------------------
+//
+// navigator.onLine only knows about the radio. On a network that is connected
+// but cannot reach the server it keeps saying yes while every request hangs,
+// which is how screens ended up waiting forever instead of showing their
+// offline state. So the installed app also tracks whether the server itself
+// has answered lately: a request that fails or times out marks it
+// unreachable, and a light probe of /health brings it back.
+
+const OFFLINE_MESSAGE = "You're offline. Connect to the internet to do that.";
+const REQUEST_TIMEOUT_MS = 15_000;
+const PROBE_TIMEOUT_MS = 8_000;
+const PROBE_EVERY_MS = 15_000;
+
+let serverReachable = true;
+let probeTimer: number | null = null;
+const reachabilityListeners = new Set<() => void>();
+
+/** The Mini App keeps its old behaviour: it has to sit out a cold start. */
+function deviceMode(): boolean {
+  const tg = (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram;
+  return !tg?.WebApp?.initData;
+}
+
+export function isOnlineNow(): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  return !deviceMode() || serverReachable;
+}
+
+export function subscribeReachability(listener: () => void): () => void {
+  reachabilityListeners.add(listener);
+  return () => reachabilityListeners.delete(listener);
+}
+
+function setReachable(next: boolean): void {
+  if (next === serverReachable) return;
+  serverReachable = next;
+  reachabilityListeners.forEach((l) => l());
+  if (!next && probeTimer == null) {
+    probeTimer = window.setInterval(() => void probeServer(), PROBE_EVERY_MS);
+  }
+  if (next && probeTimer != null) {
+    window.clearInterval(probeTimer);
+    probeTimer = null;
+  }
+}
+
+/** Asks the server if it is there. Called on a timer while it is not, and when the radio comes back. */
+export async function probeServer(): Promise<boolean> {
+  const abort = new AbortController();
+  const timer = window.setTimeout(() => abort.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/health`, { cache: "no-store", signal: abort.signal });
+    setReachable(res.ok);
+    return res.ok;
+  } catch {
+    setReachable(false);
+    return false;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 /** A request the server answered and refused, as opposed to one that never got there. */

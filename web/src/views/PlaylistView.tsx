@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as api from "../api";
+import { useSavedTracks } from "../lib/audioCache";
+import { useCollectionTracks } from "../lib/collections";
+import { useOnline } from "../lib/online";
 import type { Navigation } from "../App";
 import { CollectionArt, Cover, collectionArtUrl } from "../components/PixelArt";
 import { ImageCropSheet } from "../components/ImageCropSheet";
@@ -64,8 +67,15 @@ export function PlaylistView({
   /** The name whatever opened this knew. See View in view.ts. */
   name?: string;
 }) {
-  const { playlists, followedPlaylists, follow, unfollow, putPlaylist, dropPlaylist } =
-    useLibrary();
+  const {
+    playlists,
+    followedPlaylists,
+    follow,
+    unfollow,
+    putPlaylist,
+    dropPlaylist,
+    tracks: libraryTracks,
+  } = useLibrary();
   const { toast, errorToast, undoToast } = useToast();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -128,7 +138,20 @@ export function PlaylistView({
     () => api.listPlaylistTracks(id),
     ttl.playlistTracks
   );
-  const tracks = rows ?? [];
+  // Offline, a playlist that cannot be fetched is drawn from what it held
+  // the last time it was open, with each song's details from the library or
+  // from its download. Downloaded songs play; the rest are set back.
+  const online = useOnline();
+  const remembered = useCollectionTracks(`playlist:${id}`);
+  const savedTracks = useSavedTracks();
+  const offlineRows = useMemo(() => {
+    if (rows || online || remembered.length === 0) return null;
+    const known = new Map<string, Track>();
+    for (const t of savedTracks) known.set(t.id, t);
+    for (const t of libraryTracks) known.set(t.id, t);
+    return remembered.map((trackId) => known.get(trackId)).filter((t): t is Track => t != null);
+  }, [rows, online, remembered, savedTracks, libraryTracks]);
+  const tracks = rows ?? offlineRows ?? [];
 
   // Falls back to summing what's on screen so a brand new playlist — created
   // this session, before its first refetch — still shows a real number rather
@@ -317,7 +340,7 @@ export function PlaylistView({
           ) : null
         }
         tracks={tracks}
-        loading={loading}
+        loading={loading && !offlineRows}
         sourceKey={`playlist:${id}`}
         sourceLabel={title}
         playlistId={owned ? id : undefined}
@@ -328,7 +351,7 @@ export function PlaylistView({
             ? "Open The Crate, pick some tracks and add them here."
             : "Whoever made this has not put anything in it."
         }
-        error={error}
+        error={offlineRows ? null : error}
         onRetry={refresh}
         actions={
           owned ? (
