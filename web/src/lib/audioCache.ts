@@ -500,15 +500,68 @@ export function useDownloadSummary(trackIds: string[]): { saved: number; total: 
  * open forty connections at once. Songs already downloaded or already queued
  * are skipped. Resolves when the queue has drained.
  */
-export async function downloadTracks(tracks: Track[]): Promise<void> {
+export async function downloadTracks(tracks: Track[]): Promise<{ cancelled: boolean }> {
   await initAudioCache();
+  const batch = nextBatch++;
+  completedInBatch.set(batch, new Set());
   for (const track of tracks) {
     if (!track.telegram_file_id || stateOf(track.id) !== "none") continue;
     downloadState.set(track.id, "queued");
+    batchOf.set(track.id, batch);
     queue.push(track);
   }
   changed();
   await drain();
+  const cancelled = cancelledBatches.has(batch);
+  cancelledBatches.delete(batch);
+  completedInBatch.delete(batch);
+  return { cancelled };
+}
+
+// --- Cancelling ------------------------------------------------------------------
+//
+// Each press of a Download button is a batch. Cancelling a playlist or album
+// cancels its batch whole, as if the press had not happened: what is waiting
+// is dropped, the song in flight is stopped mid-transfer, and whatever the
+// batch already finished is deleted. Songs downloaded before it are left
+// alone. A single song's own Cancel stops just that song.
+
+let nextBatch = 1;
+const batchOf = new Map<string, number>();
+const completedInBatch = new Map<number, Set<string>>();
+const cancelledBatches = new Set<number>();
+let inFlight: { id: string; abort: AbortController } | null = null;
+
+function isAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+export function cancelDownloads(trackIds: string[], wholeBatch = true): void {
+  const ids = new Set(trackIds);
+  const batches = new Set<number>();
+  if (wholeBatch) {
+    for (const id of ids) {
+      const batch = batchOf.get(id);
+      if (batch != null && downloadState.has(id)) batches.add(batch);
+    }
+  }
+  const stops = (id: string) => ids.has(id) || batches.has(batchOf.get(id) ?? -1);
+
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (stops(queue[i].id)) {
+      downloadState.delete(queue[i].id);
+      queue.splice(i, 1);
+    }
+  }
+  if (inFlight && stops(inFlight.id)) inFlight.abort.abort();
+
+  const finished: string[] = [];
+  for (const batch of batches) {
+    cancelledBatches.add(batch);
+    finished.push(...(completedInBatch.get(batch) ?? []));
+  }
+  if (finished.length > 0) void removeDownloads(finished);
+  changed();
 }
 
 async function drain(): Promise<void> {
@@ -524,11 +577,18 @@ async function drain(): Promise<void> {
       if (!downloadState.has(track.id)) continue; // cleared meanwhile
       downloadState.set(track.id, "downloading");
       changed();
+      const abort = new AbortController();
+      inFlight = { id: track.id, abort };
       try {
-        await downloadOne(track);
+        await downloadOne(track, abort.signal);
+        completedInBatch.get(batchOf.get(track.id) ?? -1)?.add(track.id);
       } catch (err) {
-        lastError = err instanceof Error ? err.message : "Download failed";
+        if (!isAbort(err) && !abort.signal.aborted) {
+          lastError = err instanceof Error ? err.message : "Download failed";
+        }
       }
+      inFlight = null;
+      batchOf.delete(track.id);
       downloadState.delete(track.id);
       changed();
     }
@@ -537,7 +597,7 @@ async function drain(): Promise<void> {
   }
 }
 
-async function downloadOne(track: Track): Promise<void> {
+async function downloadOne(track: Track, signal?: AbortSignal): Promise<void> {
   const db = await openDb();
   if (!db) throw new Error("This browser cannot keep downloads");
 
@@ -553,9 +613,11 @@ async function downloadOne(track: Track): Promise<void> {
     }
   }
 
-  const res = await fetch(trackStreamUrl(track.id));
+  const res = await fetch(trackStreamUrl(track.id), { signal });
   if (!res.ok) throw new Error("Could not download that song");
   const raw = await readWithProgress(res, track.id);
+  // Cancelled while the last bytes were landing: keep nothing.
+  if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
   if (raw.size === 0) throw new Error("Could not download that song");
   const blob = track.mime_type && raw.type !== track.mime_type ? new Blob([raw], { type: track.mime_type }) : raw;
 

@@ -180,6 +180,23 @@ export function meRouter(): Router {
    * list, and a client that had to reconcile a row would be a client that
    * cares when this call fails. It does not.
    */
+  /**
+   * A playback problem the web app saw, written to the log and nowhere else.
+   * Phones cannot be debugged from here, and a song that will not play on one
+   * particular iOS version is invisible to the server otherwise: the request
+   * that fails, or never happens, is between the phone and itself. Capped in
+   * size, never stored, and nothing is returned.
+   */
+  router.post(
+    "/diag",
+    requireAuth,
+    (req, res) => {
+      const body = JSON.stringify(req.body ?? {}).slice(0, 1500);
+      console.log(`[diag] user=${(req as AuthedRequest).telegramUserId} ${body}`);
+      res.status(204).end();
+    }
+  );
+
   router.post(
     "/plays",
     requireAuth,

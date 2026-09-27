@@ -16,6 +16,7 @@ import {
 import { CollectionArt, Cover } from "./PixelArt";
 import {
   AlbumIcon,
+  CloseIcon,
   DownloadIcon,
   EditIcon,
   ImageIcon,
@@ -31,7 +32,13 @@ import {
 } from "../icons";
 import { pluralise, trackArtist, trackTitle } from "../lib/format";
 import { haptic, isInTelegram, shareLink } from "../telegram";
-import { downloadTracks, removeDownloads, takeDownloadError, useDownloadState } from "../lib/audioCache";
+import {
+  cancelDownloads,
+  downloadTracks,
+  removeDownloads,
+  takeDownloadError,
+  useDownloadState,
+} from "../lib/audioCache";
 import { LyricsPickerSheet } from "./LyricsPickerSheet";
 import { StoryOutputSheet, type StoryPick } from "./StoryOutputSheet";
 
@@ -710,7 +717,18 @@ function DownloadItem({ track, onDone }: { track: Track; onDone: () => void }) {
     );
   }
   if (state !== "none") {
-    return <SheetItem icon={DownloadIcon} label="Downloading…" disabled onClick={() => {}} />;
+    // Just this song, even when it is part of a playlist's download.
+    return (
+      <SheetItem
+        icon={CloseIcon}
+        label="Cancel download"
+        onClick={() => {
+          cancelDownloads([track.id], false);
+          toast("Download cancelled");
+          onDone();
+        }}
+      />
+    );
   }
   return (
     <SheetItem
@@ -723,7 +741,8 @@ function DownloadItem({ track, onDone }: { track: Track; onDone: () => void }) {
         }
         onDone();
         toast("Downloading…");
-        void downloadTracks([track]).then(() => {
+        void downloadTracks([track]).then(({ cancelled }) => {
+          if (cancelled) return;
           const error = takeDownloadError();
           if (error) haptic.error();
           else haptic.success();

@@ -5,13 +5,19 @@ import { TrackRow } from "./TrackRow";
 import { TrackMenu } from "./TrackMenu";
 import type { TrackMenuTarget } from "./TrackMenu";
 import { ActionButton, Empty, GhostButton, Screen, Skeleton } from "./ui";
-import { CheckIcon, DownloadIcon, PlayIcon, ShuffleIcon } from "../icons";
+import { CheckIcon, CloseIcon, DownloadIcon, PlayIcon, ShuffleIcon } from "../icons";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlayer } from "../context/PlayerContext";
 import type { Track } from "../types";
 import { confirmAction, haptic, isInTelegram } from "../telegram";
 import { useToast } from "../context/ToastContext";
-import { downloadTracks, removeDownloads, takeDownloadError, useDownloadSummary } from "../lib/audioCache";
+import {
+  cancelDownloads,
+  downloadTracks,
+  removeDownloads,
+  takeDownloadError,
+  useDownloadSummary,
+} from "../lib/audioCache";
 import { rememberCollection } from "../lib/collections";
 import { isOnlineNow } from "../api";
 
@@ -215,7 +221,15 @@ function DownloadAllButton({ tracks }: { tracks: Track[] }) {
   const all = total > 0 && saved === total;
 
   const onClick = async () => {
-    if (total === 0 || busy) return;
+    if (total === 0) return;
+    // While this list is downloading the button is Cancel, and stays Cancel
+    // until the last song is in: an accidental press is undone in one tap.
+    if (busy) {
+      cancelDownloads(ids);
+      haptic.warning();
+      toast("Download cancelled");
+      return;
+    }
     if (all) {
       if (await confirmAction("Remove these downloads from this device?")) {
         void removeDownloads(ids);
@@ -231,7 +245,8 @@ function DownloadAllButton({ tracks }: { tracks: Track[] }) {
     // rings on the rows take it from there.
     const remaining = total - saved;
     toast(remaining === 1 ? "Downloading 1 song…" : `Downloading ${remaining} songs…`);
-    await downloadTracks(tracks);
+    const { cancelled } = await downloadTracks(tracks);
+    if (cancelled) return;
     const error = takeDownloadError();
     if (error) haptic.error();
     else haptic.success();
@@ -240,13 +255,13 @@ function DownloadAllButton({ tracks }: { tracks: Track[] }) {
 
   return (
     <GhostButton
-      icon={all ? CheckIcon : DownloadIcon}
-      label={all ? "Downloaded" : busy ? "Downloading" : "Download"}
-      width={saved > 0 && !all ? 70 : 44}
+      icon={all ? CheckIcon : busy ? CloseIcon : DownloadIcon}
+      label={all ? "Downloaded" : busy ? "Cancel download" : "Download"}
+      width={(saved > 0 || busy) && !all ? 70 : 44}
       disabled={total === 0}
       onClick={() => void onClick()}
     >
-      {saved > 0 && !all ? (
+      {(saved > 0 || busy) && !all ? (
         <span style={{ fontSize: 11.5, fontVariantNumeric: "tabular-nums" }}>
           {saved}/{total}
         </span>

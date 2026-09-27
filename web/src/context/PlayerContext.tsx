@@ -11,6 +11,7 @@ import type { JamTrack, Track } from "../types";
 import {
   isOnlineNow,
   recordPlay,
+  reportPlayback,
   setListeningStatus,
   trackCoverUrl,
   trackStreamUrl,
@@ -124,6 +125,25 @@ interface SoloSnapshot {
   order: Track[];
   cursor: number;
   position: number;
+}
+
+/** How long a downloaded copy may take to start before the stream is tried. */
+const LOCAL_STALL_MS = 5000;
+/** How long a stream may take to start before the server is told about it. */
+const STREAM_STALL_MS = 15000;
+
+/** What the audio element knew, for a playback report. */
+function describeAudio(audio: HTMLAudioElement): Record<string, unknown> {
+  const src = audio.currentSrc || audio.src;
+  return {
+    source: src.startsWith("blob:") ? "blob" : src.includes("/offline-audio/") ? "offline-audio" : "stream",
+    errorCode: audio.error?.code ?? null,
+    errorMessage: audio.error?.message ?? null,
+    networkState: audio.networkState,
+    readyState: audio.readyState,
+    paused: audio.paused,
+    time: Math.round(audio.currentTime),
+  };
 }
 
 /** Something to show for a track the guest may not play: its name and nothing else. */
@@ -292,6 +312,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  /** The song whose downloaded copy already failed and fell back to streaming. */
+  const streamFallbackFor = useRef<string | null>(null);
+  const stallTimer = useRef<number | null>(null);
+
+  /**
+   * A downloaded copy that will not play must never be the reason a song does
+   * not: with a connection, stream it instead, from where it got to, and
+   * forget the copy so it can be downloaded again. Used both when the element
+   * reports an error and when it simply never starts (on iOS a copy that
+   * cannot play can hang rather than fail). Once per song, so a stream that
+   * also fails still ends up saying so. Reports what happened either way.
+   */
+  const streamInstead = useCallback(
+    (audio: HTMLAudioElement, track: Track, reason: string): boolean => {
+      reportPlayback(reason, { track: track.id, ...describeAudio(audio) });
+      if (streamFallbackFor.current === track.id || navigator.onLine === false) return false;
+      streamFallbackFor.current = track.id;
+      const at = audio.currentTime;
+      forgetBrokenDownload(track.id);
+      audio.src = trackStreamUrl(track.id);
+      if (at > 0) {
+        const seekOnce = () => {
+          audio.currentTime = at;
+          audio.removeEventListener("loadedmetadata", seekOnce);
+        };
+        audio.addEventListener("loadedmetadata", seekOnce);
+      }
+      playAudio(audio);
+      return true;
+    },
+    [playAudio]
+  );
+
   const load = useCallback((track: Track | null, autoplay: boolean, at = 0, itemId: string | null = null) => {
     setCurrent(track);
     setJamItemId(itemId);
@@ -313,7 +366,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // connection there is nothing to fetch, so say so now rather than leave a
     // spinner turning until the element gives up on its own.
     const local = cachedUrl(track.id);
-    if (!local && !isOnlineNow()) {
+    // Only a device that knows it has no connection gives up here. The songs
+    // themselves come from Cloudflare, so the Navaar server being slow or
+    // unreachable is no reason not to try.
+    if (!local && navigator.onLine === false) {
       audio.removeAttribute("src");
       audio.load();
       setIsPlaying(false);
@@ -335,7 +391,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.addEventListener("loadedmetadata", seekOnce);
     }
     if (autoplay) playAudio(audio);
-  }, [playAudio]);
+
+    // Nothing to play yet after a while: a downloaded copy falls back to the
+    // stream, and either way the server hears about it (see reportPlayback).
+    // Only when asked to play: a paused element may rightly load nothing.
+    if (stallTimer.current != null) window.clearTimeout(stallTimer.current);
+    stallTimer.current = null;
+    if (autoplay) {
+      const src = audio.src;
+      stallTimer.current = window.setTimeout(
+        () => {
+          stallTimer.current = null;
+          if (audioRef.current !== audio || audio.src !== src || audio.readyState >= 2) return;
+          if (local) streamInstead(audio, track, "local-stall");
+          else reportPlayback("stream-stall", { track: track.id, ...describeAudio(audio) });
+        },
+        local ? LOCAL_STALL_MS : STREAM_STALL_MS
+      );
+    }
+  }, [playAudio, streamInstead]);
 
   // --- Advancing ------------------------------------------------------------
 
@@ -724,28 +798,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // cells is a routine event and not a failure — it just needs to say so.
     const onWaiting = () => setStatus("loading");
     const onError = () => {
-      // A downloaded copy that will not play must never be the reason a song
-      // does not: with a connection, stream it instead, from where it got to,
-      // and forget the copy so it can be downloaded again. Once per song, so
-      // a stream that also fails still ends up saying so.
       const track = live.current.current;
       const src = audio.currentSrc || audio.src;
       const local = src.startsWith("blob:") || src.includes("/offline-audio/");
-      if (track && local && isOnlineNow() && streamFallbackFor.current !== track.id) {
-        streamFallbackFor.current = track.id;
-        const at = audio.currentTime;
-        forgetBrokenDownload(track.id);
-        audio.src = trackStreamUrl(track.id);
-        if (at > 0) {
-          const seekOnce = () => {
-            audio.currentTime = at;
-            audio.removeEventListener("loadedmetadata", seekOnce);
-          };
-          audio.addEventListener("loadedmetadata", seekOnce);
-        }
-        playAudio(audio);
-        return;
-      }
+      if (track && local && streamInstead(audio, track, "local-error")) return;
+      if (track && !local) reportPlayback("stream-error", { track: track.id, ...describeAudio(audio) });
       setStatus("failed");
       setIsPlaying(false);
     };
@@ -781,7 +838,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener("error", onError);
       audio.removeEventListener("ended", onEnded);
     };
-  }, [advance, repeat, playAudio]);
+  }, [advance, repeat, playAudio, streamInstead]);
 
   // --- Keeping songs on the phone -------------------------------------------
 
@@ -959,8 +1016,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
    * Short tracks count at their halfway mark, or they could never count at all.
    */
   const lastLogged = useRef<string | null>(null);
-  /** The song whose downloaded copy already failed and fell back to streaming. */
-  const streamFallbackFor = useRef<string | null>(null);
   useEffect(() => {
     if (!current || !isPlaying || lastLogged.current === current.id) return;
     const id = current.id;

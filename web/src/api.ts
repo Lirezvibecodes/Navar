@@ -744,6 +744,37 @@ export async function flushPendingPlays(): Promise<void> {
   }
 }
 
+// --- Playback reports ------------------------------------------------------------
+
+let reportsSent = 0;
+
+/**
+ * Tells the server a song failed or stalled, with what the audio element and
+ * the page knew at the time, so a problem that only happens on someone's
+ * phone shows up in the server log (see /api/me/diag). A handful per session
+ * at most; best-effort, never awaited, never retried.
+ */
+export function reportPlayback(event: string, detail: Record<string, unknown>): void {
+  if (reportsSent >= 15 || !sessionToken) return;
+  reportsSent++;
+  const body = {
+    event,
+    ...detail,
+    ua: navigator.userAgent,
+    standalone:
+      window.matchMedia?.("(display-mode: standalone)").matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true,
+    sw: navigator.serviceWorker?.controller ? "controlling" : "none",
+    online: navigator.onLine,
+  };
+  void fetch(`${API_BASE}/api/me/diag`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
 /** Replace the Telegram profile photo with a picture chosen and cropped here. */
 export function uploadAvatar(image: Blob): Promise<void> {
   const form = new FormData();
