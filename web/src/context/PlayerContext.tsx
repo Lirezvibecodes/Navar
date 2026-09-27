@@ -16,7 +16,14 @@ import {
   trackStreamUrl,
 } from "../api";
 import { useLibrary } from "./LibraryContext";
-import { cachedUrl, initAudioCache, isCached, prefetchAllowed, saveTrack } from "../lib/audioCache";
+import {
+  cachedUrl,
+  forgetBrokenDownload,
+  initAudioCache,
+  isCached,
+  prefetchAllowed,
+  saveTrack,
+} from "../lib/audioCache";
 import {
   haptic,
   isInTelegram,
@@ -717,6 +724,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // cells is a routine event and not a failure — it just needs to say so.
     const onWaiting = () => setStatus("loading");
     const onError = () => {
+      // A downloaded copy that will not play must never be the reason a song
+      // does not: with a connection, stream it instead, from where it got to,
+      // and forget the copy so it can be downloaded again. Once per song, so
+      // a stream that also fails still ends up saying so.
+      const track = live.current.current;
+      const src = audio.currentSrc || audio.src;
+      const local = src.startsWith("blob:") || src.includes("/offline-audio/");
+      if (track && local && isOnlineNow() && streamFallbackFor.current !== track.id) {
+        streamFallbackFor.current = track.id;
+        const at = audio.currentTime;
+        forgetBrokenDownload(track.id);
+        audio.src = trackStreamUrl(track.id);
+        if (at > 0) {
+          const seekOnce = () => {
+            audio.currentTime = at;
+            audio.removeEventListener("loadedmetadata", seekOnce);
+          };
+          audio.addEventListener("loadedmetadata", seekOnce);
+        }
+        playAudio(audio);
+        return;
+      }
       setStatus("failed");
       setIsPlaying(false);
     };
@@ -930,6 +959,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
    * Short tracks count at their halfway mark, or they could never count at all.
    */
   const lastLogged = useRef<string | null>(null);
+  /** The song whose downloaded copy already failed and fell back to streaming. */
+  const streamFallbackFor = useRef<string | null>(null);
   useEffect(() => {
     if (!current || !isPlaying || lastLogged.current === current.id) return;
     const id = current.id;

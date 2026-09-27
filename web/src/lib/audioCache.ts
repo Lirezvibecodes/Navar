@@ -42,11 +42,74 @@ const MAX_BUDGET_BYTES = 1500 * 1024 * 1024;
 
 interface Row {
   id: string;
-  blob: Blob;
+  /** Absent once the file itself lives in Cache Storage (`inCache`). */
+  blob?: Blob;
   size: number;
   lastPlayed: number;
   pinned?: boolean;
   track?: Track;
+  inCache?: boolean;
+}
+
+/*
+ * Where the installed web app keeps the downloaded files themselves.
+ *
+ * Downloads used to be Blobs in IndexedDB, like the songs Telegram saves in
+ * passing. On iPhone (iOS 26) those would not play back at all, neither from
+ * an object URL nor served through the service worker, while Cache Storage —
+ * the store built for offline files, and what the service worker reads from
+ * anyway — is the one Safari handles reliably. So there the file goes, under
+ * the same URL the player asks for, and IndexedDB keeps only its details.
+ * The service worker answers /offline-audio/<id> from here, Range requests
+ * included (see offlineAudio in public/sw.js).
+ */
+const AUDIO_FILES = "navaar-audio-files-v1";
+
+function fileUrl(trackId: string): string {
+  return `/offline-audio/${encodeURIComponent(trackId)}`;
+}
+
+function inTelegram(): boolean {
+  const telegram = (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram;
+  return !!telegram?.WebApp?.initData;
+}
+
+/** Downloads go to Cache Storage in the installed app, wherever it exists. */
+function filesInCache(): boolean {
+  return !inTelegram() && typeof caches !== "undefined";
+}
+
+/** Proves a stored file can be read back, before calling it downloaded. */
+async function readable(blob: Blob): Promise<boolean> {
+  try {
+    const head = await blob.slice(0, 16).arrayBuffer();
+    return head.byteLength > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function putFile(trackId: string, blob: Blob, type: string): Promise<void> {
+  const files = await caches.open(AUDIO_FILES);
+  await files.put(
+    fileUrl(trackId),
+    new Response(blob, { headers: { "Content-Type": type, "Content-Length": String(blob.size) } })
+  );
+  const stored = await files.match(fileUrl(trackId));
+  if (!stored || !(await readable(await stored.blob()))) {
+    await files.delete(fileUrl(trackId));
+    throw new Error("This device could not keep that song");
+  }
+}
+
+async function deleteFiles(trackIds: string[]): Promise<void> {
+  if (typeof caches === "undefined") return;
+  try {
+    const files = await caches.open(AUDIO_FILES);
+    await Promise.all(trackIds.map((id) => files.delete(fileUrl(id))));
+  } catch {
+    // Nothing kept there, then.
+  }
 }
 
 interface Meta {
@@ -136,6 +199,7 @@ export async function clearAudioCache(): Promise<void> {
   queue.length = 0;
   downloadState.clear();
   changed();
+  if (typeof caches !== "undefined") await caches.delete(AUDIO_FILES).catch(() => false);
   const db = await openDb();
   if (!db) return;
   try {
@@ -201,15 +265,19 @@ export function initAudioCache(): Promise<void> {
     try {
       const rows = (await tx<Row[]>(db, "readonly", (s) => s.getAll())) ?? [];
       for (const row of rows) {
-        if (!(row.blob instanceof Blob) || row.blob.size === 0) continue;
+        let url: string;
+        if (row.inCache) url = fileUrl(row.id);
+        else if (row.blob instanceof Blob && row.blob.size > 0) url = URL.createObjectURL(row.blob);
+        else continue;
         entries.set(row.id, {
-          url: URL.createObjectURL(row.blob),
+          url,
           size: row.size,
           lastPlayed: row.lastPlayed,
           pinned: row.pinned === true,
           track: row.track ?? null,
         });
       }
+      if (filesInCache()) void moveDownloadsToFiles(db, rows);
     } catch {
       // An unreadable cache is an empty one.
     }
@@ -230,6 +298,36 @@ export function initAudioCache(): Promise<void> {
   return ready;
 }
 
+/**
+ * Downloads made before files moved to Cache Storage: copied across if they
+ * can still be read, and forgotten if they cannot, so they show as not
+ * downloaded and can simply be downloaded again rather than failing to play.
+ */
+async function moveDownloadsToFiles(db: IDBDatabase, rows: Row[]): Promise<void> {
+  for (const row of rows) {
+    if (!row.pinned || row.inCache || !(row.blob instanceof Blob)) continue;
+    const entry = entries.get(row.id);
+    try {
+      if (!(await readable(row.blob))) throw new Error("unreadable");
+      const type = row.track?.mime_type || row.blob.type || "audio/mpeg";
+      await putFile(row.id, row.blob, type);
+      const moved: Row = { ...row, inCache: true };
+      delete moved.blob;
+      await tx(db, "readwrite", (s) => void s.put(moved));
+      if (entry) entry.url = fileUrl(row.id);
+    } catch {
+      await tx(db, "readwrite", (s) => void s.delete(row.id)).catch(() => undefined);
+      entries.delete(row.id);
+    }
+  }
+  changed();
+}
+
+/** Forgets a download that turned out not to play, so it can be fetched again. */
+export function forgetBrokenDownload(trackId: string): void {
+  void removeDownloads([trackId]);
+}
+
 /** An object URL for a saved song, or null. Synchronous on purpose (see top). */
 export function cachedUrl(trackId: string): string | null {
   const meta = entries.get(trackId);
@@ -240,13 +338,15 @@ export function cachedUrl(trackId: string): string | null {
   // audio (see offlineAudio in public/sw.js): Safari will not reliably play
   // an object URL for a Blob kept in IndexedDB. Still synchronous — it is only
   // a URL — so the tap that asked for the song still starts it.
-  if (serviceWorkerServesAudio()) return `/offline-audio/${encodeURIComponent(trackId)}`;
+  if (serviceWorkerServesAudio()) return fileUrl(trackId);
+  // A file in Cache Storage is only reachable through the service worker;
+  // without one controlling the page, stream it instead.
+  if (meta.url.startsWith("/offline-audio/")) return null;
   return meta.url;
 }
 
 function serviceWorkerServesAudio(): boolean {
-  const telegram = (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram;
-  return !telegram?.WebApp?.initData && navigator.serviceWorker?.controller != null;
+  return !inTelegram() && navigator.serviceWorker?.controller != null;
 }
 
 export function isCached(trackId: string): boolean {
@@ -322,7 +422,7 @@ async function makeRoom(db: IDBDatabase, incoming: number): Promise<void> {
   while ((total > budgetBytes || entries.size + 1 > MAX_TRACKS) && oldestFirst.length > 0) {
     const [id, meta] = oldestFirst.shift()!;
     await tx(db, "readwrite", (s) => void s.delete(id));
-    URL.revokeObjectURL(meta.url);
+    if (meta.url.startsWith("blob:")) URL.revokeObjectURL(meta.url);
     entries.delete(id);
     total -= meta.size;
     changed();
@@ -468,6 +568,14 @@ async function downloadOne(track: Track): Promise<void> {
   // keeps whatever this fetches; where there is none, it simply is not kept.
   if (track.has_cover) void fetch(trackCoverUrl(track.id)).catch(() => undefined);
 
+  if (filesInCache()) {
+    await putFile(track.id, blob, track.mime_type || blob.type || "audio/mpeg");
+    const row: Row = { id: track.id, size: blob.size, lastPlayed: Date.now(), pinned: true, track, inCache: true };
+    await tx(db, "readwrite", (s) => void s.put(row));
+    entries.set(track.id, { url: fileUrl(track.id), size: blob.size, lastPlayed: row.lastPlayed, pinned: true, track });
+    return;
+  }
+
   const row: Row = { id: track.id, blob, size: blob.size, lastPlayed: Date.now(), pinned: true, track };
   await tx(db, "readwrite", (s) => void s.put(row));
   entries.set(track.id, {
@@ -520,6 +628,7 @@ export async function removeDownloads(trackIds: string[]): Promise<void> {
     downloadState.delete(id);
   }
   changed();
+  await deleteFiles(trackIds);
   if (!db) return;
   try {
     await tx(db, "readwrite", (s) => {

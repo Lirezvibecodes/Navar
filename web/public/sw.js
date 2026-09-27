@@ -98,15 +98,35 @@ self.addEventListener("fetch", (event) => {
  * offline. Served from here, the element sees an ordinary same-origin URL
  * and asks for byte ranges the way it asks any server.
  *
- * The songs stay where the app keeps them (audioCache.ts, IndexedDB
- * "navaar-audio"); this only reads them.
+ * The songs stay where the app keeps them (audioCache.ts: Cache Storage
+ * "navaar-audio-files-v1", or IndexedDB "navaar-audio" for older ones); this
+ * only reads them.
  */
 async function offlineAudio(request, id) {
-  const row = await readSong(id).catch(() => null);
-  if (!row || !(row.blob instanceof Blob)) return new Response("Not downloaded", { status: 404 });
+  // The installed app keeps downloads in Cache Storage (see AUDIO_FILES in
+  // audioCache.ts); IndexedDB is only for songs not moved there yet.
+  let blob = null;
+  let type = null;
+  try {
+    const files = await caches.open("navaar-audio-files-v1");
+    const hit = await files.match(`/offline-audio/${encodeURIComponent(id)}`);
+    if (hit) {
+      type = hit.headers.get("Content-Type");
+      blob = await hit.blob();
+    }
+  } catch {
+    blob = null;
+  }
+  if (!blob) {
+    const row = await readSong(id).catch(() => null);
+    if (row && row.blob instanceof Blob) {
+      blob = row.blob;
+      type = row.track && row.track.mime_type;
+    }
+  }
+  if (!blob) return new Response("Not downloaded", { status: 404 });
 
-  const blob = row.blob;
-  const type = (row.track && row.track.mime_type) || blob.type || "audio/mpeg";
+  type = type || blob.type || "audio/mpeg";
   const size = blob.size;
   const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") || "");
   if (!range) {
